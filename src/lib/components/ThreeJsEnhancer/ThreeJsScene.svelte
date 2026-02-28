@@ -7,11 +7,11 @@
 	import { videoState } from '$lib/stores/video.store';
 	import { threeJsState } from '$lib/stores/threeJs.store';
 	import ThreeJsText from './ThreeJsText.svelte';
-	import ThreeJsLogo from './ThreeJsLogo.svelte'; // 🎨 NEW: Logo component
+	import ThreeJsLogo from './ThreeJsLogo.svelte';
 	import { text3DState } from '$lib/stores/text3d.store';
 
 	let threeJsTextComponent: ThreeJsText;
-	let threeJsLogoComponent: ThreeJsLogo; // 🎨 NEW: Logo component reference
+	let threeJsLogoComponent: ThreeJsLogo;
 
 	$: videoUrl = $videoState.videoUrl;
 
@@ -55,7 +55,6 @@
 	$: fogColor = $text3DState.fogColor;
 	$: fogNear = $text3DState.fogNear;
 	$: fogFar = $text3DState.fogFar;
-	// NEW: Particle enhancements
 	$: particleShape = $threeJsState.particleShape;
 	$: particleAnimation = $threeJsState.particleAnimation;
 	$: particleAnimationSpeed = $threeJsState.particleAnimationSpeed;
@@ -80,7 +79,6 @@
 		if (!videoUrl) return;
 
 		initThreeJS();
-		// Event listeners
 		canvas.addEventListener('mousedown', onMouseDown);
 		canvas.addEventListener('mousemove', onMouseMove);
 		canvas.addEventListener('mouseup', onMouseUp);
@@ -88,19 +86,15 @@
 		canvas.addEventListener('touchmove', onTouchMove);
 		canvas.addEventListener('touchend', onTouchEnd);
 
-		// Wait for component bindings to be established
 		await tick();
-
-		// Now start the animation loop
 		animate();
+
 		return () => {
-			// Cancel animation loop
 			if (animationId) {
 				cancelAnimationFrame(animationId);
 				animationId = null;
 			}
 
-			// Dispose particle system
 			if (particleSystem) {
 				scene.remove(particleSystem);
 				if (particleGeometry) {
@@ -119,7 +113,6 @@
 				particleSystem = null;
 			}
 
-			// Dispose mesh
 			if (mesh) {
 				scene.remove(mesh);
 				if (mesh.geometry) mesh.geometry.dispose();
@@ -133,44 +126,27 @@
 				mesh = null;
 			}
 
-			// Dispose lights
-			if (ambientLight) {
-				scene.remove(ambientLight);
-				ambientLight = null;
-			}
-			if (directionalLight) {
-				scene.remove(directionalLight);
-				directionalLight = null;
-			}
+			if (ambientLight) { scene.remove(ambientLight); ambientLight = null; }
+			if (directionalLight) { scene.remove(directionalLight); directionalLight = null; }
 
-			// Dispose video and texture
 			if (videoElement) {
 				videoElement.pause();
 				videoElement.src = '';
 				videoElement.load();
 				videoElement = null;
 			}
-			if (videoTexture) {
-				videoTexture.dispose();
-				videoTexture = null;
-			}
+			if (videoTexture) { videoTexture.dispose(); videoTexture = null; }
 
-			// Dispose renderer
 			if (renderer) {
 				renderer.dispose();
 				renderer.forceContextLoss();
 				renderer = null;
 			}
 
-			// Clear scene contents but keep the scene object
-			// (ThreeJsText component needs the scene reference to stay valid)
 			if (scene) {
-				// Remove all children
 				while (scene.children.length > 0) {
 					const child = scene.children[0];
 					scene.remove(child);
-
-					// Dispose geometries and materials
 					if (child instanceof THREE.Mesh) {
 						if (child.geometry) child.geometry.dispose();
 						if (child.material) {
@@ -184,11 +160,15 @@
 				}
 			}
 
-			// Clear global references
+			// FIX: Clear all globals including new renderer/scene/camera refs
 			(window as any).__threeJsCanvas = null;
 			(window as any).__threeJsVideo = null;
+			(window as any).__threeJsRenderer = null;
+			(window as any).__threeJsScene = null;
+			(window as any).__threeJsCamera = null;
+			(window as any).__threeJsCapturing = false;
+			(window as any).__threeJsUpdateScene = null;
 
-			// Remove event listeners
 			if (canvas) {
 				canvas.removeEventListener('mousedown', onMouseDown);
 				canvas.removeEventListener('mousemove', onMouseMove);
@@ -223,8 +203,32 @@
 		renderer.setSize(canvas.clientWidth * 2, canvas.clientHeight * 2, false);
 		renderer.setPixelRatio(window.devicePixelRatio);
 
-		// EXPOSE CANVAS GLOBALLY FOR VIDEO CAPTURE
+		// EXPOSE GLOBALS FOR VIDEO CAPTURE
 		(window as any).__threeJsCanvas = canvas;
+		(window as any).__threeJsRenderer = renderer;
+		(window as any).__threeJsScene = scene;
+		(window as any).__threeJsCamera = camera;
+		(window as any).__threeJsCapturing = false;
+
+		// FIX: Expose scene updater so videoCapture can advance animations
+		// (logo, text, particles) to the correct time per frame before rendering
+		(window as any).__threeJsUpdateScene = (time: number) => {
+			if (mesh) {
+				mesh.rotation.x = rotationX;
+				mesh.rotation.y = rotationY;
+				mesh.rotation.z = rotationZ;
+				if (autoRotate) mesh.rotation.y += autoRotateSpeed;
+				if (mesh.material instanceof THREE.MeshStandardMaterial) {
+					mesh.material.emissiveIntensity = videoGlow + shapeGlow;
+				}
+			}
+			if (threeJsTextComponent) threeJsTextComponent.updateAnimation(time);
+			if (threeJsLogoComponent) threeJsLogoComponent.updateAnimation(time);
+			updateParticles(time);
+			camera.position.z = cameraDistance;
+			if (ambientLight) ambientLight.intensity = ambientIntensity;
+			if (directionalLight) directionalLight.intensity = directionalIntensity;
+		};
 
 		ambientLight = new THREE.AmbientLight(0xffffff, ambientIntensity);
 		scene.add(ambientLight);
@@ -238,15 +242,13 @@
 		videoElement.loop = true;
 		videoElement.muted = true;
 
-		// EXPOSE VIDEO ELEMENT GLOBALLY FOR VIDEO CAPTURE
 		(window as any).__threeJsVideo = videoElement;
 
-		// Remove crossOrigin for data URLs, use proxy for GCS URLs
 		if (videoUrl.startsWith('data:')) {
-			videoElement.crossOrigin = ''; // No CORS for data URLs
+			videoElement.crossOrigin = '';
 			videoElement.src = videoUrl;
 		} else if (videoUrl.startsWith('https://storage.googleapis.com')) {
-			videoElement.crossOrigin = ''; // Proxy handles CORS
+			videoElement.crossOrigin = '';
 			const proxyUrl = `/api/proxyVideo?url=${encodeURIComponent(videoUrl)}`;
 			videoElement.src = proxyUrl;
 			console.log('🔄 Using proxy for GCS video:', proxyUrl);
@@ -255,7 +257,6 @@
 		}
 
 		videoElement.addEventListener('loadedmetadata', () => {
-			// TypeScript assertion: videoElement is guaranteed to exist here since we just created it
 			videoTexture = new THREE.VideoTexture(videoElement!);
 			videoTexture.colorSpace = THREE.SRGBColorSpace;
 			createMesh(selectedShape);
@@ -316,7 +317,6 @@
 		scene.add(mesh);
 	}
 
-	// Generate custom particle shape texture
 	function createParticleTexture(shape: string): THREE.CanvasTexture {
 		const size = 128;
 		const canvas = document.createElement('canvas');
@@ -327,7 +327,6 @@
 		const center = size / 2;
 		ctx.clearRect(0, 0, size, size);
 
-		// Create gradient for glow effect
 		const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
 		gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
 		gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
@@ -341,13 +340,11 @@
 				ctx.arc(center, center, center * 0.8, 0, Math.PI * 2);
 				ctx.fill();
 				break;
-
 			case 'square':
 				const squareSize = size * 0.7;
 				const squareOffset = (size - squareSize) / 2;
 				ctx.fillRect(squareOffset, squareOffset, squareSize, squareSize);
 				break;
-
 			case 'triangle':
 				ctx.beginPath();
 				ctx.moveTo(center, size * 0.1);
@@ -356,17 +353,14 @@
 				ctx.closePath();
 				ctx.fill();
 				break;
-
 			case 'star':
 				drawStar(ctx, center, center, 5, center * 0.8, center * 0.4);
 				ctx.fill();
 				break;
-
 			case 'heart':
 				drawHeart(ctx, center, center, size * 0.4);
 				ctx.fill();
 				break;
-
 			default:
 				ctx.beginPath();
 				ctx.arc(center, center, center * 0.8, 0, Math.PI * 2);
@@ -396,7 +390,6 @@
 			y = cy + Math.sin(rot) * outerRadius;
 			ctx.lineTo(x, y);
 			rot += step;
-
 			x = cx + Math.cos(rot) * innerRadius;
 			y = cy + Math.sin(rot) * innerRadius;
 			ctx.lineTo(x, y);
@@ -410,9 +403,7 @@
 		ctx.beginPath();
 		const topCurveHeight = size * 0.3;
 		ctx.moveTo(x, y + topCurveHeight);
-		// Top left curve
 		ctx.bezierCurveTo(x, y, x - size / 2, y, x - size / 2, y + topCurveHeight);
-		// Bottom left curve
 		ctx.bezierCurveTo(
 			x - size / 2,
 			y + (size + topCurveHeight) / 2,
@@ -421,7 +412,6 @@
 			x,
 			y + size
 		);
-		// Bottom right curve
 		ctx.bezierCurveTo(
 			x,
 			y + (size + topCurveHeight) / 2,
@@ -430,7 +420,6 @@
 			x + size / 2,
 			y + topCurveHeight
 		);
-		// Top right curve
 		ctx.bezierCurveTo(x + size / 2, y, x, y, x, y + topCurveHeight);
 		ctx.closePath();
 	}
@@ -445,14 +434,13 @@
 		particleGeometry = new THREE.BufferGeometry();
 		const positions = new Float32Array(particleCount * 3);
 		const velocities = new Float32Array(particleCount * 3);
-		const phases = new Float32Array(particleCount); // For wave animations
-		const colors = new Float32Array(particleCount * 3); // For rainbow mode
-		const sizes = new Float32Array(particleCount); // For pulse animation
+		const phases = new Float32Array(particleCount);
+		const colors = new Float32Array(particleCount * 3);
+		const sizes = new Float32Array(particleCount);
 
 		for (let i = 0; i < particleCount; i++) {
 			const i3 = i * 3;
 
-			// Initialize positions based on animation type
 			if (particleAnimation === 'fountain') {
 				positions[i3] = (Math.random() - 0.5) * 2;
 				positions[i3 + 1] = -particleSpread / 2;
@@ -470,7 +458,6 @@
 			phases[i] = Math.random() * Math.PI * 2;
 			sizes[i] = particleSize * (0.5 + Math.random());
 
-			// Rainbow colors
 			const hue = (i / particleCount) * 360;
 			const rgb = hslToRgb(hue / 360, 1, 0.5);
 			colors[i3] = rgb[0];
@@ -484,7 +471,6 @@
 		particleGeometry.userData.velocities = velocities;
 		particleGeometry.userData.phases = phases;
 
-		// Create material based on color mode
 		if (particleColorMode === 'rainbow' || particleColorMode === 'gradient') {
 			particleMaterial = new THREE.PointsMaterial({
 				size: particleSize,
@@ -517,7 +503,6 @@
 
 	function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 		let r, g, b;
-
 		if (s === 0) {
 			r = g = b = l;
 		} else {
@@ -529,14 +514,12 @@
 				if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
 				return p;
 			};
-
 			const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
 			const p = 2 * l - q;
 			r = hue2rgb(p, q, h + 1 / 3);
 			g = hue2rgb(p, q, h);
 			b = hue2rgb(p, q, h - 1 / 3);
 		}
-
 		return [r, g, b];
 	}
 
@@ -560,13 +543,11 @@
 					positions[i3 + 1] = (i / particleCount - 0.5) * particleSpread;
 					positions[i3 + 2] = Math.sin(spiralAngle) * spiralRadius;
 					break;
-
 				case 'wave':
 					positions[i3] += velocities[i3] * particleSpeed;
 					positions[i3 + 1] = Math.sin(animationTime + phases[i] + positions[i3] * 0.5) * 3;
 					positions[i3 + 2] += velocities[i3 + 2] * particleSpeed;
 					break;
-
 				case 'vortex':
 					const vortexRadius = Math.sqrt(positions[i3] ** 2 + positions[i3 + 2] ** 2);
 					const vortexAngle = Math.atan2(positions[i3 + 2], positions[i3]) + particleSpeed * 0.5;
@@ -575,14 +556,12 @@
 					positions[i3 + 2] = Math.sin(vortexAngle) * (vortexRadius + vortexPull);
 					positions[i3 + 1] += velocities[i3 + 1] * particleSpeed;
 					break;
-
 				case 'explosion':
 					const explosionPulse = Math.sin(animationTime * 2) * 0.5 + 0.5;
 					positions[i3] += velocities[i3] * particleSpeed * 5 * explosionPulse;
 					positions[i3 + 1] += velocities[i3 + 1] * particleSpeed * 5 * explosionPulse;
 					positions[i3 + 2] += velocities[i3 + 2] * particleSpeed * 5 * explosionPulse;
 					break;
-
 				case 'orbit':
 					const orbitRadius = 5 + (i / particleCount) * 3;
 					const orbitSpeed = animationTime * (1 + i / particleCount) * 0.5;
@@ -590,10 +569,9 @@
 					positions[i3 + 1] = Math.sin(animationTime * 2 + phases[i]) * 2;
 					positions[i3 + 2] = Math.sin(orbitSpeed) * orbitRadius;
 					break;
-
 				case 'fountain':
 					positions[i3 + 1] += velocities[i3 + 1] * particleSpeed * 10;
-					velocities[i3 + 1] -= 0.02; // Gravity
+					velocities[i3 + 1] -= 0.02;
 					if (positions[i3 + 1] < -particleSpread / 2) {
 						positions[i3] = (Math.random() - 0.5) * 2;
 						positions[i3 + 1] = -particleSpread / 2;
@@ -601,25 +579,19 @@
 						velocities[i3 + 1] = Math.random() * 0.5 + 0.3;
 					}
 					break;
-
 				case 'pulse':
 					const pulseFactor = Math.sin(animationTime * 3 + phases[i]) * 0.3 + 1;
-					if (sizes) {
-						sizes[i] = particleSize * pulseFactor;
-					}
-					// Continue with normal movement
+					if (sizes) sizes[i] = particleSize * pulseFactor;
 					positions[i3] += velocities[i3] * particleSpeed;
 					positions[i3 + 1] += velocities[i3 + 1] * particleSpeed;
 					positions[i3 + 2] += velocities[i3 + 2] * particleSpeed;
 					break;
-
-				default: // 'none'
+				default:
 					positions[i3] += velocities[i3] * particleSpeed;
 					positions[i3 + 1] += velocities[i3 + 1] * particleSpeed;
 					positions[i3 + 2] += velocities[i3 + 2] * particleSpeed;
 			}
 
-			// Boundary wrapping for non-special animations
 			if (!['spiral', 'orbit', 'fountain'].includes(particleAnimation)) {
 				const boundary = particleSpread / 2;
 				if (Math.abs(positions[i3]) > boundary) {
@@ -636,7 +608,6 @@
 				}
 			}
 
-			// Update colors for gradient mode
 			if (particleColorMode === 'gradient' && colors) {
 				const gradientFactor = (positions[i3 + 1] + particleSpread / 2) / particleSpread;
 				const color1 = new THREE.Color(particleColor);
@@ -654,52 +625,44 @@
 			particleGeometry.attributes.color.needsUpdate = true;
 		}
 
-		// Particle rotation
 		if (particleRotation && particleSystem) {
 			particleSystem.rotation.y += 0.001 * particleAnimationSpeed;
 		}
 	}
 
 	function animate() {
+		// FIX: When capture is in progress, stop the free-running loop.
+		// videoCapture.ts will drive renders explicitly via __threeJsRenderer.
+		if ((window as any).__threeJsCapturing) {
+			// Reschedule so we resume automatically once capture finishes
+			animationId = requestAnimationFrame(animate);
+			return;
+		}
+
 		animationId = requestAnimationFrame(animate);
 
-		// ✅ VIDEO TIME IS THE SINGLE SOURCE OF TRUTH FOR ALL ANIMATIONS
 		const animationTime = videoElement?.currentTime ?? 0;
 
 		if (mesh) {
 			mesh.rotation.x = rotationX;
 			mesh.rotation.y = rotationY;
 			mesh.rotation.z = rotationZ;
-
-			if (autoRotate) {
-				mesh.rotation.y += autoRotateSpeed;
-			}
-
+			if (autoRotate) mesh.rotation.y += autoRotateSpeed;
 			if (mesh.material instanceof THREE.MeshStandardMaterial) {
 				mesh.material.emissiveIntensity = videoGlow + shapeGlow;
 			}
 		}
 
-		// Update text animation - PASS ANIMATION TIME
-		if (threeJsTextComponent) {
-			threeJsTextComponent.updateAnimation(animationTime);
-		}
+		if (threeJsTextComponent) threeJsTextComponent.updateAnimation(animationTime);
+		if (threeJsLogoComponent) threeJsLogoComponent.updateAnimation(animationTime);
 
-		// 🎨 NEW: Update logo animation - PASS ANIMATION TIME
-		if (threeJsLogoComponent) {
-			threeJsLogoComponent.updateAnimation(animationTime);
-		}
-
-		// Update particles - PASS ANIMATION TIME
 		updateParticles(animationTime);
 
 		camera.position.z = cameraDistance;
 		if (ambientLight) ambientLight.intensity = ambientIntensity;
 		if (directionalLight) directionalLight.intensity = directionalIntensity;
 
-		if (renderer) {
-			renderer.render(scene, camera);
-		}
+		if (renderer) renderer.render(scene, camera);
 	}
 
 	function handleResize() {
@@ -718,18 +681,14 @@
 		if (!isDragging) return;
 		const deltaX = event.clientX - previousMousePosition.x;
 		const deltaY = event.clientY - previousMousePosition.y;
-
 		threeJsState.updateMultiple({
 			rotationY: rotationY + deltaX * 0.01,
 			rotationX: rotationX + deltaY * 0.01
 		});
-
 		previousMousePosition = { x: event.clientX, y: event.clientY };
 	}
 
-	function onMouseUp() {
-		isDragging = false;
-	}
+	function onMouseUp() { isDragging = false; }
 
 	function onTouchStart(event: TouchEvent) {
 		isDragging = true;
@@ -740,47 +699,27 @@
 		if (!isDragging) return;
 		const deltaX = event.touches[0].clientX - previousMousePosition.x;
 		const deltaY = event.touches[0].clientY - previousMousePosition.y;
-
 		threeJsState.updateMultiple({
 			rotationY: rotationY + deltaX * 0.01,
 			rotationX: rotationX + deltaY * 0.01
 		});
-
 		previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY };
 	}
 
-	function onTouchEnd() {
-		isDragging = false;
-	}
+	function onTouchEnd() { isDragging = false; }
 
-	// React to shape changes
-	$: if (mesh && videoTexture && selectedShape) {
-		createMesh(selectedShape);
-	}
-
-	// React to scale changes
-	$: if (mesh) {
-		mesh.scale.set(scale, scale, scale);
-	}
-
-	// React to particle settings - recreate when shape, animation, or color mode changes
-	$: if (scene && (particleShape || particleColorMode || particleAnimation)) {
-		createParticleSystem();
-	}
-
-	// React to particle enable/disable and property changes
+	$: if (mesh && videoTexture && selectedShape) createMesh(selectedShape);
+	$: if (mesh) mesh.scale.set(scale, scale, scale);
+	$: if (scene && (particleShape || particleColorMode || particleAnimation)) createParticleSystem();
 	$: if (particleSystem && particleGeometry && particleMaterial) {
 		if (particlesEnabled && !scene.children.includes(particleSystem)) {
 			scene.add(particleSystem);
 		} else if (!particlesEnabled && scene.children.includes(particleSystem)) {
 			scene.remove(particleSystem);
 		}
-
 		if (particleMaterial instanceof THREE.PointsMaterial) {
 			particleMaterial.size = particleSize;
-			if (particleColorMode === 'solid') {
-				particleMaterial.color.set(particleColor);
-			}
+			if (particleColorMode === 'solid') particleMaterial.color.set(particleColor);
 			particleMaterial.opacity = particleOpacity;
 			particleMaterial.blending = particleGlow ? THREE.AdditiveBlending : THREE.NormalBlending;
 		}
@@ -790,7 +729,5 @@
 <div class="relative h-full w-full">
 	<canvas bind:this={canvas} class="h-full w-full"></canvas>
 </div>
-<!-- Always render text component - it handles its own conditionals -->
 <ThreeJsText {scene} bind:this={threeJsTextComponent} />
-<!-- 🎨 NEW: Always render logo component - it handles its own conditionals -->
 <ThreeJsLogo {scene} bind:this={threeJsLogoComponent} />

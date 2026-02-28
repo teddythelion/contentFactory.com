@@ -1,16 +1,30 @@
 import { z } from 'zod';
 import { env } from '$env/dynamic/private';
+import { checkUsage, incrementUsage } from '$lib/services/usage.service.ts';
 
-export async function POST({ request }: { request: Request }) {
+export async function POST({ request, locals }: { request: Request; locals: any }) {
     try {
+        // Check authentication
+        const userId = locals.user?.uid;
+        if (!userId) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+        }
+
+        // Check usage limits before generation
+        const usageCheck = await checkUsage(userId, 'image');
+        if (!usageCheck.allowed) {
+            return new Response(JSON.stringify({
+                error: 'limit_reached',
+                usage: usageCheck
+            }), { status: 429 });
+        }
+
         // Get the API key from environment variables
         const apiKey = env.OPENAI_API_KEY;
         
         if (!apiKey) {
             throw new Error('OPENAI_API_KEY is not configured in environment variables');
         }
-
-      //  console.log('API Key loaded:', apiKey.substring(0, 10) + '...');
 
         // Parse and validate request body
         const body = await request.json().catch(() => ({}));    
@@ -64,7 +78,8 @@ export async function POST({ request }: { request: Request }) {
             const imageResponse = await fetch(imageData.url);
             const imageBuffer = await imageResponse.arrayBuffer();
             const base64Image = Buffer.from(imageBuffer).toString('base64');
-
+             // Increment usage after successful generation
+            await incrementUsage(userId, 'image');
             return new Response(
                 JSON.stringify({ 
                     imageBase64: base64Image,
@@ -76,7 +91,8 @@ export async function POST({ request }: { request: Request }) {
             );
         } else if (imageData.b64_json) {
             console.log('Got base64 image directly');
-            
+            // Increment usage after successful generation
+            await incrementUsage(userId, 'image'); 
             return new Response(
                 JSON.stringify({ 
                     imageBase64: imageData.b64_json

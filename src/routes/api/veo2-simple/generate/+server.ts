@@ -2,8 +2,20 @@ import { GoogleAuth } from 'google-auth-library';
 import { readFileSync } from 'fs';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
+import { checkUsage, incrementUsage } from '$lib/services/usage.service';
+export const POST: RequestHandler = async ({ request, locals }) => {
+    // Check authentication
+    const userId = locals.user?.uid;
+    if (!userId) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
 
-export const POST: RequestHandler = async ({ request }) => {
+    // Check usage limits
+    const usageCheck = await checkUsage(userId, 'video');
+    if (!usageCheck.allowed) {
+        return new Response(JSON.stringify({ error: 'limit_reached', usage: usageCheck }), { status: 429 });
+    }
+
     const { prompt, duration = 5, aspectRatio = "16:9"} = await request.json();
     
     const key = JSON.parse(readFileSync(env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
@@ -30,7 +42,7 @@ export const POST: RequestHandler = async ({ request }) => {
                 parameters: {
                     durationSeconds: duration,
                     sampleCount: 1,
-                    aspectRatio: "16:9",
+                    aspectRatio: aspectRatio ,
                     storageUri: "gs://project_app_bucket/videos/"  // Changed to include /videos/
                 }
             })
@@ -53,7 +65,7 @@ export const POST: RequestHandler = async ({ request }) => {
     const data = await res.json();
     console.log('in data*********************');
     console.log(data);
-    
+    await incrementUsage(userId, 'video');
     return new Response(JSON.stringify({ 
         operation: data.name 
     }), { 

@@ -324,6 +324,16 @@
 		scene.add(particleSystem);
 	}
 
+	function clearLogo() {
+		logoUrl = '';
+		if (logoMesh) {
+			scene.remove(logoMesh);
+			logoMesh.geometry.dispose();
+			(logoMesh.material as THREE.Material).dispose();
+			logoMesh = null;
+		}
+	}
+
 	function createLogoMesh(logoImageUrl: string) {
 		if (logoMesh) {
 			scene.remove(logoMesh);
@@ -474,7 +484,6 @@
 					mesh.material.emissiveIntensity = 0;
 				}
 			} else if (mesh.material instanceof THREE.MeshBasicMaterial) {
-				// MeshBasicMaterial doesn't support emissive, but we can tint via color
 				const glowValue = Math.max(imageGlow, shapeGlow);
 				if (glowValue > 0) {
 					const tint = Math.min(1.0 + glowValue * 0.3, 1.6);
@@ -525,26 +534,21 @@
 		}
 
 		if (logoMesh) {
-			// Increment animation time
 			logoAnimationTime += 0.016 * logoAnimationSpeed;
 
-			// Base position and rotation
 			const baseX = logoPositionX;
 			const baseY = logoPositionY;
 			const baseZ = logoPositionZ;
 
-			// Apply manual rotation
 			logoMesh.rotation.x = logoRotationX;
 			logoMesh.rotation.y = logoRotationY;
 			logoMesh.rotation.z = logoRotationZ;
 
 			if (logoAutoRotate) logoMesh.rotation.y += logoAutoRotateSpeed;
 
-			// Apply base position
 			logoMesh.position.set(baseX, baseY, baseZ);
 			logoMesh.scale.set(logoScale, logoScale, logoScale);
 
-			// Apply animation on top of base values
 			switch (logoAnimation) {
 				case 'spin':
 					logoMesh.rotation.z += logoAnimationTime * 2;
@@ -632,7 +636,6 @@
 					break;
 			}
 
-			// Update opacity (unless animation already handled it)
 			if (logoAnimation !== 'explode' && logoAnimation !== 'shimmer') {
 				if (logoMesh.material instanceof THREE.MeshStandardMaterial) {
 					logoMesh.material.opacity = logoOpacity;
@@ -719,10 +722,10 @@
 		});
 	}
 
-	// Reactive updates
+	// FIX 1: Added selectedFont and textColor to reactive block so font changes trigger re-render
 	$: if (mesh && selectedShape) createMesh(selectedShape);
 	$: if (mesh) mesh.scale.set(scale, scale, scale);
-	$: if (textContent || textSize || textColor) create3DText();
+	$: if (textContent !== undefined || textSize || textColor || selectedFont) create3DText();
 	$: if (particlesEnabled) createParticleSystem();
 	$: if (logoEnabled && logoUrl) createLogoMesh(logoUrl);
 </script>
@@ -742,7 +745,7 @@
 			</div>
 		</div>
 
-		<!-- Controls Panel (UNCHANGED STRUCTURE) -->
+		<!-- Controls Panel -->
 		<div class="flex w-full flex-col gap-3 overflow-y-auto lg:w-96">
 			<div
 				class="flex flex-col gap-2 overflow-y-auto pr-2"
@@ -778,7 +781,6 @@
 								</select>
 							</div>
 
-							<!-- Numeric + Slider for Camera Distance -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<div class="mb-2 flex items-center justify-between">
 									<span class="text-sm font-semibold text-white">Camera Distance</span>
@@ -803,7 +805,6 @@
 								</div>
 							</div>
 
-							<!-- Numeric + Slider for Scale -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<div class="mb-2 flex items-center justify-between">
 									<span class="text-sm font-semibold text-white">Scale</span>
@@ -1081,7 +1082,6 @@
 								</div>
 							</div>
 
-							<!-- Filter Presets -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="mb-2 block text-sm font-semibold text-white">Quick Presets</label>
 								<div class="grid grid-cols-2 gap-2">
@@ -1318,7 +1318,13 @@
 										class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-blue-600 file:px-2 file:py-1 file:text-white hover:file:bg-blue-700"
 									/>
 									{#if logoUrl}
-										<p class="mt-1 text-xs text-green-400">✅ Logo loaded</p>
+										<div class="mt-2 flex items-center justify-between">
+											<p class="text-xs text-green-400">✅ Logo loaded</p>
+											<button
+												on:click={clearLogo}
+												class="btn btn-xs btn-error btn-outline"
+											>🗑 Remove</button>
+										</div>
 									{/if}
 								</div>
 
@@ -1402,147 +1408,52 @@
 									</div>
 								{/if}
 
-								<!-- LOGO POSITION X/Y/Z -->
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Position X</label>
 									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="-10"
-											max="10"
-											step="0.1"
-											bind:value={logoPositionX}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={logoPositionX}
-											min="-10"
-											max="10"
-											step="0.1"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
+										<input type="range" min="-10" max="10" step="0.1" bind:value={logoPositionX} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+										<input type="number" bind:value={logoPositionX} min="-10" max="10" step="0.1" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 									</div>
 								</div>
-
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Position Y</label>
 									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="-10"
-											max="10"
-											step="0.1"
-											bind:value={logoPositionY}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={logoPositionY}
-											min="-10"
-											max="10"
-											step="0.1"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
+										<input type="range" min="-10" max="10" step="0.1" bind:value={logoPositionY} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+										<input type="number" bind:value={logoPositionY} min="-10" max="10" step="0.1" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 									</div>
 								</div>
-
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Position Z</label>
 									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="-5"
-											max="10"
-											step="0.1"
-											bind:value={logoPositionZ}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={logoPositionZ}
-											min="-5"
-											max="10"
-											step="0.1"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
+										<input type="range" min="-5" max="10" step="0.1" bind:value={logoPositionZ} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+										<input type="number" bind:value={logoPositionZ} min="-5" max="10" step="0.1" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 									</div>
 								</div>
-
-								<!-- LOGO ROTATION X/Y/Z -->
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Rotation X</label>
 									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="-3.14"
-											max="3.14"
-											step="0.01"
-											bind:value={logoRotationX}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={logoRotationX}
-											min="-3.14"
-											max="3.14"
-											step="0.01"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
+										<input type="range" min="-3.14" max="3.14" step="0.01" bind:value={logoRotationX} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+										<input type="number" bind:value={logoRotationX} min="-3.14" max="3.14" step="0.01" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 									</div>
 								</div>
-
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Rotation Y</label>
 									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="-3.14"
-											max="3.14"
-											step="0.01"
-											bind:value={logoRotationY}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={logoRotationY}
-											min="-3.14"
-											max="3.14"
-											step="0.01"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
+										<input type="range" min="-3.14" max="3.14" step="0.01" bind:value={logoRotationY} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+										<input type="number" bind:value={logoRotationY} min="-3.14" max="3.14" step="0.01" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 									</div>
 								</div>
-
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Rotation Z</label>
 									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="-3.14"
-											max="3.14"
-											step="0.01"
-											bind:value={logoRotationZ}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={logoRotationZ}
-											min="-3.14"
-											max="3.14"
-											step="0.01"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
+										<input type="range" min="-3.14" max="3.14" step="0.01" bind:value={logoRotationZ} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+										<input type="number" bind:value={logoRotationZ} min="-3.14" max="3.14" step="0.01" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 									</div>
 								</div>
 
-								<!-- LOGO ANIMATION -->
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Animation</label>
-									<select
-										bind:value={logoAnimation}
-										class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									>
+									<select bind:value={logoAnimation} class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white">
 										<option value="none">None</option>
 										<option value="spin">🔄 Spin</option>
 										<option value="pulse">💓 Pulse</option>
@@ -1560,44 +1471,15 @@
 									<div class="rounded-lg p-3 hover:bg-white/5">
 										<label class="text-sm font-semibold text-white">Animation Speed</label>
 										<div class="mt-1 flex gap-2">
-											<input
-												type="range"
-												min="0.1"
-												max="5"
-												step="0.1"
-												bind:value={logoAnimationSpeed}
-												class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-											/>
-											<input
-												type="number"
-												bind:value={logoAnimationSpeed}
-												min="0.1"
-												max="5"
-												step="0.1"
-												class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-											/>
+											<input type="range" min="0.1" max="5" step="0.1" bind:value={logoAnimationSpeed} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+											<input type="number" bind:value={logoAnimationSpeed} min="0.1" max="5" step="0.1" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 										</div>
 									</div>
-
 									<div class="rounded-lg p-3 hover:bg-white/5">
 										<label class="text-sm font-semibold text-white">Animation Intensity</label>
 										<div class="mt-1 flex gap-2">
-											<input
-												type="range"
-												min="0.1"
-												max="2"
-												step="0.1"
-												bind:value={logoAnimationIntensity}
-												class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-											/>
-											<input
-												type="number"
-												bind:value={logoAnimationIntensity}
-												min="0.1"
-												max="2"
-												step="0.1"
-												class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-											/>
+											<input type="range" min="0.1" max="2" step="0.1" bind:value={logoAnimationIntensity} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+											<input type="number" bind:value={logoAnimationIntensity} min="0.1" max="2" step="0.1" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 										</div>
 									</div>
 								{/if}
@@ -1606,7 +1488,7 @@
 					</details>
 				</div>
 
-				<!-- TEXT (abbreviated for space) -->
+				<!-- TEXT -->
 				<div class="rounded-lg border border-white/10 bg-gray-800/50">
 					<details class="group">
 						<summary
@@ -1623,7 +1505,8 @@
 								/>
 							</svg>
 						</summary>
-						<div class="px-2 pb-2" style="max-height: 300px; overflow-y: auto;">
+						<div class="px-2 pb-2" style="max-height: 500px; overflow-y: auto;">
+							<!-- 2D / 3D Mode Toggle -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<div class="flex gap-2">
 									<button
@@ -1639,6 +1522,36 @@
 								</div>
 							</div>
 
+							<!-- Font selector — different per mode -->
+							{#if textMode === '2d'}
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="text-sm font-semibold text-white">Font</label>
+									<select
+										bind:value={selectedFont}
+										on:change={create3DText}
+										class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
+									>
+										{#each googleFonts as font}
+											<option value={font}>{font}</option>
+										{/each}
+									</select>
+								</div>
+							{:else}
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="text-sm font-semibold text-white">Font</label>
+									<select
+										bind:value={selected3DFont}
+										on:change={() => load3DFont(selected3DFont)}
+										class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
+									>
+										{#each threejsFonts as font}
+											<option value={font.value}>{font.name}</option>
+										{/each}
+									</select>
+								</div>
+							{/if}
+
+							<!-- Text input -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<input
 									type="text"
@@ -1648,224 +1561,190 @@
 								/>
 							</div>
 
+							<!-- Size -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Size</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="0.5"
-										max="3"
-										step="0.1"
-										bind:value={textSize}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textSize}
-										min="0.5"
-										max="3"
-										step="0.1"
-										class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="0.5" max="3" step="0.1" bind:value={textSize} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textSize} min="0.5" max="3" step="0.1" class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
 
+							<!-- Color -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Color</label>
-								<input
-									type="color"
-									bind:value={textColor}
-									class="mt-1 h-8 w-full cursor-pointer rounded border border-white/10"
-								/>
+								<input type="color" bind:value={textColor} on:input={create3DText} class="mt-1 h-8 w-full cursor-pointer rounded border border-white/10" />
 							</div>
 
+							<!-- Glow -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Glow</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="0"
-										max="2"
-										step="0.1"
-										bind:value={textGlow}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textGlow}
-										min="0"
-										max="2"
-										step="0.1"
-										class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="0" max="2" step="0.1" bind:value={textGlow} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textGlow} min="0" max="2" step="0.1" class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
 
+							<!-- Opacity -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Opacity</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="0"
-										max="1"
-										step="0.1"
-										bind:value={textOpacity}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textOpacity}
-										min="0"
-										max="1"
-										step="0.1"
-										class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="0" max="1" step="0.1" bind:value={textOpacity} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textOpacity} min="0" max="1" step="0.1" class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
 
-							<!-- TEXT POSITION X/Y/Z -->
+							<!-- FIX 2: 3D-only bevel/extrusion controls — only show in 3D mode -->
+							{#if textMode === '3d'}
+								<div class="mt-1 rounded-lg border border-blue-500/30 bg-blue-900/20 p-2">
+									<p class="mb-2 text-xs font-semibold text-blue-300">3D Geometry</p>
+
+									<div class="rounded-lg p-3 hover:bg-white/5">
+										<label class="text-sm font-semibold text-white">Extrusion Depth</label>
+										<div class="mt-1 flex gap-2">
+											<input
+												type="range"
+												min="0.05"
+												max="2"
+												step="0.05"
+												bind:value={textExtrusionDepth}
+												on:input={create3DText}
+												class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
+											/>
+											<input
+												type="number"
+												bind:value={textExtrusionDepth}
+												min="0.05"
+												max="2"
+												step="0.05"
+												on:change={create3DText}
+												class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
+											/>
+										</div>
+									</div>
+
+									<div class="rounded-lg p-3 hover:bg-white/5">
+										<div class="flex items-center justify-between">
+											<span class="text-sm font-semibold text-white">Bevel Enabled</span>
+											<label class="relative inline-flex cursor-pointer items-center">
+												<input
+													type="checkbox"
+													bind:checked={bevelEnabled}
+													on:change={create3DText}
+													class="peer sr-only"
+												/>
+												<div
+													class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"
+												></div>
+											</label>
+										</div>
+									</div>
+
+									{#if bevelEnabled}
+										<div class="rounded-lg p-3 hover:bg-white/5">
+											<label class="text-sm font-semibold text-white">Bevel Thickness</label>
+											<div class="mt-1 flex gap-2">
+												<input
+													type="range"
+													min="0.01"
+													max="0.3"
+													step="0.01"
+													bind:value={bevelThickness}
+													on:input={create3DText}
+													class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
+												/>
+												<input
+													type="number"
+													bind:value={bevelThickness}
+													min="0.01"
+													max="0.3"
+													step="0.01"
+													on:change={create3DText}
+													class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
+												/>
+											</div>
+										</div>
+
+										<div class="rounded-lg p-3 hover:bg-white/5">
+											<label class="text-sm font-semibold text-white">Bevel Size</label>
+											<div class="mt-1 flex gap-2">
+												<input
+													type="range"
+													min="0.01"
+													max="0.2"
+													step="0.01"
+													bind:value={bevelSize}
+													on:input={create3DText}
+													class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
+												/>
+												<input
+													type="number"
+													bind:value={bevelSize}
+													min="0.01"
+													max="0.2"
+													step="0.01"
+													on:change={create3DText}
+													class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
+												/>
+											</div>
+										</div>
+									{/if}
+								</div>
+							{/if}
+
+							<!-- Position X/Y/Z -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Position X</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="-10"
-										max="10"
-										step="0.1"
-										bind:value={textPositionX}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textPositionX}
-										min="-10"
-										max="10"
-										step="0.1"
-										class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="-10" max="10" step="0.1" bind:value={textPositionX} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textPositionX} min="-10" max="10" step="0.1" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
-
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Position Y</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="-10"
-										max="10"
-										step="0.1"
-										bind:value={textPositionY}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textPositionY}
-										min="-10"
-										max="10"
-										step="0.1"
-										class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="-10" max="10" step="0.1" bind:value={textPositionY} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textPositionY} min="-10" max="10" step="0.1" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
-
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Position Z</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="-5"
-										max="10"
-										step="0.1"
-										bind:value={textPositionZ}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textPositionZ}
-										min="-5"
-										max="10"
-										step="0.1"
-										class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="-5" max="10" step="0.1" bind:value={textPositionZ} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textPositionZ} min="-5" max="10" step="0.1" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
 
-							<!-- TEXT ROTATION X/Y/Z -->
+							<!-- Rotation X/Y/Z -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Rotation X</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="-3.14"
-										max="3.14"
-										step="0.01"
-										bind:value={textRotationX}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textRotationX}
-										min="-3.14"
-										max="3.14"
-										step="0.01"
-										class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="-3.14" max="3.14" step="0.01" bind:value={textRotationX} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textRotationX} min="-3.14" max="3.14" step="0.01" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
-
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Rotation Y</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="-3.14"
-										max="3.14"
-										step="0.01"
-										bind:value={textRotationY}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textRotationY}
-										min="-3.14"
-										max="3.14"
-										step="0.01"
-										class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="-3.14" max="3.14" step="0.01" bind:value={textRotationY} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textRotationY} min="-3.14" max="3.14" step="0.01" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
-
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="text-sm font-semibold text-white">Rotation Z</label>
 								<div class="mt-1 flex gap-2">
-									<input
-										type="range"
-										min="-3.14"
-										max="3.14"
-										step="0.01"
-										bind:value={textRotationZ}
-										class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-									/>
-									<input
-										type="number"
-										bind:value={textRotationZ}
-										min="-3.14"
-										max="3.14"
-										step="0.01"
-										class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									/>
+									<input type="range" min="-3.14" max="3.14" step="0.01" bind:value={textRotationZ} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+									<input type="number" bind:value={textRotationZ} min="-3.14" max="3.14" step="0.01" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 								</div>
 							</div>
 
-							<!-- TEXT AUTO-ROTATE -->
+							<!-- Auto Rotate -->
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<div class="flex items-center justify-between">
 									<span class="text-sm font-semibold text-white">Auto Rotate</span>
 									<label class="relative inline-flex cursor-pointer items-center">
 										<input type="checkbox" bind:checked={textAutoRotate} class="peer sr-only" />
-										<div
-											class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"
-										></div>
+										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
 									</label>
 								</div>
 							</div>
@@ -1874,22 +1753,8 @@
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Rotate Speed</label>
 									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="0.001"
-											max="0.1"
-											step="0.001"
-											bind:value={textAutoRotateSpeed}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={textAutoRotateSpeed}
-											min="0.001"
-											max="0.1"
-											step="0.001"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
+										<input type="range" min="0.001" max="0.1" step="0.001" bind:value={textAutoRotateSpeed} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500" />
+										<input type="number" bind:value={textAutoRotateSpeed} min="0.001" max="0.1" step="0.001" class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white" />
 									</div>
 								</div>
 							{/if}

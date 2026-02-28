@@ -8,7 +8,7 @@ export interface User {
   photoURL: string | null;
   createdAt: Timestamp;
   lastLogin: Timestamp;
-  plan: 'free' | 'pro' | 'enterprise';
+  plan: 'free' | 'starter' | 'pro';
   
   // Storage
   storageUsed: number;
@@ -21,6 +21,13 @@ export interface User {
   
   // Content retention settings
   contentRetention: ContentRetentionSettings;
+
+  // Subscription
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  subscriptionStatus: 'active' | 'canceled' | 'past_due' | 'trialing' | null;
+  subscriptionPeriodEnd: Timestamp | null;
+  stripePriceId: string | null;
 }
 
 export interface ContentRetentionSettings {
@@ -30,6 +37,7 @@ export interface ContentRetentionSettings {
   warnBeforeDelete: boolean;
   lastWarningAt: Timestamp | null;
 }
+
 
 // Content
 export interface Content {

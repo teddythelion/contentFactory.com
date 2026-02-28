@@ -485,6 +485,22 @@
 					component: LogoUpload,
 					componentProps: {}
 				},
+				// ── APPEARANCE ──
+				{
+					label: 'Scale',
+					type: 'range',
+					min: 0.05,
+					max: 3,
+					step: 0.01
+				},
+				{
+					label: 'Opacity',
+					type: 'range',
+					min: 0,
+					max: 1,
+					step: 0.05
+				},
+				// ── POSITION (X / Y / Z grouped together) ──
 				{
 					label: 'Position X',
 					type: 'range',
@@ -500,71 +516,13 @@
 					step: 1
 				},
 				{
-					label: 'Scale',
+					label: 'Position Z',
 					type: 'range',
-					min: 0.05,
-					max: 3,
-					step: 0.01
-				},
-				{
-					label: 'Opacity',
-					type: 'range',
-					min: 0,
-					max: 1,
-					step: 0.05
-				},
-				{
-					label: 'Start Time',
-					type: 'range',
-					min: 0,
-					max: 8,
+					min: -10,
+					max: 10,
 					step: 0.1
 				},
-				{
-					label: 'End Time',
-					type: 'range',
-					min: 0,
-					max: 8,
-					step: 0.1
-				},
-				{
-					label: 'Fade In Duration',
-					type: 'range',
-					min: 0,
-					max: 2,
-					step: 0.1
-				},
-				{
-					label: 'Fade Out Duration',
-					type: 'range',
-					min: 0,
-					max: 2,
-					step: 0.1
-				},
-				{
-					label: 'Logo Animation',
-					type: 'select',
-					options: [
-						{ value: 'none', label: 'None' },
-						{ value: 'spin', label: '🔄 Spin' },
-						{ value: 'pulse', label: '💓 Pulse' },
-						{ value: 'bounce', label: '🏀 Bounce' },
-						{ value: 'explode', label: '💥 Explode' },
-						{ value: 'warp', label: '🌀 Warp' },
-						{ value: 'glitch', label: '📺 Glitch' },
-						{ value: 'flip3d', label: '🎪 Flip 3D' },
-						{ value: 'spiral', label: '🌪️ Spiral' },
-						{ value: 'shimmer', label: '✨ Shimmer' },
-						{ value: 'particle-assemble', label: '⚛️ Particle Assemble' }
-					]
-				},
-				{
-					label: 'Animation Speed',
-					type: 'range',
-					min: 0.1,
-					max: 5,
-					step: 0.1
-				},
+				// ── ROTATION (X / Y / Z grouped right after position) ──
 				{
 					label: 'Rotation X',
 					type: 'range',
@@ -597,6 +555,7 @@
 					max: 0.1,
 					step: 0.001
 				},
+				// ── POSITION PRESETS ──
 				{
 					label: '📍 Top Left',
 					type: 'button',
@@ -621,6 +580,60 @@
 					label: '📍 Center',
 					type: 'button',
 					action: () => logoState.presets.center()
+				},
+				// ── TIMING ──
+				{
+					label: 'Start Time',
+					type: 'range',
+					min: 0,
+					max: 8,
+					step: 0.1
+				},
+				{
+					label: 'End Time',
+					type: 'range',
+					min: 0,
+					max: 8,
+					step: 0.1
+				},
+				{
+					label: 'Fade In Duration',
+					type: 'range',
+					min: 0,
+					max: 2,
+					step: 0.1
+				},
+				{
+					label: 'Fade Out Duration',
+					type: 'range',
+					min: 0,
+					max: 2,
+					step: 0.1
+				},
+				// ── ANIMATION ──
+				{
+					label: 'Logo Animation',
+					type: 'select',
+					options: [
+						{ value: 'none', label: 'None' },
+						{ value: 'spin', label: '🔄 Spin' },
+						{ value: 'pulse', label: '💓 Pulse' },
+						{ value: 'bounce', label: '🏀 Bounce' },
+						{ value: 'explode', label: '💥 Explode' },
+						{ value: 'warp', label: '🌀 Warp' },
+						{ value: 'glitch', label: '📺 Glitch' },
+						{ value: 'flip3d', label: '🎪 Flip 3D' },
+						{ value: 'spiral', label: '🌪️ Spiral' },
+						{ value: 'shimmer', label: '✨ Shimmer' },
+						{ value: 'particle-assemble', label: '⚛️ Particle Assemble' }
+					]
+				},
+				{
+					label: 'Animation Speed',
+					type: 'range',
+					min: 0.1,
+					max: 5,
+					step: 0.1
 				}
 			]
 		}
@@ -689,6 +702,8 @@
 					return $logoState.position.x;
 				case 'Position Y':
 					return $logoState.position.y;
+				case 'Position Z':
+					return $logoState.position.z;
 				case 'Scale':
 					return $logoState.scale;
 				case 'Opacity':
@@ -793,10 +808,13 @@
 					logoState.setEnabled(value);
 					break;
 				case 'Position X':
-					logoState.setPosition(value, currentState.position.y);
+					logoState.setPosition(value, currentState.position.y, currentState.position.z);
 					break;
 				case 'Position Y':
-					logoState.setPosition(currentState.position.x, value);
+					logoState.setPosition(currentState.position.x, value, currentState.position.z);
+					break;
+				case 'Position Z':
+					logoState.setPosition(currentState.position.x, currentState.position.y, value);
 					break;
 				case 'Scale':
 					logoState.updateProperty('scale', value);
@@ -1156,40 +1174,17 @@
 									<div class="mb-2 flex items-center justify-between">
 										<span class="text-sm font-semibold text-white">{item.label}</span>
 										<span class="text-xs text-gray-400">
-											{#if group.id === 'logo'}
-												{#if item.label === 'Position X'}
-													{$logoState.position.x.toFixed(2)}
-												{:else if item.label === 'Position Y'}
-													{$logoState.position.y.toFixed(2)}
-												{:else if item.label === 'Scale'}
-													{$logoState.scale.toFixed(2)}
-												{:else if item.label === 'Opacity'}
-													{$logoState.opacity.toFixed(2)}
-												{:else if item.label === 'Start Time'}
-													{$logoState.startTime.toFixed(2)}
-												{:else if item.label === 'End Time'}
-													{$logoState.endTime.toFixed(2)}
-												{:else if item.label === 'Fade In Duration'}
-													{$logoState.fadeInDuration.toFixed(2)}
-												{:else if item.label === 'Fade Out Duration'}
-													{$logoState.fadeOutDuration.toFixed(2)}
-												{:else if item.label === 'Animation Speed'}
-													{$logoState.animationSpeed.toFixed(2)}
-												{:else if item.label === 'Rotation X'}
-													{$logoState.rotation3D.x.toFixed(2)}
-												{:else if item.label === 'Rotation Y'}
-													{$logoState.rotation3D.y.toFixed(2)}
-												{:else if item.label === 'Rotation Z'}
-													{$logoState.rotation3D.z.toFixed(2)}
-												{:else if item.label === 'Auto Rotate Speed'}
-													{$logoState.autoRotateSpeed.toFixed(3)}
-												{/if}
-											{:else}
-												{getNumberValue(group.id, item.label).toFixed(2)}
-											{/if}
-											{getUnit(item.label)}
+											{getNumberValue(group.id, item.label).toFixed(
+												item.step && item.step < 0.01 ? 3 : 2
+											)}{getUnit(item.label)}
 										</span>
 									</div>
+									<!--
+										FIX: Both slider and number input call the same setControlValue handler.
+										The number input uses on:change (fires on blur/enter) for deliberate entry,
+										while the slider uses on:input (fires continuously) for smooth dragging.
+										Both read from getNumberValue which pulls from the store, keeping them in sync.
+									-->
 									<input
 										type="range"
 										min={item.min}
@@ -1206,7 +1201,7 @@
 										max={item.max}
 										step={item.step}
 										value={getNumberValue(group.id, item.label)}
-										on:input={(e) =>
+										on:change={(e) =>
 											setControlValue(group.id, item.label, parseFloat(e.currentTarget.value))}
 										class="mt-2 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white outline-none focus:border-white/20"
 									/>

@@ -2,6 +2,7 @@ ignoredBuiltDependencies:
   - grpc
 
 onlyBuiltDependencies:
+  - '@firebase/util'
   - '@tailwindcss/oxide'
   - canvas
   - esbuild

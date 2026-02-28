@@ -40,7 +40,14 @@ export async function createUserProfile(uid: string, email: string, displayName:
       deleteVideosOnly: false,
       warnBeforeDelete: true,
       lastWarningAt: null
-    }
+    },
+    
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      subscriptionStatus: null,
+      subscriptionPeriodEnd: null,
+      stripePriceId: null
+    
   };
   
   await setDoc(userRef, userData);

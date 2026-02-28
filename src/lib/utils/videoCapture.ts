@@ -1,5 +1,5 @@
 // src/lib/utils/videoCapture.ts
-// CLEAN: Upload to GCS + Download locally
+// FIXED: Deterministic frame capture — explicit render + gl.finish() per frame
 
 import { get } from 'svelte/store';
 import { videoState } from '$lib/stores/video.store';
@@ -17,9 +17,13 @@ export async function captureThreeJsVideo(
 
 	const canvas = (window as any).__threeJsCanvas as HTMLCanvasElement;
 	const videoElement = (window as any).__threeJsVideo as HTMLVideoElement;
+	const threeRenderer = (window as any).__threeJsRenderer;
+	const threeScene = (window as any).__threeJsScene;
+	const threeCamera = (window as any).__threeJsCamera;
 
-	if (!canvas || !videoElement) {
-		throw new Error('Canvas or video not found');
+	if (!canvas || !videoElement) throw new Error('Canvas or video not found');
+	if (!threeRenderer || !threeScene || !threeCamera) {
+		throw new Error('Three.js renderer/scene/camera not found — cannot guarantee frame sync');
 	}
 
 	const videoDuration = videoElement.duration;
@@ -30,42 +34,57 @@ export async function captureThreeJsVideo(
 
 	progressCallback?.(0, 'Starting capture...');
 
+	// FIX: Pause the video and stop the free-running animation loop before touching currentTime
+	videoElement.pause();
+	(window as any).__threeJsCapturing = true;
+
 	try {
 		const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
 		if (!gl) throw new Error('Failed to get WebGL context');
 
-		console.log(
-			`📹 Capturing ${totalFrames} frames at ${width}x${height} in batches of ${BATCH_SIZE}`
-		);
+		console.log(`📹 Capturing ${totalFrames} frames at ${width}x${height} in batches of ${BATCH_SIZE}`);
 
 		const sessionId = Date.now().toString();
 		let batchNumber = 0;
 
-		// Capture and send in batches
 		for (let startFrame = 0; startFrame < totalFrames; startFrame += BATCH_SIZE) {
 			const endFrame = Math.min(startFrame + BATCH_SIZE, totalFrames);
 			const batchFrames: Uint8Array[] = [];
 
-			// Capture batch
 			for (let i = startFrame; i < endFrame; i++) {
 				const targetTime = i / fps;
 
+				// Seek to exact frame time
 				videoElement.currentTime = targetTime;
-				await new Promise((resolve) => {
-					videoElement.addEventListener('seeked', resolve, { once: true });
+
+				// FIX: Wait for the video element to finish seeking to targetTime
+				await new Promise<void>((resolve) => {
+					videoElement.addEventListener('seeked', () => resolve(), { once: true });
 				});
 
+				// FIX: Update video texture if present
 				const textMesh = (window as any).__textMesh;
 				if (textMesh?._videoTexture) {
 					textMesh._videoTexture.needsUpdate = true;
 				}
 
-				await new Promise((resolve) => requestAnimationFrame(resolve));
-				await new Promise((resolve) => requestAnimationFrame(resolve));
+				// FIX: Advance all animations (logo, text, particles) to this frame's time
+				// before rendering — these don't update automatically since animate() is paused
+				const updateScene = (window as any).__threeJsUpdateScene;
+				if (updateScene) updateScene(targetTime);
 
+				// FIX: Explicitly drive one render at exactly this frame's time.
+				threeRenderer.render(threeScene, threeCamera);
+
+				// FIX: Flush the GPU command queue so readPixels gets THIS frame's pixels,
+				// not whatever was last in the pipeline.
+				gl.finish();
+
+				// Now it's safe to read pixels
 				const pixels = new Uint8Array(width * height * 4);
 				gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
+				// Flip vertically (WebGL origin is bottom-left, image origin is top-left)
 				const flipped = new Uint8Array(width * height * 4);
 				for (let y = 0; y < height; y++) {
 					const sourceRow = (height - 1 - y) * width * 4;
@@ -79,7 +98,7 @@ export async function captureThreeJsVideo(
 				progressCallback?.(progress, `Capturing frame ${i + 1}/${totalFrames}`);
 			}
 
-			// Send batch to server
+			// Pack batch into single buffer
 			const batchData = new Uint8Array(batchFrames.length * width * height * 4);
 			let offset = 0;
 			for (const frame of batchFrames) {
@@ -106,26 +125,18 @@ export async function captureThreeJsVideo(
 				body: formData
 			});
 
-			if (!response.ok) {
-				throw new Error('Batch upload failed');
-			}
+			if (!response.ok) throw new Error('Batch upload failed');
 
 			batchNumber++;
 		}
 
-		// Encode all batches
+		// Encode
 		progressCallback?.(95, 'Encoding video...');
 
 		const encodeResponse = await fetch('/api/encodeFromBatches', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				sessionId,
-				totalFrames,
-				fps,
-				width,
-				height
-			})
+			body: JSON.stringify({ sessionId, totalFrames, fps, width, height })
 		});
 
 		if (!encodeResponse.ok) {
@@ -138,16 +149,14 @@ export async function captureThreeJsVideo(
 		// Convert base64 to blob
 		const videoData = atob(result.videoBase64);
 		const videoArray = new Uint8Array(videoData.length);
-
 		for (let i = 0; i < videoData.length; i++) {
 			videoArray[i] = videoData.charCodeAt(i);
 		}
-
 		const videoBlob = new Blob([videoArray], { type: 'video/mp4' });
 
 		console.log(`📊 Final video: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
 
-		// Upload to GCS (background) + Download locally (foreground)
+		// Upload to GCS
 		progressCallback?.(96, 'Uploading to cloud storage...');
 
 		const uploadFormData = new FormData();
@@ -170,12 +179,10 @@ export async function captureThreeJsVideo(
 		console.log(`☁️ Uploaded to GCS: ${gcsUrl}`);
 		console.log(`📁 Content ID: ${contentId}`);
 
-		// Update store with GCS URL
 		videoState.setProcessedVideo(gcsUrl);
 
-		// Download video locally
+		// Download locally
 		progressCallback?.(98, 'Preparing download...');
-
 		const downloadUrl = URL.createObjectURL(videoBlob);
 		const downloadLink = document.createElement('a');
 		downloadLink.href = downloadUrl;
@@ -183,21 +190,24 @@ export async function captureThreeJsVideo(
 		document.body.appendChild(downloadLink);
 		downloadLink.click();
 		document.body.removeChild(downloadLink);
-
 		setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
 
 		progressCallback?.(100, 'Complete! Video downloaded and saved to cloud.');
 
-		// Dispatch event (optional - for future UI enhancements)
 		window.dispatchEvent(
-			new CustomEvent('videoEnhanced', {
-				detail: { gcsUrl, contentId, sessionId }
-			})
+			new CustomEvent('videoEnhanced', { detail: { gcsUrl, contentId, sessionId } })
 		);
 
 		return gcsUrl;
+
 	} catch (error) {
 		console.error('❌ Capture failed:', error);
 		throw error;
+	} finally {
+		// FIX: Always restore normal playback and re-enable the animation loop,
+		// even if capture threw an error midway through.
+		(window as any).__threeJsCapturing = false;
+		videoElement.currentTime = 0;
+		videoElement.play().catch(() => {});
 	}
 }

@@ -194,7 +194,7 @@
 					{#each quickStarts as suggestion}
 						<button
 							on:click={() => handleQuickStart(suggestion)}
-							class="btn w-full gap-1 btn-outline btn-xs hover:btn-neutral sm:w-auto"
+							class="btn btn-xs sm:btn-sm md:btn-md lg:btn-lg xl:btn-xl btn-neutral "
 						>
 							<span class="text-sm">{suggestion.emoji}</span>
 							<span class="text-xs">{suggestion.text}</span>

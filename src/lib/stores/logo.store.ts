@@ -8,29 +8,29 @@ export interface LogoState {
 	enabled: boolean;
 
 	// Logo File
-	logoDataUrl: string | null; // Base64 data URL of uploaded logo
+	logoDataUrl: string | null;
 	logoFileName: string | null;
 
 	// Position (percentage of video width/height)
-	// 0-100 for both X and Y
 	position: {
-		x: number; // 0 = left, 100 = right
-		y: number; // 0 = top, 100 = bottom
+		x: number;
+		y: number;
+		z: number; // depth — 0 = default, positive = closer to camera
 	};
 
 	// Size & Appearance
-	scale: number; // 0.1 - 2.0 (logo size multiplier)
-	opacity: number; // 0 - 1 (transparency)
+	scale: number;
+	opacity: number;
 
 	// Timing (in seconds)
-	startTime: number; // When logo appears
-	endTime: number; // When logo disappears
-	fadeInDuration: number; // Fade in animation length
-	fadeOutDuration: number; // Fade out animation length
+	startTime: number;
+	endTime: number;
+	fadeInDuration: number;
+	fadeOutDuration: number;
 
-	// 🎨 NEW: Animation & Effects
+	// Animation & Effects
 	animationType: 'none' | 'spin' | 'pulse' | 'bounce' | 'explode' | 'warp' | 'glitch' | 'flip3d' | 'spiral' | 'shimmer' | 'particle-assemble';
-	animationSpeed: number; // 0.1 - 5.0
+	animationSpeed: number;
 	rotation3D: {
 		x: number;
 		y: number;
@@ -44,21 +44,21 @@ const initialState: LogoState = {
 	enabled: false,
 	logoDataUrl: null,
 	logoFileName: null,
-	
+
 	position: {
-		x: 54, // Default: top right
-		y: 47
+		x: 54,
+		y: 46,
+		z: 0
 	},
 
-	scale: 0.3, // 50% size (good default)
+	scale: 0.3,
 	opacity: 0.9,
 
-	startTime: 0, // Show from beginning
-	endTime: 8, // Show until end (8s default video length)
+	startTime: 0,
+	endTime: 8,
 	fadeInDuration: 0.5,
 	fadeOutDuration: 0.5,
 
-	// 🎨 NEW: Animation defaults
 	animationType: 'none',
 	animationSpeed: 1.0,
 	rotation3D: {
@@ -78,12 +78,10 @@ function createLogoStore() {
 		set,
 		update,
 
-		// Enable/disable logo
 		setEnabled: (enabled: boolean) => {
 			update(state => ({ ...state, enabled }));
 		},
 
-		// Upload logo from file
 		uploadLogo: (file: File) => {
 			const reader = new FileReader();
 			reader.onload = (e) => {
@@ -92,13 +90,12 @@ function createLogoStore() {
 					...state,
 					logoDataUrl: dataUrl,
 					logoFileName: file.name,
-					enabled: true // Auto-enable when logo is uploaded
+					enabled: true
 				}));
 			};
 			reader.readAsDataURL(file);
 		},
 
-		// Set logo from data URL (for DALL-E generated images)
 		setLogoDataUrl: (dataUrl: string, fileName: string = 'generated-logo.png') => {
 			update(state => ({
 				...state,
@@ -108,7 +105,6 @@ function createLogoStore() {
 			}));
 		},
 
-		// Clear logo
 		clearLogo: () => {
 			update(state => ({
 				...state,
@@ -118,15 +114,14 @@ function createLogoStore() {
 			}));
 		},
 
-		// Update position
-		setPosition: (x: number, y: number) => {
+		// Updated to accept optional z
+		setPosition: (x: number, y: number, z?: number) => {
 			update(state => ({
 				...state,
-				position: { x, y }
+				position: { x, y, z: z ?? state.position.z }
 			}));
 		},
 
-		// 🎨 NEW: Animation methods
 		setAnimation: (animationType: LogoState['animationType']) => {
 			update(state => ({ ...state, animationType }));
 		},
@@ -150,46 +145,31 @@ function createLogoStore() {
 			update(state => ({ ...state, autoRotateSpeed: speed }));
 		},
 
-		// Update single property
 		updateProperty: <K extends keyof LogoState>(key: K, value: LogoState[K]) => {
 			update(state => ({ ...state, [key]: value }));
 		},
 
-		// Position presets
+		// Position presets — calibrated to your reference points:
+		// top-left: x:54, y:46  |  bottom-right: x:53, y:54
+		// derived center ~x:53.5, y:50 — spacing ~31 units horiz, ~8 units vert
 		presets: {
 			topLeft: () => {
-				update(state => ({
-					...state,
-					position: { x: 10, y: 10 }
-				}));
+				update(state => ({ ...state, position: { ...state.position, x: 54, y: 46 } }));
 			},
 			topRight: () => {
-				update(state => ({
-					...state,
-					position: { x: 85, y: 10 }
-				}));
+				update(state => ({ ...state, position: { ...state.position, x: 85, y: 46 } }));
 			},
 			bottomLeft: () => {
-				update(state => ({
-					...state,
-					position: { x: 10, y: 85 }
-				}));
+				update(state => ({ ...state, position: { ...state.position, x: 54, y: 54 } }));
 			},
 			bottomRight: () => {
-				update(state => ({
-					...state,
-					position: { x: 85, y: 85 }
-				}));
+				update(state => ({ ...state, position: { ...state.position, x: 85, y: 54 } }));
 			},
 			center: () => {
-				update(state => ({
-					...state,
-					position: { x: 50, y: 50 }
-				}));
+				update(state => ({ ...state, position: { ...state.position, x: 53, y: 50 } }));
 			}
 		},
 
-		// Reset to defaults
 		reset: () => {
 			set(initialState);
 		}

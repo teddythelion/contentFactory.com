@@ -2,6 +2,7 @@ import { GoogleAuth } from 'google-auth-library';
 import { readFileSync } from 'fs';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
+import { checkUsage, incrementUsage } from '$lib/services/usage.service';
 //import { Storage } from '@google-cloud/storage';
 //update 3
 // --- Veo 3.1 API Structures ---
@@ -38,7 +39,19 @@ function getMimeType(filename: string): string {
     return mimeTypeMap[ext || 'jpg'] || 'image/jpeg';
 }
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+    // Check authentication
+    const userId = locals.user?.uid;
+    if (!userId) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+
+    // Check usage limits
+    const usageCheck = await checkUsage(userId, 'video');
+    if (!usageCheck.allowed) {
+        return new Response(JSON.stringify({ error: 'limit_reached', usage: usageCheck }), { status: 429 });
+    }
+
     const contentType = request.headers.get('content-type') || '';
     
     let prompt: string;
@@ -170,7 +183,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
         const data = await res.json();
         console.log('✅ Operation created:', data.name);
-        
+        await incrementUsage(userId, 'video');
         return new Response(JSON.stringify({ 
             operation: data.name,
             imageCount: referenceImages.length

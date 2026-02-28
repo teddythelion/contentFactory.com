@@ -5,6 +5,9 @@
 	import { workflowContext } from '$lib/stores/workflow.store';
 	import { imageGenStore, formatTimestamp } from '$lib/stores/imageGen.store';
 	import { saveContentToCloud } from '$lib/utils/saveContent';
+	import { canGenerate, recordGeneration } from '$lib/stores/subscription.store';
+	import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
+	import type { UsageCheckResult } from '$lib/types/subscription';
 
 	// Subscribe to the imageGen store
 	$: state = $imageGenStore;
@@ -14,6 +17,10 @@
 	let saveStatus = '';
 	let savedContentId = '';
 
+	// Paywall state
+	let showUsageLimitModal = false;
+	let usageLimitData: UsageCheckResult | null = null;
+
 	// Read prompt from URL parameter on mount
 	onMount(() => {
 		const urlPrompt = $page.url.searchParams.get('prompt');
@@ -22,7 +29,6 @@
 		if (urlPrompt) {
 			imageGenStore.setPrompt(urlPrompt);
 
-			// If coming from coach, mark workflow as in-progress
 			if (fromCoach === 'coach') {
 				workflowContext.startCurrentStep();
 				imageGenStore.setStatus('✨ Prompt loaded from coach! Ready to generate.');
@@ -31,8 +37,17 @@
 	});
 
 	async function generateImage() {
+		// Check usage before firing the request
+		const usageCheck = await canGenerate('image');
+
+		if (!usageCheck.allowed) {
+			usageLimitData = usageCheck;
+			showUsageLimitModal = true;
+			return;
+		}
+
 		imageGenStore.startGeneration();
-		workflowContext.startCurrentStep(); // Mark workflow step as in-progress
+		workflowContext.startCurrentStep();
 
 		try {
 			const response = await fetch('/api/imageGen', {
@@ -42,6 +57,15 @@
 			});
 
 			const data = await response.json();
+
+			// Handle usage limit response from server (429)
+			if (response.status === 429 || data.error === 'limit_reached') {
+				imageGenStore.setError('');
+				usageLimitData = data.usage || usageCheck;
+				showUsageLimitModal = true;
+				imageGenStore.setStatus('');
+				return;
+			}
 
 			if (data.error) {
 				throw new Error(data.error);
@@ -54,13 +78,12 @@
 				throw new Error('No image URL or base64 data received');
 			}
 
-			// Update imageGen store
 			imageGenStore.setGeneratedImage(finalUrl, imageBase64, state.prompt);
-
-			// Mark workflow step as complete
 			workflowContext.completeCurrentStep(finalUrl);
 
-			// Reset save state
+			// Record successful generation
+			await recordGeneration('image');
+
 			savedContentId = '';
 			saveStatus = '';
 		} catch (err) {
@@ -142,10 +165,16 @@
 		saveStatus = '';
 	}
 
-	// Get current displayable image
 	$: currentImage = imageGenStore.getCurrentImage(state);
 	$: hasImage = imageGenStore.hasImage(state);
 </script>
+
+<!-- Usage Limit Modal -->
+<UsageLimitModal
+	bind:show={showUsageLimitModal}
+	usageData={usageLimitData}
+	generationType="image"
+/>
 
 <div class="flex flex-col gap-6 py-4 lg:flex-row xl:pl-12 2xl:pl-20">
 	<!-- LEFT SIDE: Input Controls -->
@@ -276,7 +305,6 @@
 	<div
 		class="flex flex-1 flex-col gap-4 pt-10 sm:w-full md:w-full lg:w-full lg:pt-15 xl:max-w-2/5 xl:pl-10 2xl:pl-10"
 	>
-		<!-- Image Display -->
 		<div class="relative h-96 w-full overflow-hidden rounded-lg bg-base-300">
 			{#if state.loading}
 				<div
