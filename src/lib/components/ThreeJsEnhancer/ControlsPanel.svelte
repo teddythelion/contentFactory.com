@@ -147,15 +147,15 @@
 					label: 'Video Glow',
 					type: 'range',
 					min: 0,
-					max: 2,
-					step: 0.1
+					max: 1,
+					step: 0.01
 				},
 				{
 					label: 'Shape Glow',
 					type: 'range',
 					min: 0,
-					max: 2,
-					step: 0.1
+					max: 1,
+					step: 0.01
 				}
 			]
 		},
@@ -1044,10 +1044,10 @@
 				captureProgress = progress;
 				captureMessage = message;
 			});
-			captureMessage = 'Video downloaded successfully!';
+			captureMessage = '🎬 Encoding in background! You can navigate away freely.';
 			setTimeout(() => {
 				showCaptureProgress = false;
-			}, 2000);
+			}, 4000);
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : 'Unknown error';
 			alert(`Failed to capture video: ${errorMsg}`);

@@ -1,14 +1,16 @@
 // src/lib/utils/videoCapture.ts
 // FIXED: Deterministic frame capture — explicit render + gl.finish() per frame
+// FIXED: Async job queue — encode fires in background, browser polls for completion
 
 import { get } from 'svelte/store';
 import { videoState } from '$lib/stores/video.store';
-
+import { encodeJobStore } from '$lib/stores/encodeJob.store';
+import { authStore } from '$lib/stores/auth.store';
 const BATCH_SIZE = 30;
 
 export async function captureThreeJsVideo(
 	progressCallback?: (progress: number, message: string) => void
-): Promise<string> {
+): Promise<void> {
 	const $videoState = get(videoState);
 
 	if (!$videoState.videoUrl || !$videoState.isVideoLoaded) {
@@ -31,10 +33,10 @@ export async function captureThreeJsVideo(
 	const width = canvas.width;
 	const height = canvas.height;
 	const totalFrames = Math.ceil(videoDuration * fps);
+	const totalBatches = Math.ceil(totalFrames / BATCH_SIZE);
 
 	progressCallback?.(0, 'Starting capture...');
 
-	// FIX: Pause the video and stop the free-running animation loop before touching currentTime
 	videoElement.pause();
 	(window as any).__threeJsCapturing = true;
 
@@ -42,7 +44,9 @@ export async function captureThreeJsVideo(
 		const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
 		if (!gl) throw new Error('Failed to get WebGL context');
 
-		console.log(`📹 Capturing ${totalFrames} frames at ${width}x${height} in batches of ${BATCH_SIZE}`);
+		console.log(
+			`📹 Capturing ${totalFrames} frames at ${width}x${height} in ${totalBatches} batches of ${BATCH_SIZE}`
+		);
 
 		const sessionId = Date.now().toString();
 		let batchNumber = 0;
@@ -54,37 +58,26 @@ export async function captureThreeJsVideo(
 			for (let i = startFrame; i < endFrame; i++) {
 				const targetTime = i / fps;
 
-				// Seek to exact frame time
 				videoElement.currentTime = targetTime;
 
-				// FIX: Wait for the video element to finish seeking to targetTime
 				await new Promise<void>((resolve) => {
 					videoElement.addEventListener('seeked', () => resolve(), { once: true });
 				});
 
-				// FIX: Update video texture if present
 				const textMesh = (window as any).__textMesh;
 				if (textMesh?._videoTexture) {
 					textMesh._videoTexture.needsUpdate = true;
 				}
 
-				// FIX: Advance all animations (logo, text, particles) to this frame's time
-				// before rendering — these don't update automatically since animate() is paused
 				const updateScene = (window as any).__threeJsUpdateScene;
 				if (updateScene) updateScene(targetTime);
 
-				// FIX: Explicitly drive one render at exactly this frame's time.
 				threeRenderer.render(threeScene, threeCamera);
-
-				// FIX: Flush the GPU command queue so readPixels gets THIS frame's pixels,
-				// not whatever was last in the pipeline.
 				gl.finish();
 
-				// Now it's safe to read pixels
 				const pixels = new Uint8Array(width * height * 4);
 				gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-				// Flip vertically (WebGL origin is bottom-left, image origin is top-left)
 				const flipped = new Uint8Array(width * height * 4);
 				for (let y = 0; y < height; y++) {
 					const sourceRow = (height - 1 - y) * width * 4;
@@ -106,9 +99,12 @@ export async function captureThreeJsVideo(
 				offset += frame.length;
 			}
 
+			const batchSizeMB = (batchData.length / 1024 / 1024).toFixed(2);
+			console.log(`📤 Uploading batch ${batchNumber} of ${totalBatches - 1} — ${batchSizeMB}MB`);
+
 			progressCallback?.(
-				70 + (batchNumber / Math.ceil(totalFrames / BATCH_SIZE)) * 20,
-				`Uploading batch ${batchNumber + 1}...`
+				70 + (batchNumber / totalBatches) * 25,
+				`Uploading batch ${batchNumber + 1} of ${totalBatches}...`
 			);
 
 			const formData = new FormData();
@@ -125,87 +121,51 @@ export async function captureThreeJsVideo(
 				body: formData
 			});
 
-			if (!response.ok) throw new Error('Batch upload failed');
+			console.log(
+				`📤 Batch ${batchNumber} response: ${response.status} ${response.ok ? '✅' : '❌'}`
+			);
 
+			if (!response.ok)
+				throw new Error(`Batch ${batchNumber} upload failed with status ${response.status}`);
+
+			console.log(`✅ Batch ${batchNumber} confirmed saved`);
 			batchNumber++;
 		}
 
-		// Encode
-		progressCallback?.(95, 'Encoding video...');
+		console.log(`✅ All ${totalBatches} batches uploaded — kicking off background encode...`);
+
+		// Kick off background encode — returns immediately with jobId
+		progressCallback?.(97, 'Starting background encode...');
+		//check for authentication
+		const userId = get(authStore).user?.uid;
+		if (!userId) throw new Error('Not authenticated');
 
 		const encodeResponse = await fetch('/api/encodeFromBatches', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ sessionId, totalFrames, fps, width, height })
+			body: JSON.stringify({ sessionId, totalFrames, fps, width, height, userId })
 		});
+
+		console.log(
+			`🎬 Encode kickoff response: ${encodeResponse.status} ${encodeResponse.ok ? '✅' : '❌'}`
+		);
 
 		if (!encodeResponse.ok) {
 			const error = await encodeResponse.json();
-			throw new Error(error.details || 'Encoding failed');
+			throw new Error(error.details || 'Failed to start encode');
 		}
 
-		const result = await encodeResponse.json();
+		const { jobId } = await encodeResponse.json();
+		console.log(`🎬 Encode job started — jobId: ${jobId}`);
 
-		// Convert base64 to blob
-		const videoData = atob(result.videoBase64);
-		const videoArray = new Uint8Array(videoData.length);
-		for (let i = 0; i < videoData.length; i++) {
-			videoArray[i] = videoData.charCodeAt(i);
-		}
-		const videoBlob = new Blob([videoArray], { type: 'video/mp4' });
+		// Store jobId so the layout poller picks it up across page navigation
+		encodeJobStore.set({ jobId, status: 'processing' });
 
-		console.log(`📊 Final video: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
-
-		// Upload to GCS
-		progressCallback?.(96, 'Uploading to cloud storage...');
-
-		const uploadFormData = new FormData();
-		uploadFormData.append('file', videoBlob, `enhanced-video-${sessionId}.mp4`);
-
-		const uploadResponse = await fetch('/api/uploadEnhancedVideo', {
-			method: 'POST',
-			body: uploadFormData
-		});
-
-		if (!uploadResponse.ok) {
-			const error = await uploadResponse.json();
-			throw new Error(error.error || 'Failed to upload to cloud storage');
-		}
-
-		const uploadResult = await uploadResponse.json();
-		const gcsUrl = uploadResult.publicUrl;
-		const contentId = uploadResult.contentId;
-
-		console.log(`☁️ Uploaded to GCS: ${gcsUrl}`);
-		console.log(`📁 Content ID: ${contentId}`);
-
-		videoState.setProcessedVideo(gcsUrl);
-
-		// Download locally
-		progressCallback?.(98, 'Preparing download...');
-		const downloadUrl = URL.createObjectURL(videoBlob);
-		const downloadLink = document.createElement('a');
-		downloadLink.href = downloadUrl;
-		downloadLink.download = `enhanced-video-${sessionId}.mp4`;
-		document.body.appendChild(downloadLink);
-		downloadLink.click();
-		document.body.removeChild(downloadLink);
-		setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-
-		progressCallback?.(100, 'Complete! Video downloaded and saved to cloud.');
-
-		window.dispatchEvent(
-			new CustomEvent('videoEnhanced', { detail: { gcsUrl, contentId, sessionId } })
-		);
-
-		return gcsUrl;
-
+		progressCallback?.(100, 'Encoding started!');
 	} catch (error) {
 		console.error('❌ Capture failed:', error);
 		throw error;
 	} finally {
-		// FIX: Always restore normal playback and re-enable the animation loop,
-		// even if capture threw an error midway through.
 		(window as any).__threeJsCapturing = false;
 		videoElement.currentTime = 0;
 		videoElement.play().catch(() => {});

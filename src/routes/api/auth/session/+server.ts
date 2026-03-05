@@ -5,11 +5,10 @@ export async function POST({ request, cookies }) {
   try {
     const { idToken } = await request.json();
     
-    // Create session cookie (expires in 5 days)
-    const expiresIn = 60 * 60 * 24 * 5 * 1000;
+    // FIX: Extended to 14 days to prevent session expiry during long operations
+    const expiresIn = 60 * 60 * 24 * 14 * 1000;
     const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
     
-    // Set secure cookie
     cookies.set('__session', sessionCookie, {
       maxAge: expiresIn,
       httpOnly: true,

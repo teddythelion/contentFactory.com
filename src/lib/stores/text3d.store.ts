@@ -87,7 +87,7 @@ const initialState: Text3DState = {
 	scale3D: 1.0,
 
 	// Position
-	position3D: { x: 0, y: 0, z: 3 },
+	position3D: { x: 0, y: 0, z: 4.1 },
 
 	// Rotation
 	rotation3D: {

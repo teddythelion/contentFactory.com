@@ -15,7 +15,7 @@ export const POST: RequestHandler = async ({ request }) => {
     const frameData = formData.get('frameData') as File;
 
     console.log(`📦 Batch ${batchNumber}: ${frameCount} frames starting at ${startFrame}`);
-
+    
     // Create session directory
     const tempDir = path.join(process.cwd(), 'temp', `session-${sessionId}`);
     if (!existsSync(tempDir)) {

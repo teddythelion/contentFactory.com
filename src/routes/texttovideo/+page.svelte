@@ -112,7 +112,7 @@
 
 	async function generateFromPrompt() {
 		try {
-			const res = await fetch('/api/veo2-simple/generate', {
+			const res = await fetch('/api/veo2-simple/generateFromImage', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ prompt, duration, aspectRatios })

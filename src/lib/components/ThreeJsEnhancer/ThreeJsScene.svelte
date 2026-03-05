@@ -75,7 +75,7 @@
 		}
 	}
 
-	onMount(async () => {
+	onMount(() => {
 		if (!videoUrl) return;
 
 		initThreeJS();
@@ -86,8 +86,7 @@
 		canvas.addEventListener('touchmove', onTouchMove);
 		canvas.addEventListener('touchend', onTouchEnd);
 
-		await tick();
-		animate();
+		tick().then(() => animate());
 
 		return () => {
 			if (animationId) {
@@ -262,6 +261,8 @@
 			createMesh(selectedShape);
 			videoElement!.play().catch((err) => console.error('Play error:', err));
 			animate();
+			// FIX: Notify enhancer that the scene is truly ready to display
+			window.dispatchEvent(new CustomEvent('threeJsSceneReady'));
 		});
 
 		window.addEventListener('resize', handleResize);

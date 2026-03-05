@@ -51,7 +51,7 @@ const initialState: LogoState = {
 		z: 0
 	},
 
-	scale: 0.3,
+	scale: 0.9,
 	opacity: 0.9,
 
 	startTime: 0,
