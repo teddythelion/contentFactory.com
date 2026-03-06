@@ -126,16 +126,16 @@
 				{
 					label: 'Ambient',
 					type: 'range',
-					min: 0,
-					max: 2,
-					step: 0.1
+					min: 0.3,
+					max: 2.5,
+					step: 0.01
 				},
 				{
 					label: 'Directional',
 					type: 'range',
-					min: 0,
-					max: 2,
-					step: 0.1
+					min: 0.2,
+					max: 2.5,
+					step: 0.01
 				}
 			]
 		},

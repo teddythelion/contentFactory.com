@@ -36,9 +36,11 @@ async function runEncode(
 	height: number,
 	userId: string
 ) {
-	const sessionDir = path.join(process.cwd(), 'temp', `session-${sessionId}`);
-	const outputPath = path.join(process.cwd(), 'temp', `output-${sessionId}.mp4`);
+	const isLinux = process.platform === 'linux';
+	const baseTemp = isLinux ? '/dev/shm/contentfactory' : path.join(process.cwd(), 'temp');
 
+	const sessionDir = path.join(baseTemp, `session-${sessionId}`);
+	const outputPath = path.join(baseTemp, `output-${sessionId}.mp4`);
 	try {
 		console.log(`🎬 Encoding ${totalFrames} frames from session ${sessionId}`);
 		console.log(`🖼️ Converting raw frames to PNG (${PARALLEL_BATCH_SIZE} at a time)...`);

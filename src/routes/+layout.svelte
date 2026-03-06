@@ -4,30 +4,23 @@
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Footer from '$lib/components/Footer.svelte';
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { encodeJobStore } from '$lib/stores/encodeJob.store';
 
   let { children } = $props();
 
-  // Toast state
   let toastVisible = $state(false);
   let toastMessage = $state('');
   let toastType = $state<'success' | 'error'>('success');
+  let toastTimeout: ReturnType<typeof setTimeout> | null = null;
   let pollInterval: ReturnType<typeof setInterval> | null = null;
 
   function showToast(message: string, type: 'success' | 'error' = 'success') {
+    if (toastTimeout) clearTimeout(toastTimeout);
     toastMessage = message;
     toastType = type;
     toastVisible = true;
-    setTimeout(() => { toastVisible = false; }, 6000);
-  }
-
-  function triggerDownload(gcsUrl: string) {
-    const link = document.createElement('a');
-    link.href = gcsUrl;
-    link.download = `enhanced-video-${Date.now()}.mp4`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    toastTimeout = setTimeout(() => { toastVisible = false; }, 30000);
   }
 
   function startPolling(jobId: string) {
@@ -44,8 +37,11 @@
           clearInterval(pollInterval!);
           pollInterval = null;
           encodeJobStore.clear();
-          triggerDownload(job.gcsUrl);
-          showToast('✅ Your enhanced video is ready! Downloading now...', 'success');
+          showToast('✅ Your enhanced video has been saved to your library!', 'success');
+          // Navigate to library after 2 seconds
+          setTimeout(() => {
+            goto('/content-library');
+          }, 2000);
         } else if (job.status === 'error') {
           clearInterval(pollInterval!);
           pollInterval = null;
@@ -59,7 +55,6 @@
   }
 
   onMount(() => {
-    // Resume polling if there's an active job from a previous page
     const unsubscribe = encodeJobStore.subscribe((job) => {
       if (job?.status === 'processing' && !pollInterval) {
         startPolling(job.jobId);
@@ -69,6 +64,7 @@
     return () => {
       unsubscribe();
       if (pollInterval) clearInterval(pollInterval);
+      if (toastTimeout) clearTimeout(toastTimeout);
     };
   });
 </script>
@@ -78,14 +74,14 @@
   <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
 </svelte:head>
 
-<!-- Global encode toast notification -->
 {#if toastVisible}
-  <div
-    class="encode-toast {toastType}"
-    role="alert"
-  >
-    <span>{toastMessage}</span>
-    <button onclick={() => toastVisible = false} aria-label="Dismiss">✕</button>
+  <div class="encode-toast {toastType}" role="alert">
+    <div class="toast-icon">{toastType === 'success' ? '✅' : '❌'}</div>
+    <div class="toast-body">
+      <p class="toast-title">{toastType === 'success' ? 'Video Ready!' : 'Encoding Failed'}</p>
+      <p class="toast-message">{toastMessage}</p>
+    </div>
+    <button onclick={() => { toastVisible = false; }} aria-label="Dismiss">✕</button>
   </div>
 {/if}
 
@@ -102,47 +98,66 @@
     right: 24px;
     z-index: 9999;
     display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 16px 20px;
-    border-radius: 10px;
-    font-size: 0.95rem;
-    font-weight: 500;
-    max-width: 420px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    animation: slideIn 0.3s ease;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 18px 20px;
+    border-radius: 12px;
+    max-width: 440px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+    animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .encode-toast.success {
-    background: #1a2e1a;
-    border: 1px solid #4ade80;
-    color: #4ade80;
+    background: #0f2318;
+    border: 1.5px solid #4ade80;
   }
 
   .encode-toast.error {
-    background: #2e1a1a;
-    border: 1px solid #f87171;
-    color: #f87171;
+    background: #230f0f;
+    border: 1.5px solid #f87171;
+  }
+
+  .toast-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .toast-body {
+    flex: 1;
+  }
+
+  .toast-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 4px;
+  }
+
+  .toast-message {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.8);
   }
 
   .encode-toast button {
     background: none;
     border: none;
     cursor: pointer;
-    color: inherit;
-    opacity: 0.7;
+    color: rgba(255, 255, 255, 0.5);
     font-size: 1rem;
     padding: 0;
-    margin-left: auto;
     flex-shrink: 0;
+    margin-top: 2px;
+    transition: color 0.2s;
   }
 
   .encode-toast button:hover {
-    opacity: 1;
+    color: rgba(255, 255, 255, 0.9);
   }
 
   @keyframes slideIn {
-    from { transform: translateY(20px); opacity: 0; }
+    from { transform: translateY(30px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
 </style>

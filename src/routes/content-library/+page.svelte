@@ -16,7 +16,7 @@
 		model?: string;
 	}
 
-	let activeTab: 'image' | 'video' = 'image';
+	let activeTab: 'image' | 'video' = 'video'; // Videos first
 	let items: ContentItem[] = [];
 	let loading = false;
 	let error: string | null = null;
@@ -50,12 +50,10 @@
 	function formatDate(timestamp: any): string {
 		if (!timestamp) return '';
 		try {
-			// Handle Firestore Timestamp format
 			if (timestamp._seconds) {
 				const date = new Date(timestamp._seconds * 1000);
 				return date.toLocaleDateString();
 			}
-			// Handle regular Date
 			const date = new Date(timestamp);
 			return date.toLocaleDateString();
 		} catch {
@@ -72,13 +70,17 @@
 	}
 
 	async function downloadItem(item: ContentItem) {
+		const fileName = item.title.endsWith('.mp4') || item.title.endsWith('.jpg') 
+			? item.title 
+			: `${item.title}.${item.format}`;
+		
 		const link = document.createElement('a');
-		link.href = item.publicUrl;
-		link.download = item.title;
+		link.href = `/api/content/download?url=${encodeURIComponent(item.publicUrl)}&name=${encodeURIComponent(fileName)}`;
+		link.download = fileName;
 		document.body.appendChild(link);
 		link.click();
 		document.body.removeChild(link);
-	}
+}
 
 	async function deleteItem(contentId: string) {
 		if (!confirm('Delete this item?')) return;
@@ -102,10 +104,8 @@
 
 	async function loadIntoEditor(item: ContentItem) {
 		if (item.type === 'image') {
-			// TODO: Load into image editor
 			console.log('Loading image into editor:', item);
 		} else {
-			// TODO: Load into video enhancer
 			console.log('Loading video into enhancer:', item);
 		}
 	}
@@ -121,18 +121,8 @@
 			<p class="text-gray-400">Your saved images and videos</p>
 		</div>
 
-		<!-- Tabs -->
+		<!-- Tabs — Videos first -->
 		<div class="mb-8 flex gap-4 border-b border-white/10">
-			<button
-				on:click={() => (activeTab = 'image')}
-				class={`px-4 pb-3 font-semibold transition-colors ${
-					activeTab === 'image'
-						? 'border-b-2 border-blue-400 text-blue-400'
-						: 'text-gray-400 hover:text-white'
-				}`}
-			>
-				📸 Images ({items.filter((i) => i.type === 'image').length})
-			</button>
 			<button
 				on:click={() => (activeTab = 'video')}
 				class={`px-4 pb-3 font-semibold transition-colors ${
@@ -142,6 +132,16 @@
 				}`}
 			>
 				🎬 Videos ({items.filter((i) => i.type === 'video').length})
+			</button>
+			<button
+				on:click={() => (activeTab = 'image')}
+				class={`px-4 pb-3 font-semibold transition-colors ${
+					activeTab === 'image'
+						? 'border-b-2 border-blue-400 text-blue-400'
+						: 'text-gray-400 hover:text-white'
+				}`}
+			>
+				📸 Images ({items.filter((i) => i.type === 'image').length})
 			</button>
 		</div>
 
@@ -202,7 +202,7 @@
 									class="h-full w-full object-cover"
 									style="object-position: center 35%;"
 									controls={false}
-								/>
+								></video>
 								<div
 									class="absolute inset-0 flex items-center justify-center bg-black/30 transition-colors group-hover:bg-black/40"
 								>
