@@ -453,7 +453,7 @@
 			{#if savedContentId}
 				<div class="alert py-2 alert-success">
 					<span class="text-sm"
-						>✅ Saved! <a href="/my-content" class="link">View in My Content</a></span
+						>✅ Saved! <a href="/content-library" class="link">View in Content Library</a></span
 					>
 				</div>
 			{/if}
