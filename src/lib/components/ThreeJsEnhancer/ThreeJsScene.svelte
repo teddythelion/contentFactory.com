@@ -240,7 +240,8 @@
 		videoElement.crossOrigin = 'anonymous';
 		videoElement.loop = true;
 		videoElement.muted = true;
-
+		videoElement.setAttribute('playsinline', '');
+		videoElement.setAttribute('webkit-playsinline', '');
 		(window as any).__threeJsVideo = videoElement;
 
 		if (videoUrl.startsWith('data:')) {

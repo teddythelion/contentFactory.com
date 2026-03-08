@@ -1,8 +1,8 @@
 <footer class="footer bg-base-200 p-10 text-base-content sm:footer-horizontal">
 	<nav>
-		<h6 class="footer-title">Services</h6>
-		<a href="/" class="link link-hover">Branding</a>
-		<a href="/" class="link link-hover">Design</a>
+		<h4 class="footer-title">We Offer</h4>
+		<a href="/services" class="link link-hover">Services</a>
+		<a href="/branding" class="link link-hover">Branding</a>
 		<a href="/" class="link link-hover">Marketing</a>
 		<a href="/" class="link link-hover">Advertisement</a>
 	</nav>

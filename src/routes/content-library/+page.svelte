@@ -202,7 +202,11 @@
 									class="h-full w-full object-cover"
 									style="object-position: center 35%;"
 									controls={false}
-								></video>
+									muted
+ 									playsinline
+								>
+								 <track kind="captions" />								
+							</video>
 								<div
 									class="absolute inset-0 flex items-center justify-center bg-black/30 transition-colors group-hover:bg-black/40"
 								>
@@ -228,21 +232,21 @@
 									class="flex-1 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
 									title="Download"
 								>
-									⬇️
+								Download ⬇️
 								</button>
 								<button
 									on:click={() => loadIntoEditor(item)}
 									class="flex-1 rounded bg-gray-700 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-600"
 									title="Load into editor"
 								>
-									✏️
+									Edit ✏️
 								</button>
 								<button
 									on:click={() => deleteItem(item.contentId)}
 									class="flex-1 rounded bg-red-600/20 px-3 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/30 hover:text-red-300"
 									title="Delete"
 								>
-									🗑️
+									Trash 🗑️
 								</button>
 							</div>
 						</div>

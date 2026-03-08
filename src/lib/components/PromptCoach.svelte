@@ -121,7 +121,7 @@
 		workflowContext.startCurrentStep();
 		workflowContext.setGeneratedPrompt(promptText);
 		const params = new URLSearchParams({
-			prompt: promptText,
+			prompt: ` ${promptText} - Add your NICHE/INDUSTRY `,
 			from: 'coach'
 		});
 		goto(`/texttoimage?${params.toString()}`);
@@ -246,7 +246,7 @@
 			<div class="mt-4 space-y-2">
 				<div class="flex items-center gap-2">
 					<span>✨</span>
-					<span class="text-sm font-semibold">Expert Prompt Options</span>
+					<span class="text-sm font-semibold">Expert Prompt Options-ADD YOUR NICHE/INDUSTRY</span>
 				</div>
 
 				{#each suggestedPrompts as prompt, index}
