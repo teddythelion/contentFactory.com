@@ -7,13 +7,14 @@
 	import { threeJsState } from '$lib/stores/threeJs.store';
 	import ThreeJsScene from './ThreeJsScene.svelte';
 	import ControlsPanel from './ControlsPanel.svelte';	
-	import { enhancedContentState } from '$lib/stores/enhancedContent.store.ts';
+	import { enhancedContentState } from '$lib/stores/enhancedContent.store';
 	import { authStore } from '$lib/stores/auth.store';
-
-	export let contentId: string = '';
+	import { audioSessionStore } from '$lib/stores/audioSession.store';
+	import { audioStudioStore } from '$lib/stores/audioStudio.store';
+	
 	export let videoUrl: string;
 	export let onClose: () => void;
-
+	export let audioSessionId: string | null = null;
 	if (videoUrl) videoState.setVideo(videoUrl);
 
 	$: if (videoUrl) {
@@ -37,11 +38,20 @@
 	}
 
 	onMount(() => {
-		window.addEventListener('threeJsSceneReady', onSceneReady);
-		return () => {
-			window.removeEventListener('threeJsSceneReady', onSceneReady);
-			isSceneReady = false;
-		};
+	// Write audioSessionId into the store so videoCapture.ts
+	// can read it without prop drilling through ControlsPanel
+	audioSessionStore.set(audioSessionId);
+
+	window.addEventListener('threeJsSceneReady', onSceneReady);
+
+	return () => {
+		window.removeEventListener('threeJsSceneReady', onSceneReady);
+		isSceneReady = false;
+		// Clear the store when the enhancer closes
+		// so it doesn't bleed into the next session
+		audioSessionStore.clear();
+		audioStudioStore.stopAll(); 
+	};
 	});
 
 	type ModalView = 'enhance' | 'post';
@@ -174,7 +184,7 @@
 			</div>
 
 			<!-- Controls Panel (Right) -->
-			<ControlsPanel {onSaveAndPost} />
+			<ControlsPanel />
 		</div>
 	</div>
 {/if}

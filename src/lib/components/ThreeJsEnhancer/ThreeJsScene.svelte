@@ -9,7 +9,7 @@
 	import ThreeJsText from './ThreeJsText.svelte';
 	import ThreeJsLogo from './ThreeJsLogo.svelte';
 	import { text3DState } from '$lib/stores/text3d.store';
-
+	import { audioStudioStore } from '$lib/stores/audioStudio.store';
 	let threeJsTextComponent: ThreeJsText;
 	let threeJsLogoComponent: ThreeJsLogo;
 
@@ -28,9 +28,8 @@
 	let directionalLight: THREE.DirectionalLight | null = null;
 	let particleSystem: THREE.Points | null = null;
 	let particleGeometry: THREE.BufferGeometry | null = null;
-	let particleMaterial: THREE.PointsMaterial | THREE.ShaderMaterial | null = null;
+	let particleMaterial: THREE.PointsMaterial | THREE.ShaderMaterial | null = null;	
 
-	// Subscribe to 3D state
 	$: selectedShape = $threeJsState.selectedShape;
 	$: rotationX = $threeJsState.rotationX;
 	$: rotationY = $threeJsState.rotationY;
@@ -64,14 +63,51 @@
 	$: particleColorMode = $threeJsState.particleColorMode;
 	$: particleGradientColor = $threeJsState.particleGradientColor;
 
-	// Touch/drag state
 	let isDragging = false;
 	let previousMousePosition = { x: 0, y: 0 };
+	let isVideoPaused = false;	
+	let videoDuration = 0;
+	// ── Video player controls ──────────────────────────────────────────────
+	let currentTime = 0;
+	let duration = 0;
+	let isScrubbing = false;
+	let playerInterval: ReturnType<typeof setInterval> | null = null;
+
 	$: if (scene) {
 		if (fogEnabled) {
 			scene.fog = new THREE.Fog(new THREE.Color(fogColor), fogNear, fogFar);
 		} else {
 			scene.fog = null;
+		}
+	}
+			function startPlayerPolling() {
+				playerInterval = setInterval(() => {
+				const vid = (window as any).__threeJsVideo as HTMLVideoElement | null;
+				if (!vid) return;
+				if (!isScrubbing) currentTime = vid.currentTime;
+				duration = vid.duration || 0;
+						}, 100);
+			}
+
+			
+
+			function formatTime(s: number): string {
+				if (!isFinite(s)) return '0:00.0';
+				const m = Math.floor(s / 60);
+				const sec = (s % 60).toFixed(1).padStart(4, '0');
+				return `${m}:${sec}`;
+			}
+
+
+//need to remove this
+	function togglePlayPause() {
+		if (!videoElement) return;
+		if (videoElement.paused) {
+			videoElement.play().catch((err) => console.error('Play error:', err));
+			isVideoPaused = false;
+		} else {
+			videoElement.pause();
+			isVideoPaused = true;
 		}
 	}
 
@@ -89,22 +125,14 @@
 		tick().then(() => animate());
 
 		return () => {
-			if (animationId) {
-				cancelAnimationFrame(animationId);
-				animationId = null;
-			}
-
+			 if (playerInterval) clearInterval(playerInterval);
+			if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
+			audioStudioStore.stopAll();
 			if (particleSystem) {
 				scene.remove(particleSystem);
-				if (particleGeometry) {
-					particleGeometry.dispose();
-					particleGeometry = null;
-				}
+				if (particleGeometry) { particleGeometry.dispose(); particleGeometry = null; }
 				if (particleMaterial) {
-					if (
-						particleMaterial instanceof THREE.ShaderMaterial ||
-						particleMaterial instanceof THREE.PointsMaterial
-					) {
+					if (particleMaterial instanceof THREE.ShaderMaterial || particleMaterial instanceof THREE.PointsMaterial) {
 						particleMaterial.dispose();
 					}
 					particleMaterial = null;
@@ -116,11 +144,8 @@
 				scene.remove(mesh);
 				if (mesh.geometry) mesh.geometry.dispose();
 				if (mesh.material) {
-					if (Array.isArray(mesh.material)) {
-						mesh.material.forEach((m) => m.dispose());
-					} else {
-						mesh.material.dispose();
-					}
+					if (Array.isArray(mesh.material)) { mesh.material.forEach((m) => m.dispose()); }
+					else { mesh.material.dispose(); }
 				}
 				mesh = null;
 			}
@@ -128,19 +153,10 @@
 			if (ambientLight) { scene.remove(ambientLight); ambientLight = null; }
 			if (directionalLight) { scene.remove(directionalLight); directionalLight = null; }
 
-			if (videoElement) {
-				videoElement.pause();
-				videoElement.src = '';
-				videoElement.load();
-				videoElement = null;
-			}
+			if (videoElement) { videoElement.pause(); videoElement.src = ''; videoElement.load(); videoElement = null; }
 			if (videoTexture) { videoTexture.dispose(); videoTexture = null; }
 
-			if (renderer) {
-				renderer.dispose();
-				renderer.forceContextLoss();
-				renderer = null;
-			}
+			if (renderer) { renderer.dispose(); renderer.forceContextLoss(); renderer = null; }
 
 			if (scene) {
 				while (scene.children.length > 0) {
@@ -149,17 +165,13 @@
 					if (child instanceof THREE.Mesh) {
 						if (child.geometry) child.geometry.dispose();
 						if (child.material) {
-							if (Array.isArray(child.material)) {
-								child.material.forEach((m) => m.dispose());
-							} else {
-								child.material.dispose();
-							}
+							if (Array.isArray(child.material)) { child.material.forEach((m) => m.dispose()); }
+							else { child.material.dispose(); }
 						}
 					}
 				}
 			}
 
-			// FIX: Clear all globals including new renderer/scene/camera refs
 			(window as any).__threeJsCanvas = null;
 			(window as any).__threeJsVideo = null;
 			(window as any).__threeJsRenderer = null;
@@ -176,21 +188,12 @@
 				canvas.removeEventListener('touchmove', onTouchMove);
 				canvas.removeEventListener('touchend', onTouchEnd);
 			}
+			window.removeEventListener('resize', handleResize);
 		};
 	});
 
 	function initThreeJS() {
-		if (!videoUrl) {
-			console.error('Cannot initialize Three.js: videoUrl is null');
-			return;
-		}
-		if ($text3DState.fogEnabled) {
-			scene.fog = new THREE.Fog(
-				new THREE.Color($text3DState.fogColor),
-				$text3DState.fogNear,
-				$text3DState.fogFar
-			);
-		}
+		if (!videoUrl) { console.error('Cannot initialize Three.js: videoUrl is null'); return; }
 
 		scene = new THREE.Scene();
 		scene.background = new THREE.Color(0x1a1a1a);
@@ -199,18 +202,15 @@
 		camera.position.z = cameraDistance;
 
 		renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-		renderer.setSize(canvas.clientWidth * 2, canvas.clientHeight * 2, false);
 		renderer.setPixelRatio(window.devicePixelRatio);
+		renderer.setSize(canvas.clientWidth, canvas.clientHeight);
 
-		// EXPOSE GLOBALS FOR VIDEO CAPTURE
 		(window as any).__threeJsCanvas = canvas;
 		(window as any).__threeJsRenderer = renderer;
 		(window as any).__threeJsScene = scene;
 		(window as any).__threeJsCamera = camera;
 		(window as any).__threeJsCapturing = false;
 
-		// FIX: Expose scene updater so videoCapture can advance animations
-		// (logo, text, particles) to the correct time per frame before rendering
 		(window as any).__threeJsUpdateScene = (time: number) => {
 			if (mesh) {
 				mesh.rotation.x = rotationX;
@@ -229,17 +229,19 @@
 			if (directionalLight) directionalLight.intensity = directionalIntensity;
 		};
 
-		ambientLight = new THREE.AmbientLight(0xffffff, ambientIntensity);
+		ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
 		scene.add(ambientLight);
 
-		directionalLight = new THREE.DirectionalLight(0xffffff, directionalIntensity);
+		directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
 		directionalLight.position.set(5, 5, 5);
 		scene.add(directionalLight);
+
+		threeJsState.updateMultiple({ ambientIntensity: 1.2, directionalIntensity: 1.5 });
 
 		videoElement = document.createElement('video');
 		videoElement.crossOrigin = 'anonymous';
 		videoElement.loop = true;
-		videoElement.muted = true;
+		videoElement.muted = false;
 		videoElement.setAttribute('playsinline', '');
 		videoElement.setAttribute('webkit-playsinline', '');
 		(window as any).__threeJsVideo = videoElement;
@@ -259,11 +261,16 @@
 		videoElement.addEventListener('loadedmetadata', () => {
 			videoTexture = new THREE.VideoTexture(videoElement!);
 			videoTexture.colorSpace = THREE.SRGBColorSpace;
+			videoTexture.minFilter = THREE.LinearFilter;
+			videoTexture.magFilter = THREE.LinearFilter;
+			videoTexture.generateMipmaps = false;
+
 			createMesh(selectedShape);
 			videoElement!.play().catch((err) => console.error('Play error:', err));
 			animate();
-			// FIX: Notify enhancer that the scene is truly ready to display
 			window.dispatchEvent(new CustomEvent('threeJsSceneReady'));
+			startPlayerPolling(); 
+			audioStudioStore.connectVideo(videoElement!);
 		});
 
 		window.addEventListener('resize', handleResize);
@@ -274,16 +281,15 @@
 		if (mesh) {
 			scene.remove(mesh);
 			mesh.geometry.dispose();
-			if (Array.isArray(mesh.material)) {
-				mesh.material.forEach((mat) => mat.dispose());
-			} else {
-				mesh.material.dispose();
-			}
+			if (Array.isArray(mesh.material)) { mesh.material.forEach((mat) => mat.dispose()); }
+			else { mesh.material.dispose(); }
 		}
 
 		let geometry: THREE.BufferGeometry;
+		let applyDiamondRotation = false;
 
 		switch (shape) {
+			// ── ORIGINAL ─────────────────────────────────────────────────
 			case 'sphere':
 				geometry = new THREE.SphereGeometry(2, 64, 64);
 				break;
@@ -299,10 +305,80 @@
 			case 'icosahedron':
 				geometry = new THREE.IcosahedronGeometry(2, 4);
 				break;
-			case 'plane':
-			default:
-				geometry = new THREE.PlaneGeometry(6, 4);
+
+			// ── NEW 3D PRIMITIVES ─────────────────────────────────────────
+			case 'cone':
+				geometry = new THREE.ConeGeometry(2, 4, 64);
 				break;
+			case 'ring':
+				// Thin torus — flat disc/ring shape
+				geometry = new THREE.TorusGeometry(2, 0.2, 16, 100);
+				break;
+			case 'octahedron':
+				geometry = new THREE.OctahedronGeometry(2, 2);
+				break;
+			case 'tetrahedron':
+				geometry = new THREE.TetrahedronGeometry(2.5, 2);
+				break;
+
+			// ── FLAT SHAPES ───────────────────────────────────────────────
+			case 'diamond': {
+				// Aspect-correct plane rotated 45° — classic card/diamond orientation
+				const aspect =
+					videoElement && videoElement.videoWidth && videoElement.videoHeight
+						? videoElement.videoWidth / videoElement.videoHeight
+						: 16 / 9;
+				geometry = new THREE.PlaneGeometry(4 * aspect, 4);
+				applyDiamondRotation = true;
+				break;
+			}
+			case 'hexagon': {
+				// Custom 6-sided flat polygon fan-triangulated from center
+				const r = 2.5;
+				const verts: number[] = [];
+				const uvs: number[] = [];
+				for (let i = 0; i < 6; i++) {
+					const a0 = (i / 6) * Math.PI * 2;
+					const a1 = ((i + 1) / 6) * Math.PI * 2;
+					verts.push(0, 0, 0);
+					uvs.push(0.5, 0.5);
+					verts.push(Math.cos(a0) * r, Math.sin(a0) * r, 0);
+					uvs.push(0.5 + Math.cos(a0) * 0.5, 0.5 + Math.sin(a0) * 0.5);
+					verts.push(Math.cos(a1) * r, Math.sin(a1) * r, 0);
+					uvs.push(0.5 + Math.cos(a1) * 0.5, 0.5 + Math.sin(a1) * 0.5);
+				}
+				const hexGeo = new THREE.BufferGeometry();
+				hexGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+				hexGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+				hexGeo.computeVertexNormals();
+				geometry = hexGeo;
+				break;
+			}
+			case 'cinematic': {
+				// 2.39:1 ultra-wide Scope aspect — ignores video's native ratio intentionally
+				geometry = new THREE.PlaneGeometry(4 * 2.39, 4);
+				break;
+			}
+
+			// ── ORGANIC / ABSTRACT ────────────────────────────────────────
+			case 'torusknot':
+				geometry = new THREE.TorusKnotGeometry(1.8, 0.5, 200, 32, 2, 3);
+				break;
+			case 'twistedtorus':
+				// Standard torus with low tubular segments for a faceted twisted look
+				geometry = new THREE.TorusGeometry(2, 0.7, 8, 80);
+				break;
+
+			// ── DEFAULT ───────────────────────────────────────────────────
+			case 'plane':
+			default: {
+				const aspect =
+					videoElement && videoElement.videoWidth && videoElement.videoHeight
+						? videoElement.videoWidth / videoElement.videoHeight
+						: 16 / 9;
+				geometry = new THREE.PlaneGeometry(4 * aspect, 4);
+				break;
+			}
 		}
 
 		const material = new THREE.MeshStandardMaterial({
@@ -316,6 +392,7 @@
 
 		mesh = new THREE.Mesh(geometry, material);
 		mesh.scale.set(scale, scale, scale);
+		if (applyDiamondRotation) mesh.rotation.z = Math.PI / 4;
 		scene.add(mesh);
 	}
 
@@ -325,7 +402,6 @@
 		canvas.width = size;
 		canvas.height = size;
 		const ctx = canvas.getContext('2d')!;
-
 		const center = size / 2;
 		ctx.clearRect(0, 0, size, size);
 
@@ -333,7 +409,6 @@
 		gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
 		gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
 		gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
 		ctx.fillStyle = gradient;
 
 		switch (shape) {
@@ -372,30 +447,17 @@
 		return new THREE.CanvasTexture(canvas);
 	}
 
-	function drawStar(
-		ctx: CanvasRenderingContext2D,
-		cx: number,
-		cy: number,
-		spikes: number,
-		outerRadius: number,
-		innerRadius: number
-	) {
+	function drawStar(ctx: CanvasRenderingContext2D, cx: number, cy: number, spikes: number, outerRadius: number, innerRadius: number) {
 		let rot = (Math.PI / 2) * 3;
-		let x = cx;
-		let y = cy;
+		let x = cx; let y = cy;
 		const step = Math.PI / spikes;
-
 		ctx.beginPath();
 		ctx.moveTo(cx, cy - outerRadius);
 		for (let i = 0; i < spikes; i++) {
-			x = cx + Math.cos(rot) * outerRadius;
-			y = cy + Math.sin(rot) * outerRadius;
-			ctx.lineTo(x, y);
-			rot += step;
-			x = cx + Math.cos(rot) * innerRadius;
-			y = cy + Math.sin(rot) * innerRadius;
-			ctx.lineTo(x, y);
-			rot += step;
+			x = cx + Math.cos(rot) * outerRadius; y = cy + Math.sin(rot) * outerRadius;
+			ctx.lineTo(x, y); rot += step;
+			x = cx + Math.cos(rot) * innerRadius; y = cy + Math.sin(rot) * innerRadius;
+			ctx.lineTo(x, y); rot += step;
 		}
 		ctx.lineTo(cx, cy - outerRadius);
 		ctx.closePath();
@@ -406,22 +468,8 @@
 		const topCurveHeight = size * 0.3;
 		ctx.moveTo(x, y + topCurveHeight);
 		ctx.bezierCurveTo(x, y, x - size / 2, y, x - size / 2, y + topCurveHeight);
-		ctx.bezierCurveTo(
-			x - size / 2,
-			y + (size + topCurveHeight) / 2,
-			x,
-			y + (size + topCurveHeight) / 2,
-			x,
-			y + size
-		);
-		ctx.bezierCurveTo(
-			x,
-			y + (size + topCurveHeight) / 2,
-			x + size / 2,
-			y + (size + topCurveHeight) / 2,
-			x + size / 2,
-			y + topCurveHeight
-		);
+		ctx.bezierCurveTo(x - size / 2, y + (size + topCurveHeight) / 2, x, y + (size + topCurveHeight) / 2, x, y + size);
+		ctx.bezierCurveTo(x, y + (size + topCurveHeight) / 2, x + size / 2, y + (size + topCurveHeight) / 2, x + size / 2, y + topCurveHeight);
 		ctx.bezierCurveTo(x + size / 2, y, x, y, x, y + topCurveHeight);
 		ctx.closePath();
 	}
@@ -442,7 +490,6 @@
 
 		for (let i = 0; i < particleCount; i++) {
 			const i3 = i * 3;
-
 			if (particleAnimation === 'fountain') {
 				positions[i3] = (Math.random() - 0.5) * 2;
 				positions[i3 + 1] = -particleSpread / 2;
@@ -452,19 +499,14 @@
 				positions[i3 + 1] = (Math.random() - 0.5) * particleSpread;
 				positions[i3 + 2] = (Math.random() - 0.5) * particleSpread;
 			}
-
 			velocities[i3] = (Math.random() - 0.5) * particleSpeed * 0.1;
 			velocities[i3 + 1] = (Math.random() - 0.5) * particleSpeed * 0.1;
 			velocities[i3 + 2] = (Math.random() - 0.5) * particleSpeed * 0.1;
-
 			phases[i] = Math.random() * Math.PI * 2;
 			sizes[i] = particleSize * (0.5 + Math.random());
-
 			const hue = (i / particleCount) * 360;
 			const rgb = hslToRgb(hue / 360, 1, 0.5);
-			colors[i3] = rgb[0];
-			colors[i3 + 1] = rgb[1];
-			colors[i3 + 2] = rgb[2];
+			colors[i3] = rgb[0]; colors[i3 + 1] = rgb[1]; colors[i3 + 2] = rgb[2];
 		}
 
 		particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -475,42 +517,28 @@
 
 		if (particleColorMode === 'rainbow' || particleColorMode === 'gradient') {
 			particleMaterial = new THREE.PointsMaterial({
-				size: particleSize,
-				transparent: true,
-				opacity: particleOpacity,
+				size: particleSize, transparent: true, opacity: particleOpacity,
 				blending: particleGlow ? THREE.AdditiveBlending : THREE.NormalBlending,
-				depthWrite: false,
-				vertexColors: true,
-				map: createParticleTexture(particleShape),
-				sizeAttenuation: true
+				depthWrite: false, vertexColors: true,
+				map: createParticleTexture(particleShape), sizeAttenuation: true
 			});
 		} else {
 			particleMaterial = new THREE.PointsMaterial({
-				color: particleColor,
-				size: particleSize,
-				transparent: true,
-				opacity: particleOpacity,
+				color: particleColor, size: particleSize, transparent: true, opacity: particleOpacity,
 				blending: particleGlow ? THREE.AdditiveBlending : THREE.NormalBlending,
-				depthWrite: false,
-				map: createParticleTexture(particleShape),
-				sizeAttenuation: true
+				depthWrite: false, map: createParticleTexture(particleShape), sizeAttenuation: true
 			});
 		}
 
 		particleSystem = new THREE.Points(particleGeometry, particleMaterial);
-		if (particlesEnabled) {
-			scene.add(particleSystem);
-		}
+		if (particlesEnabled) scene.add(particleSystem);
 	}
 
 	function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 		let r, g, b;
-		if (s === 0) {
-			r = g = b = l;
-		} else {
+		if (s === 0) { r = g = b = l; } else {
 			const hue2rgb = (p: number, q: number, t: number) => {
-				if (t < 0) t += 1;
-				if (t > 1) t -= 1;
+				if (t < 0) t += 1; if (t > 1) t -= 1;
 				if (t < 1 / 6) return p + (q - p) * 6 * t;
 				if (t < 1 / 2) return q;
 				if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
@@ -518,9 +546,7 @@
 			};
 			const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
 			const p = 2 * l - q;
-			r = hue2rgb(p, q, h + 1 / 3);
-			g = hue2rgb(p, q, h);
-			b = hue2rgb(p, q, h - 1 / 3);
+			r = hue2rgb(p, q, h + 1 / 3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1 / 3);
 		}
 		return [r, g, b];
 	}
@@ -536,7 +562,6 @@
 
 		for (let i = 0; i < particleCount; i++) {
 			const i3 = i * 3;
-
 			switch (particleAnimation) {
 				case 'spiral':
 					const spiralRadius = 5 + Math.sin(animationTime + phases[i]) * 2;
@@ -596,18 +621,9 @@
 
 			if (!['spiral', 'orbit', 'fountain'].includes(particleAnimation)) {
 				const boundary = particleSpread / 2;
-				if (Math.abs(positions[i3]) > boundary) {
-					positions[i3] = (Math.random() - 0.5) * particleSpread;
-					velocities[i3] = (Math.random() - 0.5) * particleSpeed * 0.1;
-				}
-				if (Math.abs(positions[i3 + 1]) > boundary) {
-					positions[i3 + 1] = (Math.random() - 0.5) * particleSpread;
-					velocities[i3 + 1] = (Math.random() - 0.5) * particleSpeed * 0.1;
-				}
-				if (Math.abs(positions[i3 + 2]) > boundary) {
-					positions[i3 + 2] = (Math.random() - 0.5) * particleSpread;
-					velocities[i3 + 2] = (Math.random() - 0.5) * particleSpeed * 0.1;
-				}
+				if (Math.abs(positions[i3]) > boundary) { positions[i3] = (Math.random() - 0.5) * particleSpread; velocities[i3] = (Math.random() - 0.5) * particleSpeed * 0.1; }
+				if (Math.abs(positions[i3 + 1]) > boundary) { positions[i3 + 1] = (Math.random() - 0.5) * particleSpread; velocities[i3 + 1] = (Math.random() - 0.5) * particleSpeed * 0.1; }
+				if (Math.abs(positions[i3 + 2]) > boundary) { positions[i3 + 2] = (Math.random() - 0.5) * particleSpread; velocities[i3 + 2] = (Math.random() - 0.5) * particleSpeed * 0.1; }
 			}
 
 			if (particleColorMode === 'gradient' && colors) {
@@ -615,34 +631,20 @@
 				const color1 = new THREE.Color(particleColor);
 				const color2 = new THREE.Color(particleGradientColor);
 				const mixedColor = color1.clone().lerp(color2, gradientFactor);
-				colors[i3] = mixedColor.r;
-				colors[i3 + 1] = mixedColor.g;
-				colors[i3 + 2] = mixedColor.b;
+				colors[i3] = mixedColor.r; colors[i3 + 1] = mixedColor.g; colors[i3 + 2] = mixedColor.b;
 			}
 		}
 
 		particleGeometry.attributes.position.needsUpdate = true;
 		if (sizes) particleGeometry.attributes.size.needsUpdate = true;
-		if (colors && particleColorMode === 'gradient') {
-			particleGeometry.attributes.color.needsUpdate = true;
-		}
-
-		if (particleRotation && particleSystem) {
-			particleSystem.rotation.y += 0.001 * particleAnimationSpeed;
-		}
+		if (colors && particleColorMode === 'gradient') particleGeometry.attributes.color.needsUpdate = true;
+		if (particleRotation && particleSystem) particleSystem.rotation.y += 0.001 * particleAnimationSpeed;
 	}
 
 	function animate() {
-		// FIX: When capture is in progress, stop the free-running loop.
-		// videoCapture.ts will drive renders explicitly via __threeJsRenderer.
-		if ((window as any).__threeJsCapturing) {
-			// Reschedule so we resume automatically once capture finishes
-			animationId = requestAnimationFrame(animate);
-			return;
-		}
+		if ((window as any).__threeJsCapturing) { animationId = requestAnimationFrame(animate); return; }
 
 		animationId = requestAnimationFrame(animate);
-
 		const animationTime = videoElement?.currentTime ?? 0;
 
 		if (mesh) {
@@ -657,13 +659,11 @@
 
 		if (threeJsTextComponent) threeJsTextComponent.updateAnimation(animationTime);
 		if (threeJsLogoComponent) threeJsLogoComponent.updateAnimation(animationTime);
-
 		updateParticles(animationTime);
 
 		camera.position.z = cameraDistance;
 		if (ambientLight) ambientLight.intensity = ambientIntensity;
 		if (directionalLight) directionalLight.intensity = directionalIntensity;
-
 		if (renderer) renderer.render(scene, camera);
 	}
 
@@ -671,54 +671,34 @@
 		if (!canvas || !camera || !renderer) return;
 		camera.aspect = canvas.clientWidth / canvas.clientHeight;
 		camera.updateProjectionMatrix();
-		renderer.setSize(canvas.clientWidth * 2, canvas.clientHeight * 2, false);
+		renderer.setSize(canvas.clientWidth, canvas.clientHeight);
 	}
 
-	function onMouseDown(event: MouseEvent) {
-		isDragging = true;
-		previousMousePosition = { x: event.clientX, y: event.clientY };
-	}
-
+	function onMouseDown(event: MouseEvent) { isDragging = true; previousMousePosition = { x: event.clientX, y: event.clientY }; }
 	function onMouseMove(event: MouseEvent) {
 		if (!isDragging) return;
 		const deltaX = event.clientX - previousMousePosition.x;
 		const deltaY = event.clientY - previousMousePosition.y;
-		threeJsState.updateMultiple({
-			rotationY: rotationY + deltaX * 0.01,
-			rotationX: rotationX + deltaY * 0.01
-		});
+		threeJsState.updateMultiple({ rotationY: rotationY + deltaX * 0.01, rotationX: rotationX + deltaY * 0.01 });
 		previousMousePosition = { x: event.clientX, y: event.clientY };
 	}
-
 	function onMouseUp() { isDragging = false; }
-
-	function onTouchStart(event: TouchEvent) {
-		isDragging = true;
-		previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY };
-	}
-
+	function onTouchStart(event: TouchEvent) { isDragging = true; previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY }; }
 	function onTouchMove(event: TouchEvent) {
 		if (!isDragging) return;
 		const deltaX = event.touches[0].clientX - previousMousePosition.x;
 		const deltaY = event.touches[0].clientY - previousMousePosition.y;
-		threeJsState.updateMultiple({
-			rotationY: rotationY + deltaX * 0.01,
-			rotationX: rotationX + deltaY * 0.01
-		});
+		threeJsState.updateMultiple({ rotationY: rotationY + deltaX * 0.01, rotationX: rotationX + deltaY * 0.01 });
 		previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY };
 	}
-
 	function onTouchEnd() { isDragging = false; }
 
 	$: if (mesh && videoTexture && selectedShape) createMesh(selectedShape);
 	$: if (mesh) mesh.scale.set(scale, scale, scale);
 	$: if (scene && (particleShape || particleColorMode || particleAnimation)) createParticleSystem();
 	$: if (particleSystem && particleGeometry && particleMaterial) {
-		if (particlesEnabled && !scene.children.includes(particleSystem)) {
-			scene.add(particleSystem);
-		} else if (!particlesEnabled && scene.children.includes(particleSystem)) {
-			scene.remove(particleSystem);
-		}
+		if (particlesEnabled && !scene.children.includes(particleSystem)) { scene.add(particleSystem); }
+		else if (!particlesEnabled && scene.children.includes(particleSystem)) { scene.remove(particleSystem); }
 		if (particleMaterial instanceof THREE.PointsMaterial) {
 			particleMaterial.size = particleSize;
 			if (particleColorMode === 'solid') particleMaterial.color.set(particleColor);
@@ -726,10 +706,94 @@
 			particleMaterial.blending = particleGlow ? THREE.AdditiveBlending : THREE.NormalBlending;
 		}
 	}
+
+		
 </script>
 
 <div class="relative h-full w-full">
 	<canvas bind:this={canvas} class="h-full w-full"></canvas>
+
+	{#if videoElement && !(window as any).__threeJsCapturing}
+		<div class="absolute bottom-0 left-0 right-0 flex items-center gap-2 bg-black/50 px-3 py-2 backdrop-blur-sm">
+			<!-- Play/Pause -->
+			<button
+				on:click={togglePlayPause}
+				aria-label={isVideoPaused ? 'Play video' : 'Pause video'}
+				class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 hover:bg-white/30 transition-colors"
+			>
+				{#if isVideoPaused}
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-white">
+						<path d="M8 5v14l11-7z"/>
+					</svg>
+				{:else}
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-white">
+						<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+					</svg>
+				{/if}
+			</button>
+
+			<!-- Current time -->
+			<span class="text-xs tabular-nums text-white/80 w-10 text-right shrink-0">
+				{formatTime(currentTime)}
+			</span>
+
+			<!-- Scrub bar -->
+			<input
+				type="range"
+				min="0"
+				max="8.0"
+				step="0.01"
+				value={currentTime}
+				on:mousedown={() => isScrubbing = true}
+				on:touchstart={() => isScrubbing = true}
+				on:input={(e) => currentTime = parseFloat(e.currentTarget.value)}
+				on:mouseup={(e) => {
+					const val = parseFloat(e.currentTarget.value);
+					if (videoElement) videoElement.currentTime = val;
+					isScrubbing = false;
+				}}
+				on:touchend={(e) => {
+					const val = parseFloat(e.currentTarget.value);
+					if (videoElement) videoElement.currentTime = val;
+					isScrubbing = false;
+				}}
+				class="flex-1 h-1.5 cursor-pointer appearance-none rounded-lg bg-white/20 accent-white"
+			/>
+
+			<!-- Duration -->
+			<span class="text-xs tabular-nums text-white/50 w-10 shrink-0">
+				{formatTime(videoDuration)}
+			</span>
+		</div>
+	{/if}
 </div>
+
 <ThreeJsText {scene} bind:this={threeJsTextComponent} />
 <ThreeJsLogo {scene} bind:this={threeJsLogoComponent} />
+
+<style>
+	.pause-btn {
+		position: absolute;
+		bottom: 12px;
+		left: 50%;
+		transform: translateX(-50%);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		background: rgba(0, 0, 0, 0.5);
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		color: white;
+		cursor: pointer;
+		opacity: 0.4;
+		transition: opacity 0.2s ease, background 0.2s ease;
+		backdrop-filter: blur(4px);
+		z-index: 10;
+	}
+	.pause-btn:hover {
+		opacity: 1;
+		background: rgba(0, 0, 0, 0.75);
+	}
+</style>

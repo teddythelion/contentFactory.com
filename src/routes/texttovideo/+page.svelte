@@ -31,10 +31,12 @@
 	let isSaving = false;
 	let saveStatus = '';
 	let savedContentId = '';
-
+	
 	// Enhancement modals
 	let showVideoEnhancer = false;
 	let showEffectsPanel = false;
+	let audioSessionId: string | null = null;
+	let isExtractingAudio = false;
 
 	onMount(() => {
 		try {
@@ -328,10 +330,56 @@
 		saveStatus = '';
 	}
 
-	function openVideoEnhancer() {
-		if (video) {
-			showVideoEnhancer = true;
+	async function openVideoEnhancer() {
+	if (!video) return;
+
+	isExtractingAudio = true;
+	status = 'Preparing enhancer...';
+
+	try {
+		const formData = new FormData();
+
+		if (video.startsWith('data:video')) {
+			// Local upload — convert base64 data URL to a Blob and send as a file
+			const response = await fetch(video);
+			const blob = await response.blob();
+			formData.append('videoFile', blob, 'input-video.mp4');
+		} else {
+			// GCS URL — send as a plain URL string, FFmpeg fetches it directly
+			formData.append('videoUrl', video);
 		}
+
+		const res = await fetch('/api/extractAudio', {
+			method: 'POST',
+			body: formData
+		});
+
+		if (!res.ok) {
+			// Extraction endpoint failed — log it but don't block the enhancer
+			// User still gets the enhancer, just without audio preservation
+			console.warn('⚠️ Audio extraction failed — continuing without audio preservation');
+			audioSessionId = null;
+		} else {
+			const data = await res.json();
+			// data.audioSessionId will be null if video had no audio — that's fine
+			audioSessionId = data.audioSessionId ?? null;
+			if (audioSessionId) {
+				console.log(`🎵 Audio preserved — session: ${audioSessionId}`);
+			} else {
+				console.log('ℹ️ No audio track found — proceeding with visual only');
+			}
+		}
+	} catch (err) {
+		// Network error or unexpected failure — don't block the enhancer
+		console.warn('⚠️ Audio extraction error — continuing without audio preservation:', err);
+		audioSessionId = null;
+	} finally {
+		isExtractingAudio = false;
+		status = video ? 'Done! Ready to enhance or download.' : '';
+	}
+
+	// Open the enhancer regardless of whether audio extraction succeeded
+	showVideoEnhancer = true;
 	}
 
 	function openEffectsPanel() {
@@ -504,7 +552,7 @@
 					>
 						<li>
 							<button on:click={openVideoEnhancer} class="btn-default btn mb-2 btn-sm">
-								🎬 3D Enhance
+								🎬 Enhance
 							</button>
 						</li>
 						<li>
@@ -579,16 +627,16 @@
 	</div>
 </div>
 
-<!-- NEW: Video Enhancer Modal -->
 {#if showVideoEnhancer && video}
 	<ThreeJsEnhancer
-		videoUrl={video}
-		contentId={video}
-		onClose={() => {
-			showVideoEnhancer = false;
+ 		videoUrl={video} 		
+ 		{audioSessionId}
+ 		onClose={() => {
+		showVideoEnhancer = false;
+ 		audioSessionId = null;
 		}}
-	/>
-{/if}
+ 	/>
+ {/if}
 
 <!-- NEW: Video Effects Panel Modal -->
 {#if showEffectsPanel && video}

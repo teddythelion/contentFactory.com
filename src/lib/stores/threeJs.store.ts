@@ -2,7 +2,15 @@
 import { writable } from 'svelte/store';
 
 export type ParticleShape = 'circle' | 'square' | 'triangle' | 'star' | 'heart' | 'custom';
-export type ParticleAnimation = 'none' | 'spiral' | 'wave' | 'vortex' | 'explosion' | 'orbit' | 'pulse' | 'fountain';
+export type ParticleAnimation =
+	| 'none'
+	| 'spiral'
+	| 'wave'
+	| 'vortex'
+	| 'explosion'
+	| 'orbit'
+	| 'pulse'
+	| 'fountain';
 
 interface ThreeJsState {
 	selectedShape: string;
@@ -17,7 +25,7 @@ interface ThreeJsState {
 	directionalIntensity: number;
 	videoGlow: number;
 	shapeGlow: number;
-	
+
 	// Particle system
 	particlesEnabled: boolean;
 	particleCount: number;
@@ -27,7 +35,7 @@ interface ThreeJsState {
 	particleColor: string;
 	particleOpacity: number;
 	particleReactToVideo: boolean;
-	
+
 	// NEW: Particle shapes and animations
 	particleShape: ParticleShape;
 	particleAnimation: ParticleAnimation;
@@ -37,7 +45,7 @@ interface ThreeJsState {
 	particleRotation: boolean;
 	particleColorMode: 'solid' | 'gradient' | 'rainbow' | 'video-reactive';
 	particleGradientColor: string;
-	
+
 	// Capture state
 	isCapturing: boolean;
 }
@@ -49,13 +57,13 @@ const initialState: ThreeJsState = {
 	rotationZ: 0,
 	autoRotate: false,
 	autoRotateSpeed: 0.01,
-	cameraDistance: 5.9,
+	cameraDistance: 6,
 	scale: 1.8,
 	ambientIntensity: 0.5,
 	directionalIntensity: 0.8,
 	videoGlow: 0,
 	shapeGlow: 0,
-	
+
 	particlesEnabled: false,
 	particleCount: 1000,
 	particleSize: 0.05,
@@ -64,7 +72,7 @@ const initialState: ThreeJsState = {
 	particleColor: '#ffffff',
 	particleOpacity: 0.8,
 	particleReactToVideo: false,
-	
+
 	// NEW defaults
 	particleShape: 'circle',
 	particleAnimation: 'none',
@@ -74,8 +82,8 @@ const initialState: ThreeJsState = {
 	particleRotation: false,
 	particleColorMode: 'solid',
 	particleGradientColor: '#00ffff',
-	
-	isCapturing: false,
+
+	isCapturing: false
 };
 
 function createThreeJsStore() {
@@ -103,7 +111,7 @@ function createThreeJsStore() {
 				ambientIntensity: initialState.ambientIntensity,
 				directionalIntensity: initialState.directionalIntensity,
 				videoGlow: initialState.videoGlow,
-				shapeGlow: initialState.shapeGlow,
+				shapeGlow: initialState.shapeGlow
 			}));
 		},
 		resetParticles: () => {
@@ -123,7 +131,7 @@ function createThreeJsStore() {
 				particleGlow: initialState.particleGlow,
 				particleRotation: initialState.particleRotation,
 				particleColorMode: initialState.particleColorMode,
-				particleGradientColor: initialState.particleGradientColor,
+				particleGradientColor: initialState.particleGradientColor
 			}));
 		},
 		resetRotation: () => {
@@ -131,7 +139,7 @@ function createThreeJsStore() {
 				...state,
 				rotationX: 0,
 				rotationY: 0,
-				rotationZ: 0,
+				rotationZ: 0
 			}));
 		},
 		setShape: (shape: string) => {
@@ -139,7 +147,7 @@ function createThreeJsStore() {
 		},
 		setCapturing: (isCapturing: boolean) => {
 			update((state) => ({ ...state, isCapturing }));
-		},
+		}
 	};
 }
 

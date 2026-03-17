@@ -2,7 +2,7 @@
 	import { authStore } from '$lib/stores/auth.store';
 	import { goto } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
-
+	 let avatarError = $state(false);
 	let dropdownOpen = $state(false);
 	let dropdownRef: HTMLDivElement;
 
@@ -38,12 +38,15 @@
 	<div class="relative" bind:this={dropdownRef}>
 		<button class="btn avatar btn-circle btn-ghost" onclick={() => (dropdownOpen = !dropdownOpen)}>
 			<div class="w-10 rounded-full">
-				{#if $authStore.user.photoURL}
-					<img src={$authStore.user.photoURL} alt={$authStore.user.displayName || 'User'} />
+				{#if $authStore.user.photoURL && !avatarError}
+					<img
+						src={$authStore.user.photoURL}
+						alt={$authStore.user.displayName || 'User'}
+						referrerpolicy="no-referrer"
+						onerror={() => (avatarError = true)}
+					/>
 				{:else}
-					<div
-						class="flex h-10 w-10 items-center justify-center rounded-full bg-primary font-bold text-primary-content"
-					>
+					<div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary font-bold text-primary-content">
 						{$authStore.user.displayName?.charAt(0) || $authStore.user.email?.charAt(0) || 'U'}
 					</div>
 				{/if}

@@ -1,11 +1,16 @@
 // src/lib/utils/videoCapture.ts
 // FIXED: Deterministic frame capture — explicit render + gl.finish() per frame
 // FIXED: Async job queue — encode fires in background, browser polls for completion
+// UPDATED: Reads audioSessionId from audioSessionStore and passes it to encodeFromBatches
+//          so the server can mux the preserved audio back into the final video.
 
 import { get } from 'svelte/store';
 import { videoState } from '$lib/stores/video.store';
 import { encodeJobStore } from '$lib/stores/encodeJob.store';
 import { authStore } from '$lib/stores/auth.store';
+import { audioSessionStore } from '$lib/stores/audioSession.store'; // NEW
+import { audioStudioStore } from '$lib/stores/audioStudio.store';
+
 const BATCH_SIZE = 30;
 
 export async function captureThreeJsVideo(
@@ -35,6 +40,14 @@ export async function captureThreeJsVideo(
 	const totalFrames = Math.ceil(videoDuration * fps);
 	const totalBatches = Math.ceil(totalFrames / BATCH_SIZE);
 
+	// Read audioSessionId from store — will be null if video had no audio
+	// or if extraction was skipped/failed. Server handles null gracefully.
+	const audioSessionId = get(audioSessionStore); // NEW
+	const audioStudio = get(audioStudioStore);
+	const suppressOriginalAudio =
+		audioStudio.originalMuted ||
+		audioStudio.sfxSuppressOriginal ||
+		audioStudio.musicSuppressOriginal;
 	progressCallback?.(0, 'Starting capture...');
 
 	videoElement.pause();
@@ -47,6 +60,9 @@ export async function captureThreeJsVideo(
 		console.log(
 			`📹 Capturing ${totalFrames} frames at ${width}x${height} in ${totalBatches} batches of ${BATCH_SIZE}`
 		);
+		if (audioSessionId) {
+			console.log(`🎵 Audio session attached — will mux audio-${audioSessionId}.aac after encode`);
+		}
 
 		const sessionId = Date.now().toString();
 		let batchNumber = 0;
@@ -136,14 +152,34 @@ export async function captureThreeJsVideo(
 
 		// Kick off background encode — returns immediately with jobId
 		progressCallback?.(97, 'Starting background encode...');
-		//check for authentication
+
 		const userId = get(authStore).user?.uid;
 		if (!userId) throw new Error('Not authenticated');
 
 		const encodeResponse = await fetch('/api/encodeFromBatches', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ sessionId, totalFrames, fps, width, height, userId })
+			body: JSON.stringify({
+				sessionId,
+				totalFrames,
+				fps,
+				width,
+				height,
+				userId,
+				audioSessionId,
+				sfxSessionId: audioStudio.sfxSessionId,
+				musicSessionId: audioStudio.musicSessionId,
+				sfxVolume: audioStudio.sfxVolume,
+				musicVolume: audioStudio.musicVolume,
+				sfxStartTime: audioStudio.sfxStartTime,
+				sfxEndTime: audioStudio.sfxEndTime,
+				sfxFadeIn: audioStudio.sfxFadeIn,
+				sfxFadeOut: audioStudio.sfxFadeOut,
+				musicStartTime: audioStudio.musicStartTime,
+				musicEndTime: audioStudio.musicEndTime,
+				musicFadeIn: audioStudio.musicFadeIn,
+				musicFadeOut: audioStudio.musicFadeOut
+			})
 		});
 
 		console.log(

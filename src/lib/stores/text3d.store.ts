@@ -34,18 +34,18 @@ export interface Text3DState {
 		z: number;
 	};
 	// Advanced Text Features
-		letterSpacing: number;
-		curveRadius: number;
+	letterSpacing: number;
+	curveRadius: number;
 
-		// Color Animation
-		colorCycling: boolean;
-		colorCycleSpeed: number;
+	// Color Animation
+	colorCycling: boolean;
+	colorCycleSpeed: number;
 
-		// Fog Effect
-		fogEnabled: boolean;
-		fogColor: string;
-		fogNear: number;
-		fogFar: number;
+	// Fog Effect
+	fogEnabled: boolean;
+	fogColor: string;
+	fogNear: number;
+	fogFar: number;
 	// Material Properties
 	materialType: 'standard' | 'phong' | 'basic' | 'normal';
 	materialColor: string; // Hex color
@@ -66,7 +66,20 @@ export interface Text3DState {
 	// Animation
 	autoRotate: boolean;
 	autoRotateSpeed: number;
-	animationType: 'none' | 'spin' | 'wave' | 'float' | 'bounce' | 'pulse' | 'swing' | 'jitter' | 'spiral' | 'elastic' | 'glitch' | 'orbit' | 'wobble';
+	animationType:
+		| 'none'
+		| 'spin'
+		| 'wave'
+		| 'float'
+		| 'bounce'
+		| 'pulse'
+		| 'swing'
+		| 'jitter'
+		| 'spiral'
+		| 'elastic'
+		| 'glitch'
+		| 'orbit'
+		| 'wobble';
 }
 
 const initialState: Text3DState = {
@@ -117,15 +130,12 @@ const initialState: Text3DState = {
 	wireframe: false,
 
 	// 3D Effects
-	extrudeDepth: 0.5, // ✅ Increased from 0.2 for better visibility
+	extrudeDepth: 0.1, // ✅ Increased from 0.2 for better visibility
 	bevelEnabled: true,
-	bevelThickness: 0.1, // ✅ Increased from 0.03 for better visibility
+	bevelThickness: 0.05, // ✅ Increased from 0.03 for better visibility
 	bevelSize: 0.05, // ✅ Increased from 0.02
 	bevelSegments: 3,
-	curveSegments: 12,
-
-	
-	
+	curveSegments: 12
 };
 
 function createText3DStore() {
@@ -138,47 +148,47 @@ function createText3DStore() {
 
 		// Update any property dynamically (for generic control panel use)
 		updateProperty: <K extends keyof Text3DState>(key: K, value: Text3DState[K]) => {
-			update(state => ({ ...state, [key]: value }));
+			update((state) => ({ ...state, [key]: value }));
 		},
 
 		// Toggle 3D text on/off
 		toggle: () => {
-			update(state => ({ ...state, enabled: !state.enabled }));
+			update((state) => ({ ...state, enabled: !state.enabled }));
 		},
 
 		// Enable 3D text
 		enable: () => {
-			update(state => ({ ...state, enabled: true }));
+			update((state) => ({ ...state, enabled: true }));
 		},
 
 		// Disable 3D text
 		disable: () => {
-			update(state => ({ ...state, enabled: false }));
+			update((state) => ({ ...state, enabled: false }));
 		},
 
 		// Update text content
 		setText: (text: string) => {
-			update(state => ({ ...state, text }));
+			update((state) => ({ ...state, text }));
 		},
 
 		// Update font family
 		setFont: (fontFamily: string) => {
-			update(state => ({ ...state, fontFamily }));
+			update((state) => ({ ...state, fontFamily }));
 		},
 
 		// Update font family and URL together
 		setFontWithUrl: (fontFamily: string, fontUrl: string | null) => {
-			update(state => ({ ...state, fontFamily, fontUrl }));
+			update((state) => ({ ...state, fontFamily, fontUrl }));
 		},
 
 		// Update font size
 		setFontSize: (fontSize: number) => {
-			update(state => ({ ...state, fontSize }));
+			update((state) => ({ ...state, fontSize }));
 		},
 
 		// Update position
 		setPosition: (x: number, y: number, z: number) => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				position3D: { x, y, z }
 			}));
@@ -186,7 +196,7 @@ function createText3DStore() {
 
 		// Update position property (for individual axis updates)
 		updatePosition3D: (axis: 'x' | 'y' | 'z', value: number) => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				position3D: { ...state.position3D, [axis]: value }
 			}));
@@ -194,7 +204,7 @@ function createText3DStore() {
 
 		// Update rotation
 		setRotation: (x: number, y: number, z: number) => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				rotation3D: { x, y, z }
 			}));
@@ -202,7 +212,7 @@ function createText3DStore() {
 
 		// Update rotation property (for individual axis updates)
 		updateRotation3D: (axis: 'x' | 'y' | 'z', value: number) => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				rotation3D: { ...state.rotation3D, [axis]: value }
 			}));
@@ -210,37 +220,43 @@ function createText3DStore() {
 
 		// Update scale
 		setScale: (scale: number) => {
-			update(state => ({ ...state, scale3D: scale }));
+			update((state) => ({ ...state, scale3D: scale }));
 		},
 
 		// Update color
 		setColor: (color: string) => {
-			update(state => ({ ...state, materialColor: color }));
+			update((state) => ({ ...state, materialColor: color }));
 		},
 
 		// Update material properties
-		setMaterial: (props: Partial<Pick<Text3DState, 'metalness' | 'roughness' | 'emissive' | 'emissiveIntensity'>>) => {
-			update(state => ({ ...state, ...props }));
+		setMaterial: (
+			props: Partial<
+				Pick<Text3DState, 'metalness' | 'roughness' | 'emissive' | 'emissiveIntensity'>
+			>
+		) => {
+			update((state) => ({ ...state, ...props }));
 		},
 
 		// Update 3D effect properties
-		set3DEffects: (props: Partial<Pick<Text3DState, 'extrudeDepth' | 'bevelEnabled' | 'bevelThickness'>>) => {
-			update(state => ({ ...state, ...props }));
+		set3DEffects: (
+			props: Partial<Pick<Text3DState, 'extrudeDepth' | 'bevelEnabled' | 'bevelThickness'>>
+		) => {
+			update((state) => ({ ...state, ...props }));
 		},
 
 		// Set animation type
 		setAnimation: (animationType: Text3DState['animationType']) => {
-			update(state => ({ ...state, animationType }));
+			update((state) => ({ ...state, animationType }));
 		},
 
 		// Toggle auto-rotate
 		toggleAutoRotate: () => {
-			update(state => ({ ...state, autoRotate: !state.autoRotate }));
+			update((state) => ({ ...state, autoRotate: !state.autoRotate }));
 		},
 
 		// Set auto-rotate speed
 		setAutoRotateSpeed: (speed: number) => {
-			update(state => ({ ...state, autoRotateSpeed: speed }));
+			update((state) => ({ ...state, autoRotateSpeed: speed }));
 		},
 
 		// Reset to defaults
@@ -250,7 +266,7 @@ function createText3DStore() {
 
 		// Reset just position and rotation
 		resetTransform: () => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				position3D: initialState.position3D,
 				rotation3D: initialState.rotation3D,
@@ -262,7 +278,7 @@ function createText3DStore() {
 		presets: {
 			// Bold title preset
 			title: () => {
-				update(state => ({
+				update((state) => ({
 					...state,
 					fontSize: 120,
 					bevelEnabled: true,
@@ -276,7 +292,7 @@ function createText3DStore() {
 
 			// Subtle subtitle preset
 			subtitle: () => {
-				update(state => ({
+				update((state) => ({
 					...state,
 					fontSize: 60,
 					bevelEnabled: false,
@@ -289,7 +305,7 @@ function createText3DStore() {
 
 			// Neon glow preset
 			neon: () => {
-				update(state => ({
+				update((state) => ({
 					...state,
 					fontSize: 100,
 					bevelEnabled: true,
@@ -304,7 +320,7 @@ function createText3DStore() {
 
 			// Classic gold preset
 			gold: () => {
-				update(state => ({
+				update((state) => ({
 					...state,
 					fontSize: 100,
 					bevelEnabled: true,
