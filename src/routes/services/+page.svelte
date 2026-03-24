@@ -1,7 +1,5 @@
-
 <script lang="ts">
   // Services page — Content Factory
- 
 </script>
 
 <!-- Hero Section -->
@@ -9,7 +7,6 @@
 
   <!-- Hero -->
   <div class="relative overflow-hidden border-b border-white/5 bg-base-200 px-6 py-20 text-center">
-    <!-- Subtle grid background -->
     <div class="pointer-events-none absolute inset-0 opacity-5"
       style="background-image: linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px); background-size: 40px 40px;">
     </div>
@@ -73,7 +70,7 @@
           Export a fully rendered MP4 ready for posting anywhere.
         </p>
         <ul class="space-y-2">
-          {#each ['6 3D shape options', 'Custom particle systems', 'Logo & text overlay', 'Glow & lighting effects'] as feature}
+          {#each ['14+ 3D shape options', 'Custom particle systems', 'Logo & text overlay', 'Glow & lighting effects'] as feature}
             <li class="flex items-center gap-2 text-sm text-white/50">
               <span class="text-info">✓</span> {feature}
             </li>
@@ -113,7 +110,47 @@
           touching Photoshop. Ultra-refinement mode takes your image further than ever.
         </p>
         <ul class="space-y-2">
-          {#each ['Upload & edit any image', 'AI ultra refinement', 'Style transfer', 'One-click enhancement'] as feature}
+          {#each ['Upload & edit any image', 'AI ultra refinement', 'Identity-preserving face lock', 'Multi-reference compositing'] as feature}
+            <li class="flex items-center gap-2 text-sm text-white/50">
+              <span class="text-info">✓</span> {feature}
+            </li>
+          {/each}
+        </ul>
+      </div>
+
+      <!-- Service 5: AI Sound Effects -->
+      <div class="group rounded-2xl border border-white/10 bg-base-200 p-8 transition-all hover:border-info/30 hover:bg-base-300">
+        <div class="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-info/10 text-3xl">
+          🔊
+        </div>
+        <h3 class="mb-3 text-xl font-bold text-white">AI Sound Effects</h3>
+        <p class="mb-6 text-sm leading-relaxed text-white/60">
+          Generate custom sound effects from a text prompt and bake them directly 
+          into your video export. Set start time, end time, fade in, fade out, 
+          and loop — all in the live preview before you capture.
+        </p>
+        <ul class="space-y-2">
+          {#each ['Prompt-based SFX generation', 'Live preview with real-time controls', 'Fade in & fade out', 'Loop mode with trim window', 'Baked into final video export'] as feature}
+            <li class="flex items-center gap-2 text-sm text-white/50">
+              <span class="text-info">✓</span> {feature}
+            </li>
+          {/each}
+        </ul>
+      </div>
+
+      <!-- Service 6: AI Music Generation -->
+      <div class="group rounded-2xl border border-white/10 bg-base-200 p-8 transition-all hover:border-info/30 hover:bg-base-300">
+        <div class="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-info/10 text-3xl">
+          🎵
+        </div>
+        <h3 class="mb-3 text-xl font-bold text-white">AI Music Generation</h3>
+        <p class="mb-6 text-sm leading-relaxed text-white/60">
+          Generate original background music from a text prompt — from cinematic 
+          orchestral scores to lo-fi beats to high-energy tracks. Control duration 
+          up to 5 minutes, placement, and fades. Music gets mixed into your final video.
+        </p>
+        <ul class="space-y-2">
+          {#each ['Prompt-based music generation', 'Up to 5 minutes of original music', 'Start & end time placement', 'Fade in & fade out controls', 'Mixed into final video export'] as feature}
             <li class="flex items-center gap-2 text-sm text-white/50">
               <span class="text-info">✓</span> {feature}
             </li>
@@ -149,6 +186,24 @@
         <div class="mb-4 text-2xl">⚡</div>
         <h4 class="mb-2 font-bold text-white">Background Processing</h4>
         <p class="text-sm text-white/50">Long renders process in the background. Navigate freely — your content downloads automatically when ready.</p>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">🎛️</div>
+        <h4 class="mb-2 font-bold text-white">Audio Studio</h4>
+        <p class="text-sm text-white/50">Full audio mixing inside the 3D enhancer — control original audio, SFX, and music volume independently with live preview.</p>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">📱</div>
+        <h4 class="mb-2 font-bold text-white">Mobile Friendly</h4>
+        <p class="text-sm text-white/50">Full creative studio on any device. The 3D enhancer and all tools are optimized for mobile with touch-friendly controls.</p>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">🔒</div>
+        <h4 class="mb-2 font-bold text-white">Secure & Private</h4>
+        <p class="text-sm text-white/50">Your content is yours. Stored securely in your personal library with Google authentication and encrypted storage.</p>
       </div>
 
     </div>

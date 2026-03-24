@@ -2,48 +2,52 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { authStore } from '$lib/stores/auth.store';
-	import { workflowContext } from '$lib/stores/workflow.store';
-	import ImageUploader from '$lib/components/ImageUploader.svelte';
+	import { workflowContext } from '$lib/stores/workflow.store';	
 	import ThreeJSEnhancer from '$lib/components/ThreeJSEnhancer.svelte';
 	import PromptCoachRefine from '$lib/components/PromptCoachRefine.svelte';
 	import { saveContentToCloud } from '$lib/utils/saveContent';
+	import AuthToast from '$lib/components/AuthToast.svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import AuthModal from '$lib/components/AuthModal.svelte';
+	let authToast: AuthToast;
+	
 
-	let imageUrl = '';
-	let loading = false;
-	let prompt = '';
-	let status = '';
-	let uploadedImages: File[] = [];
-	let imagePreviews: string[] = [];
-	let showEnhancer = false;
-	let enhancedPrompt = '';
-	let refinePrompt = '';
-	let isRefining = false;
-	let showPromptCoach = false;
-	let isImageUploadedForEditing = false;
-	let showInfoModal = false;
+	let imageUrl = $state('');
+	let loading = $state(false);
+	let prompt = $state('');
+	let status = $state('');
+	let uploadedImages = $state<File[]>([]);
+	let imagePreviews = $state<string[]>([]);
+	let showEnhancer = $state(false);
+	let enhancedPrompt = $state('');
+	let refinePrompt = $state('');
+	let isRefining = $state(false);
+	let showPromptCoach = $state(false);
+	let isImageUploadedForEditing = $state(false);
+	let showInfoModal = $state(false);
+	let isSaving = $state(false);
+	let saveStatus = $state('');
+	let savedContentId = $state('');
+	let showAuthToast = $state(false);
+	let showAuthModal = $state(false);
 
-	// Save state
-	let isSaving = false;
-	let saveStatus = '';
-	let savedContentId = '';
+		
 
 	// Save state to sessionStorage
-	$: if (typeof window !== 'undefined') {
-		try {
-			sessionStorage.setItem(
-				'imageedit_state',
-				JSON.stringify({
-					imageUrl,
-					prompt,
-					status,
-					refinePrompt
-				})
-			);
-		} catch (e) {
-			console.warn('Failed to save state:', e);
-			sessionStorage.removeItem('imageedit_state');
-		}
-	}
+	$effect(() => {
+    if (typeof window !== 'undefined') {
+        try {
+            sessionStorage.setItem(
+                'imageedit_state',
+                JSON.stringify({ imageUrl, prompt, status, refinePrompt })
+            );
+			} catch (e) {
+				console.warn('Failed to save state:', e);
+				sessionStorage.removeItem('imageedit_state');
+			}
+    	}
+	});
 
 	function handlePromptSelected(selectedPrompt: string) {
 		prompt = selectedPrompt;
@@ -74,6 +78,11 @@
 	});
 
 	async function generateImage() {
+		if (!$authStore.user) {
+			showAuthToast = true;
+			setTimeout(() => { showAuthToast = false; }, 6000);
+			return;
+   		 }
 		loading = true;
 		status = 'Generating image...';
 		savedContentId = '';
@@ -305,13 +314,31 @@
 		sessionStorage.removeItem('imageedit_state');
 	}
 </script>
+<AuthModal bind:isOpen={showAuthModal} />
 
+{#if showAuthToast}
+    <div class="toast toast-top toast-center z-[9999]">
+        <div class="alert alert-info shadow-2xl flex flex-col gap-2 max-w-sm">
+            <div class="flex items-center gap-2">
+                <span class="text-2xl">🔒</span>
+                <div>
+                    <p class="font-bold text-base">Sign in required</p>
+                    <p class="text-sm">You need to be signed in to use this tool.</p>
+                </div>
+                <button onclick={() => showAuthToast = false} class="btn btn-ghost btn-xs ml-auto">✕</button>
+            </div>
+            <button onclick={() => { showAuthModal = true; showAuthToast = false; }} class="btn btn-primary btn-sm w-full">
+                Sign In Now
+            </button>
+        </div>
+    </div>
+{/if}
 <!-- Info Modal -->
 {#if showInfoModal}
 	<div class="modal-open modal" role="dialog">
 		<div class="modal-box max-w-lg border border-info/30 bg-base-200">
 			<button
-				on:click={() => (showInfoModal = false)}
+				onclick={() => (showInfoModal = false)}
 				class="btn absolute top-3 right-3 btn-circle btn-ghost btn-sm"
 			>
 				✕
@@ -359,15 +386,15 @@
 			</div>
 
 			<div class="modal-action">
-				<button on:click={() => (showInfoModal = false)} class="btn btn-sm btn-neutral">
+				<button onclick={() => (showInfoModal = false)} class="btn btn-sm btn-neutral">
 					Got it
 				</button>
 			</div>
 		</div>
 		<div
 			class="modal-backdrop"
-			on:click={() => (showInfoModal = false)}
-			on:keydown={() => {}}
+			onclick={() => (showInfoModal = false)}
+			onkeydown={() => {}}
 		></div>
 	</div>
 {/if}
@@ -380,7 +407,7 @@
 				<div class="flex items-center justify-between border-b border-base-300 p-4">
 					<h3 class="text-lg font-bold">Prompt Engineer</h3>
 					<button
-						on:click={() => (showPromptCoach = false)}
+						onclick={() => (showPromptCoach = false)}
 						class="btn btn-circle btn-ghost btn-sm"
 					>
 						✕
@@ -415,7 +442,7 @@
 				data-tip="Learn how Precision Refine preserves your subject's identity while enhancing scenes, lighting, and context around it."
 			>
 				<button
-					on:click={() => (showInfoModal = true)}
+					onclick={() => (showInfoModal = true)}
 					class="btn gap-1.5 btn-outline btn-xs btn-info"
 				>
 					<span>ⓘ</span>
@@ -424,7 +451,7 @@
 			</div>
 		</div>
 
-		<button on:click={() => (showPromptCoach = true)} class="btn max-w-66 gap-2 btn-sm btn-neutral">
+		<button onclick={() => (showPromptCoach = true)} class="btn max-w-66 gap-2 btn-sm btn-neutral">
 			<span>🎨</span>
 			<span>Use Prompt Engineer</span>
 		</button>
@@ -435,7 +462,7 @@
 				type="file"
 				accept="image/*"
 				multiple
-				on:change={handleImageUpload}
+				onchange={handleImageUpload}
 				class="file-input w-full file-input-sm file-input-neutral"
 			/>
 			<p class="mt-1 text-xs text-base-content/50">
@@ -446,7 +473,7 @@
 					<p class="text-sm text-success">
 						{uploadedImages.length} reference image(s) ready
 					</p>
-					<button on:click={clearImages} class="btn text-error btn-ghost btn-xs">
+					<button onclick={clearImages} class="btn text-error btn-ghost btn-xs">
 						Clear All
 					</button>
 				</div>
@@ -471,18 +498,16 @@
 
 		<div class="flex flex-col gap-3">
 			<button
-				on:click={generateImage}
-				disabled={loading || !prompt || uploadedImages.length === 0}
-				class="btn btn-neutral {loading || !prompt || uploadedImages.length === 0
-					? 'btn-disabled'
-					: ''}"
+				onclick={generateImage}
+				disabled={loading || !prompt}
+				class="btn btn-neutral {loading || !prompt ? 'btn-disabled' : ''}"
 			>
 				{loading ? 'Generating...' : 'Generate'}
 			</button>
 
 			{#if imageUrl && !loading && !savedContentId}
 				<button
-					on:click={saveToLibrary}
+					onclick={saveToLibrary}
 					disabled={isSaving || !$authStore.user}
 					class="btn btn-primary {isSaving || !$authStore.user ? 'btn-disabled' : ''}"
 				>
@@ -493,7 +518,7 @@
 			{#if savedContentId}
 				<div class="alert py-2 alert-success">
 					<span class="text-sm"
-						>✅ Saved! <a href="/content-library" class="link">View in Content Library</a></span
+						>✅ Saved! <a  href={resolve('/content-library')} class="link">View in Content Library</a></span
 					>
 				</div>
 			{/if}
@@ -505,7 +530,7 @@
 			{/if}
 
 			{#if imageUrl || prompt || imagePreviews.length > 0}
-				<button on:click={clearSession} class="btn btn-ghost btn-sm"> 🗑️ Start Fresh </button>
+				<button onclick={clearSession} class="btn btn-ghost btn-sm"> 🗑️ Start Fresh </button>
 			{/if}
 
 			{#if status}
@@ -536,7 +561,7 @@
 			</fieldset>
 
 			<button
-				on:click={refineImage}
+				onclick={refineImage}
 				disabled={isRefining || !refinePrompt}
 				class="btn btn-sm btn-neutral {isRefining || !refinePrompt ? 'btn-disabled' : ''}"
 			>
@@ -555,9 +580,11 @@
 						Your refined image is ready! Next, upload it to <strong>Animate</strong> (Text to Video)
 						to create cinematic video with motion.
 					</p>
-					<a href="/texttovideo?from=refine" class="btn mt-3 btn-sm btn-neutral">
+					<button 					
+						onclick={() => goto('/texttovideo?from=refine')} 
+						class="btn mt-3 btn-sm btn-neutral">
 						Go to Animate →
-					</a>
+					</button>
 				</div>
 			</div>
 		{/if}
@@ -587,7 +614,7 @@
 					>
 						<li>
 							<button
-								on:click={downloadImage}
+								onclick={downloadImage}
 								class="btn-default btn shadow-lg btn-sm hover:btn-success"
 								title="Download Image"
 							>
@@ -596,7 +623,7 @@
 						</li>
 						<li>
 							<button
-								on:click={openEnhancer}
+								onclick={openEnhancer}
 								class="btn shadow-lg btn-ghost btn-sm hover:btn-primary"
 								title="Add 3D Effects"
 							>
@@ -604,7 +631,7 @@
 							</button>
 						</li>
 						{#if isImageUploadedForEditing}
-							<button on:click={clearUploadedImage} class="btn btn-sm btn-error">
+							<button onclick={clearUploadedImage} class="btn btn-sm btn-error">
 								🗑️ Remove
 							</button>
 						{/if}
@@ -621,7 +648,7 @@
 								<input
 									type="file"
 									accept="image/*"
-									on:change={handleImageUploadForEditing}
+									onchange={handleImageUploadForEditing}
 									class="hidden"
 								/>
 							</label>
@@ -635,7 +662,7 @@
 			<div class="space-y-2">
 				<p class="text-xs font-semibold text-base-content/60">Reference Images:</p>
 				<div class="grid grid-cols-3 gap-3">
-					{#each imagePreviews as preview, i}
+					{#each imagePreviews as preview, i (i)}
 						<div class="group relative">
 							<img
 								src={preview}
@@ -643,7 +670,7 @@
 								class="h-24 w-full rounded-lg border-2 border-base-300 object-contain transition-colors group-hover:border-neutral"
 							/>
 							<button
-								on:click={() => removeImage(i)}
+								onclick={() => removeImage(i)}
 								class="btn absolute -top-2 -right-2 btn-circle opacity-80 shadow-lg btn-xs btn-error hover:opacity-100"
 								title="Remove this reference"
 							>

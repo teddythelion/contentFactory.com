@@ -1,16 +1,20 @@
 <script lang="ts">
 	import { workflowContext } from '$lib/stores/workflow.store';
-	import { onMount, afterUpdate } from 'svelte';
+	import { authStore } from '$lib/stores/auth.store';
+	import { onMount} from 'svelte';
 	import { goto } from '$app/navigation';
-
-	let userInput = '';
-	let isLoading = false;
-	let chatContainer: HTMLDivElement;
-	let suggestedPrompts: Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> = [];
-	let proTipData: string | null = null;
-	let showProTipModal = false;
-	let lastMessageCount = 0;
-
+	import { resolve } from '$app/paths';
+	import AuthModal from '$lib/components/AuthModal.svelte';
+	let userInput = $state('');
+	let isLoading = $state(false);
+	let chatContainer = $state<HTMLDivElement>();
+	let suggestedPrompts = $state<Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }>>([]);
+	let proTipData = $state<string | null>(null);
+	let showProTipModal = $state(false);
+	
+	let showAuthToast = $state(false);
+	let showAuthModal = $state(false);
+	let lastMessageCount = $state(0);
 	// Quick start suggestions - most common use cases
 	const quickStarts = [
 		{ emoji: '👤', text: 'Create a professional avatar', type: 'avatar' },
@@ -21,14 +25,21 @@
 	];
 
 	// ONLY scroll when NEW message is added, not on every update
-	$: if ($workflowContext.chatHistory.length > lastMessageCount && chatContainer) {
-		lastMessageCount = $workflowContext.chatHistory.length;
-		setTimeout(() => {
-			chatContainer.scrollTop = chatContainer.scrollHeight;
-		}, 100);
-	}
+	$effect(() => {
+    if ($workflowContext.chatHistory.length > lastMessageCount && chatContainer) {
+        lastMessageCount = $workflowContext.chatHistory.length;
+			setTimeout(() => {
+				chatContainer.scrollTop = chatContainer.scrollHeight;
+			}, 100);
+   		 }
+	});
 
 	async function sendMessage() {
+		if (!$authStore.user) {
+			showAuthToast = true;
+			setTimeout(() => { showAuthToast = false; }, 6000);
+			return;
+		}
 		if (!userInput.trim() || isLoading) return;
 
 		const message = userInput.trim();
@@ -124,7 +135,7 @@
 			prompt: ` ${promptText} - Add your NICHE/INDUSTRY `,
 			from: 'coach'
 		});
-		goto(`/texttoimage?${params.toString()}`);
+		goto(resolve('/texttoimage') + `?${params.toString()}`);
 	}
 
 	onMount(() => {
@@ -136,7 +147,25 @@
 		}
 	});
 </script>
+<AuthModal bind:isOpen={showAuthModal} />
 
+{#if showAuthToast}
+    <div class="toast toast-top toast-center z-[9999]">
+        <div class="alert alert-warning flex flex-col gap-2 max-w-sm shadow-2xl">
+            <div class="flex items-center gap-2">
+                <span class="text-2xl">🔒</span>
+                <div>
+                    <p class="font-bold">Sign in required</p>
+                    <p class="text-sm">You need to be signed in to use this tool.</p>
+                </div>
+                <button onclick={() => showAuthToast = false} class="btn btn-ghost btn-xs ml-auto">✕</button>
+            </div>
+            <button onclick={() => { showAuthModal = true; showAuthToast = false; }} class="btn btn-primary btn-sm w-full">
+                Sign In Now
+            </button>
+        </div>
+    </div>
+{/if}
 <!-- Floating Pro Tip Modal - EDUCATION CONTENT -->
 {#if showProTipModal && proTipData}
 	<div class="animate-fade-in fixed top-20 right-2 z-50 w-[calc(100vw-1rem)] sm:right-4 sm:w-96 sm:max-w-[calc(100vw-2rem)]">
@@ -151,7 +180,7 @@
 						</div>
 					</div>
 					<button
-						on:click={() => (showProTipModal = false)}
+						onclick={() => (showProTipModal = false)}
 						class="btn btn-circle btn-ghost btn-xs"
 					>
 						✕
@@ -191,9 +220,9 @@
 			<div class="mb-4 space-y-2">
 				<p class="text-xs text-base-content/60">Quick starts:</p>
 				<div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-					{#each quickStarts as suggestion}
+					{#each quickStarts as suggestion , i (i)}
 						<button
-							on:click={() => handleQuickStart(suggestion)}
+							onclick={() => handleQuickStart(suggestion)}
 							class="btn btn-xs sm:btn-sm md:btn-md lg:btn-lg xl:btn-xl btn-neutral "
 						>
 							<span class="text-sm">{suggestion.emoji}</span>
@@ -205,7 +234,7 @@
 		{/if}
 
 		<!-- Chat Messages -->
-		{#each $workflowContext.chatHistory as message}
+		{#each $workflowContext.chatHistory as message , i (i)}
 			<div class="flex gap-2 {message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}">
 				<!-- Avatar -->
 				<div class="shrink-0">
@@ -249,7 +278,7 @@
 					<span class="text-sm font-semibold">Expert Prompt Options-ADD YOUR NICHE/INDUSTRY</span>
 				</div>
 
-				{#each suggestedPrompts as prompt, index}
+				{#each suggestedPrompts as prompt, index (index)}
 					<div class="w-full rounded-lg border border-success/30 bg-success/10 p-2 sm:max-w-[60%] sm:p-3">
 						<div class="mb-2 flex items-center justify-between">
 							<div class="flex items-center gap-2">
@@ -260,13 +289,13 @@
 									<span class="badge badge-ghost badge-xs">Good</span>
 								{/if}
 							</div>
-							<button on:click={(e) => copyPrompt(prompt.text, e)} class="btn btn-ghost btn-xs">
+							<button onclick={(e) => copyPrompt(prompt.text, e)} class="btn btn-ghost btn-xs">
 								📋 <span class="ml-1 hidden sm:inline">Copy</span>
 							</button>
 						</div>
 						<p class="mb-2 text-xs leading-relaxed">{prompt.text}</p>
 						<button
-							on:click={() => goToCreate(prompt.text)}
+							onclick={() => goToCreate(prompt.text)}
 							class="btn btn-block btn-xs btn-success"
 						>
 							🎨 Quick Apply
@@ -289,11 +318,11 @@
 
 	<!-- Input Area - Fixed at Bottom -->
 	<div class="shrink-0 border-t border-base-300 p-2 sm:p-3">
-		<form on:submit|preventDefault={sendMessage} class="w-full">
+		<form onsubmit={(e) => { e.preventDefault(); sendMessage(); }} class="w-full">
 			<div class="flex items-end gap-2">
 				<textarea
 					bind:value={userInput}
-					on:keydown={handleKeyPress}
+					onkeydown={handleKeyPress}
 					placeholder="What do you want to create?"
 					disabled={isLoading}
 					class="textarea-bordered textarea w-full flex-1 resize-y bg-base-200 text-sm textarea-sm focus:outline-neutral disabled:opacity-50"

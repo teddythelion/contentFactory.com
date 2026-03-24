@@ -63,7 +63,7 @@
           </div>
         </div>
 
-        <h3 class="mb-2 text-center text-xl font-bold text-white">Capturing Video</h3>
+        <h3 class="mb-2 text-center text-xl font-bold text-white">Encoding Video</h3>
 
         <p class="mb-6 text-center text-sm text-gray-400">
           {message || 'Please wait...'}

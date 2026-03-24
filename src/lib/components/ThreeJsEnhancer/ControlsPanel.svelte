@@ -15,24 +15,32 @@
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
 
 	// Capture progress state
-	let captureProgress = 0;
-	let captureMessage = '';
-	let showCaptureProgress = false;
+	let captureProgress = $state(0);
+	let captureMessage = $state('');
+	let showCaptureProgress = $state(false);
 
-	$: logoValues = $logoState;
-	$: textValues = $text3DState;
-	$: shapeValues = $threeJsState;
-	$: isSavingEnhanced = $enhancedContentState.isSaving;
-	$: audioStudio = $audioStudioStore;
+	// Mobile tab state — tracks which group is active on mobile
+	let activeMobileTab = 'shape';
+
+	//$: logoValues = $logoState;
+	//$: textValues = $text3DState;
+	//$: shapeValues = $threeJsState;
+	//$: isSavingEnhanced = $enhancedContentState.isSaving;
+	let audioStudio = $derived($audioStudioStore);
+	let videoDuration = $derived($videoState.videoDuration || 8);
+	let sfxMaxTime = $derived(Math.min(8, videoDuration));
+	let musicMaxTime = $derived(videoDuration);
 
 	// Sync original video volume/mute to the canvas video element
-	$: if (typeof window !== 'undefined') {
+	$effect(() => {		
+		if (typeof window !== 'undefined') {
 		const vid = (window as any).__threeJsVideo as HTMLVideoElement | null;
 		if (vid) {
 			vid.muted = audioStudio.originalMuted;
 			vid.volume = audioStudio.originalVolume;
+			}
 		}
-	}
+	});
 
 	interface ControlGroup {
 		id: string;
@@ -81,10 +89,10 @@
 	if (!prompt) return;
 	audioStudioStore.setMusicGenerating(true);
 	try {
-		const video = (window as any).__threeJsVideo as HTMLVideoElement;
-		const durationMs = video?.duration
-			? Math.min(Math.round(video.duration * 1000), 8000)
-			: 8000;
+		//const video = (window as any).__threeJsVideo as HTMLVideoElement;
+		const durationMs = $audioStudioStore.musicDuration
+    	? $audioStudioStore.musicDuration * 1000
+    	: 30000;
 		const res = await fetch('/api/generateMusic', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -98,7 +106,7 @@
 		}
 	}
 
-	$: controlGroups = [
+	let controlGroups = $derived.by(() => [	
 		{
 			id: 'shape',
 			title: 'Shape & Transform',
@@ -314,8 +322,8 @@
 		},
 		// ── AUDIO STUDIO groups — custom template rendering below ──
 		{ id: 'sfx',   title: '🔊 Sound Effects', items: [] },
-		{ id: 'music', title: '🎵 Music',          items: [] }
-	] as ControlGroup[];
+		{ id: 'music', title: '🎵 Music',          items: [] }	
+	]);
 
 	function getControlValue(groupId: string, label: string): number | string | boolean {
 		if (groupId === 'text3d') {
@@ -520,6 +528,19 @@
 			threeJsState.setCapturing(false);
 		}
 	}
+
+	// Short display labels for mobile pill tabs
+	const mobileTabLabels: Record<string, string> = {
+		shape:     'Shape',
+		rotation:  'Rotate',
+		lighting:  'Light',
+		effects:   'FX',
+		particles: 'Particles',
+		text3d:    '3D Text',
+		logo:      'Image',
+		sfx:       'SFX',
+		music:     'Music'
+	};
 </script>
 
 <CaptureProgressOverlay
@@ -528,9 +549,371 @@
 	message={captureMessage}
 />
 
-<div class="flex w-full flex-col gap-3 overflow-y-auto lg:w-96">
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!-- ║  MOBILE LAYOUT — pill tabs + single-panel content       ║ -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<div class="flex h-full flex-col lg:hidden">
+
+	<!-- Horizontal scrollable pill tab row -->
+	<div class="shrink-0 overflow-x-auto border-b border-white/10 bg-gray-900/80 px-2 py-2">
+		<div class="flex gap-1.5" style="width: max-content;">
+			{#each controlGroups as group (group.id)}
+				<button
+					onclick={() => activeMobileTab = group.id}
+					class="whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-colors {activeMobileTab === group.id ? 'bg-blue-600 text-white' : 'bg-gray-700/80 text-gray-300 hover:bg-gray-600'}"
+				>
+					{mobileTabLabels[group.id] ?? group.title}
+				</button>
+			{/each}
+		</div>
+	</div>
+
+	<!-- Active group content — scrolls independently -->
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+		{#each controlGroups as group (group.id)}
+			{#if group.id === activeMobileTab}
+
+				{#if group.id === 'sfx'}
+					<!-- ── SOUND EFFECTS (mobile) ── -->
+					<div class="flex flex-col gap-3">
+						<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
+							<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Original Audio</p>
+							<div class="mb-2 flex items-center justify-between">
+								<span class="text-sm text-white">Mute Original</span>
+								<label class="relative inline-flex cursor-pointer items-center">
+									<input type="checkbox" checked={audioStudio.originalMuted}
+										onchange={(e) => audioStudioStore.setOriginalMuted(e.currentTarget.checked)}
+										class="peer sr-only" />
+									<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+								</label>
+							</div>
+							<div class="mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Volume</span>
+								<span class="text-xs text-gray-400">{Math.round(audioStudio.originalVolume * 100)}%</span>
+							</div>
+							<input type="range" min="0" max="1" step="0.01"
+								value={audioStudio.originalVolume}
+								oninput={(e) => audioStudioStore.setOriginalVolume(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+						</div>
+						<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
+							<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Generate SFX</p>
+							<textarea
+								value={audioStudio.sfxPrompt}
+								oninput={(e) => audioStudioStore.setSfxPrompt(e.currentTarget.value)}
+								placeholder="e.g. deep cinematic space rumble with low frequency boom"
+								rows="2"
+								class="w-full resize-none rounded border border-white/10 bg-gray-700 px-2 py-1 text-sm text-white outline-none focus:border-white/20"
+							></textarea>
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">SFX Volume</span>
+								<span class="text-xs text-gray-400">{Math.round(audioStudio.sfxVolume * 100)}%</span>
+							</div>
+							<input type="range" min="0" max="1" step="0.01"
+								value={audioStudio.sfxVolume}
+								oninput={(e) => audioStudioStore.setSfxVolume(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Start Time</span>
+								<span class="text-xs text-gray-400">{audioStudio.sfxStartTime.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max={sfxMaxTime} step="0.1"
+								value={audioStudio.sfxStartTime}
+								oninput={(e) => audioStudioStore.setSfxStartTime(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">End Time</span>
+								<span class="text-xs text-gray-400">{audioStudio.sfxEndTime.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max={sfxMaxTime} step="0.1"
+								value={audioStudio.sfxEndTime}
+								oninput={(e) => audioStudioStore.setSfxEndTime(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+								<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Duration</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
+							</div>
+							<input type="range" min="5" max="300" step="5"
+								value={audioStudio.musicDuration ?? 30}
+								oninput={(e) => audioStudioStore.setMusicDuration(parseInt(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Fade In</span>
+								<span class="text-xs text-gray-400">{audioStudio.sfxFadeIn.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max="6" step="0.1"
+								value={audioStudio.sfxFadeIn}
+								oninput={(e) => audioStudioStore.setSfxFadeIn(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Fade Out</span>
+								<span class="text-xs text-gray-400">{audioStudio.sfxFadeOut.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max="6" step="0.1"
+								value={audioStudio.sfxFadeOut}
+								oninput={(e) => audioStudioStore.setSfxFadeOut(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+							<div class="mt-3 mb-3 flex items-center justify-between">
+								<span class="text-sm text-white">Loop</span>
+								<label class="relative inline-flex cursor-pointer items-center">
+									<input type="checkbox" checked={audioStudio.sfxLoop}
+										onchange={(e) => audioStudioStore.setSfxLoop(e.currentTarget.checked)}
+										class="peer sr-only" />
+									<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+								</label>
+							</div>
+							<div class="mb-3 flex items-center justify-between">
+								<span class="text-sm text-white">Suppress Original Audio</span>
+								<label class="relative inline-flex cursor-pointer items-center">
+									<input type="checkbox" checked={audioStudio.sfxSuppressOriginal}
+										onchange={(e) => audioStudioStore.setSfxSuppressOriginal(e.currentTarget.checked)}
+										class="peer sr-only" />
+									<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-red-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+								</label>
+							</div>
+							{#if audioStudio.sfxError}
+								<p class="mb-2 text-xs text-red-400">{audioStudio.sfxError}</p>
+							{/if}
+							<div class="flex gap-2">
+								<button onclick={handleGenerateSfx}
+									disabled={audioStudio.sfxGenerating || !audioStudio.sfxPrompt.trim()}
+									class="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+									{audioStudio.sfxGenerating ? '⏳ Generating...' : '🔊 Generate & Preview'}
+								</button>
+								{#if audioStudio.sfxSessionId}
+									<button onclick={() => audioStudioStore.regenerateSfx(handleGenerateSfx)} title="Regenerate" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">🔄</button>
+									<button onclick={() => audioStudioStore.downloadSfx()} title="Download" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">⬇️</button>
+									<button onclick={() => audioStudioStore.stopSfx()} title="Remove" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">✕</button>
+								{:else if audioStudio.sfxGenerating}
+									<button onclick={() => audioStudioStore.stopSfx()} title="Cancel" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">✕</button>
+								{/if}
+							</div>
+							{#if audioStudio.sfxSessionId}
+								<p class="mt-2 text-xs text-green-400">✅ SFX active — will be baked into export</p>
+							{/if}
+						</div>
+					</div>
+
+				{:else if group.id === 'music'}
+					<!-- ── MUSIC (mobile) ── -->
+					<div class="flex flex-col gap-3">
+						<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
+							<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Generate Music</p>
+							<textarea
+								value={audioStudio.musicPrompt}
+								oninput={(e) => audioStudioStore.setMusicPrompt(e.currentTarget.value)}
+								placeholder="e.g. epic orchestral cinematic space adventure, sweeping strings"
+								rows="2"
+								class="w-full resize-none rounded border border-white/10 bg-gray-700 px-2 py-1 text-sm text-white outline-none focus:border-white/20"
+							></textarea>
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Music Volume</span>
+								<span class="text-xs text-gray-400">{Math.round(audioStudio.musicVolume * 100)}%</span>
+							</div>
+							<input type="range" min="0" max="1" step="0.01"
+								value={audioStudio.musicVolume}
+								oninput={(e) => audioStudioStore.setMusicVolume(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Start Time</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicStartTime.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max={musicMaxTime} step="0.1"
+								value={audioStudio.musicStartTime}
+								oninput={(e) => audioStudioStore.setMusicStartTime(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">End Time</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicEndTime.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max={musicMaxTime} step="0.1"
+								value={audioStudio.musicEndTime}
+								oninput={(e) => audioStudioStore.setMusicEndTime(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
+								<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Duration</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
+							</div>
+							<input type="range" min="5" max="300" step="5"
+								value={audioStudio.musicDuration ?? 30}
+								oninput={(e) => audioStudioStore.setMusicDuration(parseInt(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Fade In</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicFadeIn.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max="6" step="0.1"
+								value={audioStudio.musicFadeIn}
+								oninput={(e) => audioStudioStore.setMusicFadeIn(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Fade Out</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicFadeOut.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max="6" step="0.1"
+								value={audioStudio.musicFadeOut}
+								oninput={(e) => audioStudioStore.setMusicFadeOut(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
+							<div class="mt-3 mb-3 flex items-center justify-between">
+								<span class="text-sm text-white">Suppress Original Audio</span>
+								<label class="relative inline-flex cursor-pointer items-center">
+									<input type="checkbox" checked={audioStudio.musicSuppressOriginal}
+										onchange={(e) => audioStudioStore.setMusicSuppressOriginal(e.currentTarget.checked)}
+										class="peer sr-only" />
+									<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-red-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+								</label>
+							</div>
+							
+							{#if audioStudio.musicError}
+								<p class="mb-2 mt-3 text-xs text-red-400">{audioStudio.musicError}</p>
+							{/if}
+							<div class="mt-3 flex gap-2">
+								<button onclick={handleGenerateMusic}
+									disabled={audioStudio.musicGenerating || !audioStudio.musicPrompt.trim()}
+									class="flex-1 rounded-lg bg-purple-600 px-3 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50">
+									{audioStudio.musicGenerating ? '⏳ Generating...' : '🎵 Generate & Preview'}
+								</button>
+								{#if audioStudio.musicSessionId}
+									<button onclick={() => audioStudioStore.regenerateMusic(handleGenerateMusic)} title="Regenerate" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">🔄</button>
+									<button onclick={() => audioStudioStore.downloadMusic()} title="Download" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">⬇️</button>
+									<button onclick={() => audioStudioStore.stopMusic()} title="Remove" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">✕</button>
+								{:else if audioStudio.musicGenerating}
+									<button onclick={() => audioStudioStore.stopMusic()} title="Cancel" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">✕</button>
+								{/if}
+							</div>
+							{#if audioStudio.musicSessionId}
+								<p class="mt-2 text-xs text-green-400">✅ Music active — will be baked into export</p>
+							{/if}
+						</div>
+					</div>
+
+				{:else}
+					<!-- ── STANDARD CONTROLS (mobile) ── -->
+					{#each group.items as item (item.label)}
+						{#if item.type === 'component'}
+							<div class="rounded-lg p-3 hover:bg-white/5">
+							{#if item.component}										
+								<item.component {...(item.componentProps as any)} />
+							{/if}
+								
+							</div>
+						{:else if item.type === 'select'}
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<div class="mb-2 flex items-center justify-between">
+									<span class="text-sm font-semibold text-white">{item.label}</span>
+								</div>
+								<select
+									value={getControlValue(group.id, item.label)}
+									onchange={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
+									class="w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white outline-none focus:border-white/20"
+								>
+									{#each item.options || [] as option (typeof option === 'string' ? option : option.value)}
+										{#if typeof option === 'string'}
+											<option value={option}>{(option as string).charAt(0).toUpperCase() + (option as string).slice(1)}</option>
+										{:else}
+											<option value={option.value}>{option.label}</option>
+										{/if}
+									{/each}
+								</select>
+							</div>
+						{:else if item.type === 'toggle'}
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<div class="flex items-center justify-between">
+									<span class="text-sm font-semibold text-white">{item.label}</span>
+									<label class="relative inline-flex cursor-pointer items-center">
+										<input type="checkbox"
+											checked={getBooleanValue(group.id, item.label)}
+											onchange={(e) => setControlValue(group.id, item.label, e.currentTarget.checked)}
+											class="peer sr-only" />
+										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+									</label>
+								</div>
+							</div>
+						{:else if item.type === 'button'}
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<button onclick={item.action}
+									class="w-full rounded-lg border border-white/10 bg-gray-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-600">
+									{item.label}
+								</button>
+							</div>
+						{:else if item.type === 'color'}
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<div class="mb-2 flex items-center justify-between">
+									<span class="text-sm font-semibold text-white">{item.label}</span>
+								</div>
+								<input type="color"
+									value={getControlValue(group.id, item.label)}
+									oninput={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
+									class="h-8 w-full cursor-pointer rounded border border-white/10" />
+							</div>
+						{:else if item.type === 'text'}
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<div class="mb-2 flex items-center justify-between">
+									<span class="text-sm font-semibold text-white">{item.label}</span>
+								</div>
+								<textarea
+									value={String(getControlValue(group.id, item.label))}
+									oninput={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
+									class="w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-sm text-white outline-none focus:border-white/20"
+									placeholder="Enter text..."
+								></textarea>
+							</div>
+						{:else if item.type === 'range'}
+							<!-- Mobile range: no number input box, saves vertical space -->
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<div class="mb-2 flex items-center justify-between">
+									<span class="text-sm font-semibold text-white">{item.label}</span>
+									<span class="text-xs text-gray-400">
+										{getNumberValue(group.id, item.label).toFixed(item.step && item.step < 0.01 ? 3 : 2)}{getUnit(item.label)}
+									</span>
+								</div>
+								<input type="range" min={item.min} max={item.max} step={item.step}
+									value={getNumberValue(group.id, item.label)}
+									oninput={(e) => setControlValue(group.id, item.label, parseFloat(e.currentTarget.value))}
+									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+							</div>
+						{/if}
+					{/each}
+				{/if}
+
+			{/if}
+		{/each}
+	</div>
+
+	<!-- Mobile action buttons — pinned to bottom -->
+	<div class="shrink-0 flex flex-col gap-2 border-t border-white/10 bg-gray-900/80 px-3 py-3">
+		<div class="flex gap-2">
+			<button onclick={() => threeJsState.resetVisuals()}
+				class="flex-1 rounded-lg border border-white/10 bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-700/50 disabled:opacity-50"
+				disabled={$threeJsState.isCapturing}>
+				🔄 Reset All
+			</button>
+			<button onclick={handleCapture}
+				class="flex-1 rounded-lg border border-white/10 bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+				disabled={$threeJsState.isCapturing || !$videoState.isVideoLoaded}>
+				{#if $threeJsState.isCapturing}
+					🎥 Capturing...
+				{:else}
+					🎬 Capture & Download
+				{/if}
+			</button>
+		</div>
+		{#if $enhancedContentState.saveStatus}
+			<div class="alert py-2 alert-success"><p class="text-sm">{$enhancedContentState.saveStatus}</p></div>
+		{/if}
+		{#if $enhancedContentState.saveError}
+			<div class="alert py-2 alert-error"><p class="text-sm">{$enhancedContentState.saveError}</p></div>
+		{/if}
+	</div>
+</div>
+
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!-- ║  DESKTOP LAYOUT — original accordions, untouched        ║ -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<div class="hidden lg:flex w-full flex-col gap-3 overflow-y-auto lg:w-96">
 	<div class="flex flex-col gap-2 overflow-y-auto pr-2" style="max-height: calc(100vh - 200px);">
-		{#each controlGroups as group}
+		{#each controlGroups as group (group.id)}
 			<div class="rounded-lg border border-white/10 bg-gray-800/50">
 				<details class="group">
 					<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
@@ -541,8 +924,6 @@
 					</summary>
 
 					<div class="px-2 pb-2">
-
-					
 
 					{#if group.id === 'sfx'}
 						<!-- ── SOUND EFFECTS ─────────────────────────────── -->
@@ -555,7 +936,7 @@
 									<span class="text-sm text-white">Mute Original</span>
 									<label class="relative inline-flex cursor-pointer items-center">
 										<input type="checkbox" checked={audioStudio.originalMuted}
-											on:change={(e) => audioStudioStore.setOriginalMuted(e.currentTarget.checked)}
+											onchange={(e) => audioStudioStore.setOriginalMuted(e.currentTarget.checked)}
 											class="peer sr-only" />
 										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
 									</label>
@@ -566,7 +947,7 @@
 								</div>
 								<input type="range" min="0" max="1" step="0.01"
 									value={audioStudio.originalVolume}
-									on:input={(e) => audioStudioStore.setOriginalVolume(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setOriginalVolume(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 							</div>
 
@@ -575,7 +956,7 @@
 								<p class="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Generate SFX</p>
 								<textarea
 									value={audioStudio.sfxPrompt}
-									on:input={(e) => audioStudioStore.setSfxPrompt(e.currentTarget.value)}
+									oninput={(e) => audioStudioStore.setSfxPrompt(e.currentTarget.value)}
 									placeholder="e.g. deep cinematic space rumble with low frequency boom"
 									rows="2"
 									class="w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-sm text-white outline-none focus:border-white/20 resize-none"
@@ -588,7 +969,7 @@
 								</div>
 								<input type="range" min="0" max="1" step="0.01"
 									value={audioStudio.sfxVolume}
-									on:input={(e) => audioStudioStore.setSfxVolume(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setSfxVolume(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 
 								<!-- Start Time -->
@@ -596,9 +977,9 @@
 									<span class="text-sm text-white">Start Time</span>
 									<span class="text-xs text-gray-400">{audioStudio.sfxStartTime.toFixed(1)}s</span>
 								</div>
-								<input type="range" min="0" max="8" step="0.1"
+								<input type="range" min="0" max={sfxMaxTime} step="0.1"
 									value={audioStudio.sfxStartTime}
-									on:input={(e) => audioStudioStore.setSfxStartTime(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setSfxStartTime(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 
 								<!-- End Time -->
@@ -606,11 +987,18 @@
 									<span class="text-sm text-white">End Time</span>
 									<span class="text-xs text-gray-400">{audioStudio.sfxEndTime.toFixed(1)}s</span>
 								</div>
-								<input type="range" min="0" max="8" step="0.1"
+								<input type="range" min="0" max={sfxMaxTime} step="0.1"
 									value={audioStudio.sfxEndTime}
-									on:input={(e) => audioStudioStore.setSfxEndTime(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setSfxEndTime(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
-
+								<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Duration</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
+							</div>
+							<input type="range" min="5" max="300" step="5"
+								value={audioStudio.musicDuration ?? 30}
+								oninput={(e) => audioStudioStore.setMusicDuration(parseInt(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 								<!-- Fade In -->
 								<div class="mt-3 flex items-center justify-between mb-1">
 									<span class="text-sm text-white">Fade In</span>
@@ -618,7 +1006,7 @@
 								</div>
 								<input type="range" min="0" max="6" step="0.1"
 									value={audioStudio.sfxFadeIn}
-									on:input={(e) => audioStudioStore.setSfxFadeIn(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setSfxFadeIn(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 
 								<!-- Fade Out -->
@@ -628,7 +1016,7 @@
 								</div>
 								<input type="range" min="0" max="6" step="0.1"
 									value={audioStudio.sfxFadeOut}
-									on:input={(e) => audioStudioStore.setSfxFadeOut(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setSfxFadeOut(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 
 								<!-- Loop -->
@@ -636,7 +1024,7 @@
 									<span class="text-sm text-white">Loop</span>
 									<label class="relative inline-flex cursor-pointer items-center">
 										<input type="checkbox" checked={audioStudio.sfxLoop}
-											on:change={(e) => audioStudioStore.setSfxLoop(e.currentTarget.checked)}
+											onchange={(e) => audioStudioStore.setSfxLoop(e.currentTarget.checked)}
 											class="peer sr-only" />
 										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
 									</label>
@@ -645,7 +1033,7 @@
 									<span class="text-sm text-white">Suppress Original Audio</span>
 									<label class="relative inline-flex cursor-pointer items-center">
 										<input type="checkbox" checked={audioStudio.sfxSuppressOriginal}
-											on:change={(e) => audioStudioStore.setSfxSuppressOriginal(e.currentTarget.checked)}
+											onchange={(e) => audioStudioStore.setSfxSuppressOriginal(e.currentTarget.checked)}
 											class="peer sr-only" />
 										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-red-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
 									</label>
@@ -656,26 +1044,26 @@
 
 								<!-- Action buttons -->
 								<div class="flex gap-2">
-									<button on:click={handleGenerateSfx}
+									<button onclick={handleGenerateSfx}
 										disabled={audioStudio.sfxGenerating || !audioStudio.sfxPrompt.trim()}
 										class="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
 										{audioStudio.sfxGenerating ? '⏳ Generating...' : '🔊 Generate & Preview'}
 									</button>
 									{#if audioStudio.sfxSessionId}
-										<button on:click={() => audioStudioStore.regenerateSfx(handleGenerateSfx)}
+										<button onclick={() => audioStudioStore.regenerateSfx(handleGenerateSfx)}
 											title="Regenerate" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
 											🔄
 										</button>
-										<button on:click={() => audioStudioStore.downloadSfx()}
+										<button onclick={() => audioStudioStore.downloadSfx()}
 											title="Download" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
 											⬇️
 										</button>
-										<button on:click={() => audioStudioStore.stopSfx()}
+										<button onclick={() => audioStudioStore.stopSfx()}
 											title="Remove" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
 											✕
 										</button>
 									{:else if audioStudio.sfxGenerating}
-										<button on:click={() => audioStudioStore.stopSfx()}
+										<button onclick={() => audioStudioStore.stopSfx()}
 											title="Cancel" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
 											✕
 										</button>
@@ -695,7 +1083,7 @@
 								<p class="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Generate Music</p>
 								<textarea
 									value={audioStudio.musicPrompt}
-									on:input={(e) => audioStudioStore.setMusicPrompt(e.currentTarget.value)}
+									oninput={(e) => audioStudioStore.setMusicPrompt(e.currentTarget.value)}
 									placeholder="e.g. epic orchestral cinematic space adventure, sweeping strings"
 									rows="2"
 									class="w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-sm text-white outline-none focus:border-white/20 resize-none"
@@ -708,7 +1096,7 @@
 								</div>
 								<input type="range" min="0" max="1" step="0.01"
 									value={audioStudio.musicVolume}
-									on:input={(e) => audioStudioStore.setMusicVolume(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setMusicVolume(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 
 								<!-- Start Time -->
@@ -716,9 +1104,9 @@
 									<span class="text-sm text-white">Start Time</span>
 									<span class="text-xs text-gray-400">{audioStudio.musicStartTime.toFixed(1)}s</span>
 								</div>
-								<input type="range" min="0" max="16" step="0.1"
+								<input type="range" min="0" max={musicMaxTime} step="0.1"
 									value={audioStudio.musicStartTime}
-									on:input={(e) => audioStudioStore.setMusicStartTime(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setMusicStartTime(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 
 								<!-- End Time -->
@@ -726,11 +1114,18 @@
 									<span class="text-sm text-white">End Time</span>
 									<span class="text-xs text-gray-400">{audioStudio.musicEndTime.toFixed(1)}s</span>
 								</div>
-								<input type="range" min="0" max="16" step="0.1"
+								<input type="range" min="0" max={musicMaxTime} step="0.1"
 									value={audioStudio.musicEndTime}
-									on:input={(e) => audioStudioStore.setMusicEndTime(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setMusicEndTime(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
-
+								<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Duration</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
+							</div>
+							<input type="range" min="5" max="300" step="5"
+								value={audioStudio.musicDuration ?? 30}
+								oninput={(e) => audioStudioStore.setMusicDuration(parseInt(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 								<!-- Fade In -->
 								<div class="mt-3 flex items-center justify-between mb-1">
 									<span class="text-sm text-white">Fade In</span>
@@ -738,7 +1133,7 @@
 								</div>
 								<input type="range" min="0" max="6" step="0.1"
 									value={audioStudio.musicFadeIn}
-									on:input={(e) => audioStudioStore.setMusicFadeIn(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setMusicFadeIn(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 
 								<!-- Fade Out -->
@@ -748,14 +1143,14 @@
 								</div>
 								<input type="range" min="0" max="6" step="0.1"
 									value={audioStudio.musicFadeOut}
-									on:input={(e) => audioStudioStore.setMusicFadeOut(parseFloat(e.currentTarget.value))}
+									oninput={(e) => audioStudioStore.setMusicFadeOut(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 
 									<div class="flex items-center justify-between mb-3 mt-3">
 									<span class="text-sm text-white">Suppress Original Audio</span>
 									<label class="relative inline-flex cursor-pointer items-center">
 										<input type="checkbox" checked={audioStudio.musicSuppressOriginal}
-											on:change={(e) => audioStudioStore.setMusicSuppressOriginal(e.currentTarget.checked)}
+											onchange={(e) => audioStudioStore.setMusicSuppressOriginal(e.currentTarget.checked)}
 											class="peer sr-only" />
 										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-red-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
 									</label>
@@ -767,26 +1162,26 @@
 
 								<!-- Action buttons -->
 								<div class="flex gap-2 mt-3">
-									<button on:click={handleGenerateMusic}
+									<button onclick={handleGenerateMusic}
 										disabled={audioStudio.musicGenerating || !audioStudio.musicPrompt.trim()}
 										class="flex-1 rounded-lg bg-purple-600 px-3 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50">
 										{audioStudio.musicGenerating ? '⏳ Generating...' : '🎵 Generate & Preview'}
 									</button>
 									{#if audioStudio.musicSessionId}
-										<button on:click={() => audioStudioStore.regenerateMusic(handleGenerateMusic)}
+										<button onclick={() => audioStudioStore.regenerateMusic(handleGenerateMusic)}
 											title="Regenerate" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
 											🔄
 										</button>
-										<button on:click={() => audioStudioStore.downloadMusic()}
+										<button onclick={() => audioStudioStore.downloadMusic()}
 											title="Download" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
 											⬇️
 										</button>
-										<button on:click={() => audioStudioStore.stopMusic()}
+										<button onclick={() => audioStudioStore.stopMusic()}
 											title="Remove" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
 											✕
 										</button>
 									{:else if audioStudio.musicGenerating}
-										<button on:click={() => audioStudioStore.stopMusic()}
+										<button onclick={() => audioStudioStore.stopMusic()}
 											title="Cancel" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
 											✕
 										</button>
@@ -801,10 +1196,12 @@
 
 						{:else}
 							<!-- ── STANDARD CONTROLS ──────────────────────────── -->
-							{#each group.items as item}
+							{#each group.items as item (item.label)}
 								{#if item.type === 'component'}
 									<div class="rounded-lg p-3 hover:bg-white/5">
-										<svelte:component this={item.component} {...item.componentProps} />
+										{#if item.component}										
+											<item.component {...(item.componentProps as any)} />
+										{/if}
 									</div>
 								{:else if item.type === 'select'}
 									<div class="rounded-lg p-3 hover:bg-white/5">
@@ -813,12 +1210,12 @@
 										</div>
 										<select
 											value={getControlValue(group.id, item.label)}
-											on:change={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
+											onchange={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
 											class="w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white outline-none focus:border-white/20"
 										>
-											{#each item.options || [] as option}
+											{#each item.options || [] as option (typeof option === 'string' ? option : option.value)}
 												{#if typeof option === 'string'}
-													<option value={option}>{option.charAt(0).toUpperCase() + option.slice(1)}</option>
+													<option value={option}>{(option as string).charAt(0).toUpperCase() + (option as string).slice(1)}</option>
 												{:else}
 													<option value={option.value}>{option.label}</option>
 												{/if}
@@ -832,7 +1229,7 @@
 											<label class="relative inline-flex cursor-pointer items-center">
 												<input type="checkbox"
 													checked={getBooleanValue(group.id, item.label)}
-													on:change={(e) => setControlValue(group.id, item.label, e.currentTarget.checked)}
+													onchange={(e) => setControlValue(group.id, item.label, e.currentTarget.checked)}
 													class="peer sr-only" />
 												<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
 											</label>
@@ -840,7 +1237,7 @@
 									</div>
 								{:else if item.type === 'button'}
 									<div class="rounded-lg p-3 hover:bg-white/5">
-										<button on:click={item.action}
+										<button onclick={item.action}
 											class="w-full rounded-lg border border-white/10 bg-gray-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-600">
 											{item.label}
 										</button>
@@ -852,7 +1249,7 @@
 										</div>
 										<input type="color"
 											value={getControlValue(group.id, item.label)}
-											on:input={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
+											oninput={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
 											class="h-8 w-full cursor-pointer rounded border border-white/10" />
 									</div>
 								{:else if item.type === 'text'}
@@ -862,7 +1259,7 @@
 										</div>
 										<textarea
 											value={String(getControlValue(group.id, item.label))}
-											on:input={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
+											oninput={(e) => setControlValue(group.id, item.label, e.currentTarget.value)}
 											class="w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-sm text-white outline-none focus:border-white/20"
 											placeholder="Enter text..."
 										></textarea>
@@ -877,11 +1274,11 @@
 										</div>
 										<input type="range" min={item.min} max={item.max} step={item.step}
 											value={getNumberValue(group.id, item.label)}
-											on:input={(e) => setControlValue(group.id, item.label, parseFloat(e.currentTarget.value))}
+											oninput={(e) => setControlValue(group.id, item.label, parseFloat(e.currentTarget.value))}
 											class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 										<input type="number" min={item.min} max={item.max} step={item.step}
 											value={getNumberValue(group.id, item.label)}
-											on:change={(e) => setControlValue(group.id, item.label, parseFloat(e.currentTarget.value))}
+											onchange={(e) => setControlValue(group.id, item.label, parseFloat(e.currentTarget.value))}
 											class="mt-2 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white outline-none focus:border-white/20" />
 									</div>
 								{/if}
@@ -894,14 +1291,14 @@
 		{/each}
 	</div>
 
-	<!-- ACTION BUTTONS -->
+	<!-- ACTION BUTTONS (desktop) -->
 	<div class="mt-auto flex flex-col gap-2 border-t border-white/10 pt-4">
-		<button on:click={() => threeJsState.resetVisuals()}
+		<button onclick={() => threeJsState.resetVisuals()}
 			class="rounded-lg border border-white/10 bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-700/50 disabled:opacity-50"
 			disabled={$threeJsState.isCapturing}>
 			🔄 Reset All
 		</button>
-		<button on:click={handleCapture}
+		<button onclick={handleCapture}
 			class="rounded-lg border border-white/10 bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
 			disabled={$threeJsState.isCapturing || !$videoState.isVideoLoaded}>
 			{#if $threeJsState.isCapturing}

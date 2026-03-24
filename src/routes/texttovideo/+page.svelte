@@ -13,31 +13,32 @@
 	import { saveContentToCloud } from '$lib/utils/saveContent';
 	import { onMount } from 'svelte';
 	import PromptCoachRefine from '$lib/components/PromptCoachRefine.svelte';
+	import AuthModal from '$lib/components/AuthModal.svelte';
+	import { resolve } from '$app/paths';
 
-	let prompt = '';
-	let duration = 8;
-	let operation = '';
-	let video = '';
-	let status = '';
-	let isGenerating = false;
-	let aspectRatios = '16:9';
-	let uploadedImages: File[] = [];
-	let imagePreviews: string[] = [];
-	let isProcessingImages = false;
-	let uploadedVideoForEditing: string = '';
-	let isVideoUploaded = false;
-	let showPromptCoach = false;
+	let prompt = $state('');
+	let duration = $state(8);
+	let operation = $state('');
+	let video = $state('');
+	let status = $state('');
+	let isGenerating = $state(false);
+	let aspectRatios = $state('16:9');
+	let uploadedImages = $state<File[]>([]);
+	let imagePreviews = $state<string[]>([]);
+	let isVideoUploaded = $state(false);
+	let uploadedVideoForEditing = $state('');
+	let showPromptCoach = $state(false);
 	// Save state
-	let isSaving = false;
-	let saveStatus = '';
-	let savedContentId = '';
-	
+	let isSaving = $state(false);
+	let saveStatus = $state('');
+	let savedContentId = $state('');
 	// Enhancement modals
-	let showVideoEnhancer = false;
-	let showEffectsPanel = false;
-	let audioSessionId: string | null = null;
-	let isExtractingAudio = false;
-
+	let showVideoEnhancer = $state(false);
+	let showEffectsPanel = $state(false);
+	let audioSessionId = $state<string | null>(null);
+	// Auth toast
+	let showAuthToast = $state(false);
+	let showAuthModal = $state(false);
 	onMount(() => {
 		try {
 			const saved = sessionStorage.getItem('texttovideo_state');
@@ -88,6 +89,11 @@
 	}
 
 	async function generate() {
+		if (!$authStore.user) {
+			showAuthToast = true;
+			setTimeout(() => { showAuthToast = false; }, 6000);
+			return;
+		}
 		if (!prompt.trim()) {
 			status = 'Error: Prompt is required';
 			return;
@@ -217,8 +223,9 @@
 	}
 	async function saveToLibrary() {
 		if (!$authStore.user) {
-			saveStatus = 'Please sign in to save content';
-			return;
+   		 showAuthToast = true;
+    	setTimeout(() => { showAuthToast = false; }, 6000);
+    	return;
 		}
 
 		if (!video || video.startsWith('data:video')) {
@@ -269,7 +276,7 @@
 		if (files && files.length > 0) {
 			uploadedImages = Array.from(files);
 			imagePreviews = [];
-			isProcessingImages = true;
+			//isProcessingImages = true;
 
 			let loadedCount = 0;
 
@@ -282,7 +289,7 @@
 					loadedCount++;
 
 					if (loadedCount === uploadedImages.length) {
-						isProcessingImages = false;
+						//isProcessingImages = false;
 					}
 				};
 				reader.readAsDataURL(file);
@@ -332,8 +339,12 @@
 
 	async function openVideoEnhancer() {
 	if (!video) return;
-
-	isExtractingAudio = true;
+	if (!$authStore.user) {
+    showAuthToast = true;
+    setTimeout(() => { showAuthToast = false; }, 6000);
+    return;
+	}
+	//isExtractingAudio = true;
 	status = 'Preparing enhancer...';
 
 	try {
@@ -374,7 +385,7 @@
 		console.warn('⚠️ Audio extraction error — continuing without audio preservation:', err);
 		audioSessionId = null;
 	} finally {
-		isExtractingAudio = false;
+		//isExtractingAudio = false;
 		status = video ? 'Done! Ready to enhance or download.' : '';
 	}
 
@@ -383,12 +394,17 @@
 	}
 
 	function openEffectsPanel() {
+	if (!$authStore.user) {
+    showAuthToast = true;
+    setTimeout(() => { showAuthToast = false; }, 6000);
+    return;
+	}
 		if (video) {
 			showEffectsPanel = true;
 		}
 	}
 
-	function downloadVideo() {
+	/*function downloadVideo() {
 		if (!video) return;
 		const a = document.createElement('a');
 		a.href = video;
@@ -396,16 +412,34 @@
 		document.body.appendChild(a);
 		a.click();
 		a.remove();
-	}
+	}*/
 </script>
+<AuthModal bind:isOpen={showAuthModal} />
 
+{#if showAuthToast}
+    <div class="toast toast-top toast-center z-[9999]">
+        <div class="alert alert-warning flex flex-col gap-2 max-w-sm shadow-2xl">
+            <div class="flex items-center gap-2">
+                <span class="text-2xl">🔒</span>
+                <div>
+                    <p class="font-bold">Sign in required</p>
+                    <p class="text-sm">You need to be signed in to use this tool.</p>
+                </div>
+                <button onclick={() => showAuthToast = false} class="btn btn-ghost btn-xs ml-auto">✕</button>
+            </div>
+            <button onclick={() => { showAuthModal = true; showAuthToast = false; }} class="btn btn-primary btn-sm w-full">
+                Sign In Now
+            </button>
+        </div>
+    </div>
+{/if}
 <div class="flex flex-col gap-6 py-4 lg:flex-row xl:pl-12 2xl:pl-20">
 	<!-- LEFT SIDE: Input Controls -->
 	<div
 		class="flex flex-1 flex-col gap-4 sm:w-full md:w-full lg:max-w-4/5 xl:max-w-3/5 2xl:max-w-1/3"
 	>
 		<p class="text-center text-sm text-white">Videos come in 4, 6, and 8 seconds.</p>
-		<button on:click={() => (showPromptCoach = true)} class="btn max-w-66 gap-2 btn-sm btn-neutral">
+		<button onclick={() => (showPromptCoach = true)} class="btn max-w-66 gap-2 btn-sm btn-neutral">
 			<span>🎨</span>
 			<span>Use Prompt Engineer</span>
 		</button>
@@ -417,7 +451,7 @@
 						<div class="flex items-center justify-between border-b border-base-300 p-4">
 							<h3 class="text-lg font-bold">Prompt Engineer</h3>
 							<button
-								on:click={() => (showPromptCoach = false)}
+								onclick={() => (showPromptCoach = false)}
 								class="btn btn-circle btn-ghost btn-sm"
 							>
 								✕
@@ -457,7 +491,7 @@
 				type="file"
 				accept="image/*"
 				multiple
-				on:change={handleImageUpload}
+				onchange={handleImageUpload}
 				class="file-input w-full file-input-info"
 			/>
 			{#if uploadedImages.length > 0}
@@ -480,7 +514,7 @@
 
 		<div class="flex flex-col gap-3">
 			<button
-				on:click={generate}
+				onclick={generate}
 				disabled={isGenerating || !prompt || isVideoUploaded}
 				class="btn btn-info {isGenerating || !prompt || isVideoUploaded ? 'btn-disabled' : ''}"
 				title={isVideoUploaded ? 'Cannot generate while video is uploaded for editing' : ''}
@@ -490,7 +524,7 @@
 
 			{#if video && !isGenerating && !isVideoUploaded && !savedContentId}
 				<button
-					on:click={saveToLibrary}
+					onclick={saveToLibrary}
 					disabled={isSaving || !$authStore.user}
 					class="btn btn-primary {isSaving || !$authStore.user ? 'btn-disabled' : ''}"
 				>
@@ -501,7 +535,7 @@
 			{#if savedContentId}
 				<div class="alert py-2 alert-success">
 					<span class="text-sm"
-						>✅ Saved! <a href="/content-library" class="link">View in Content Library</a></span
+						>✅ Saved! <a  href={resolve('/content-library')} class="link">View in Content Library</a></span
 					>
 				</div>
 			{/if}
@@ -513,7 +547,7 @@
 			{/if}
 
 			{#if uploadedImages.length > 0}
-				<button on:click={clearImages} class="btn btn-outline btn-sm btn-error">
+				<button onclick={clearImages} class="btn btn-outline btn-sm btn-error">
 					Clear Images
 				</button>
 			{/if}
@@ -551,18 +585,18 @@
 						class="dropdown-content menu z-1 w-52 rounded-box bg-base-100 p-2 shadow-sm"
 					>
 						<li>
-							<button on:click={openVideoEnhancer} class="btn-default btn mb-2 btn-sm">
+							<button onclick={openVideoEnhancer} class="btn-default btn mb-2 btn-sm">
 								🎬 Enhance
 							</button>
 						</li>
 						<li>
-							<button on:click={openEffectsPanel} class="btn-default btn btn-sm">
+							<button onclick={openEffectsPanel} class="btn-default btn btn-sm">
 								✨ Effects
 							</button>
 						</li>
 						{#if isVideoUploaded}
 							<li>
-								<button on:click={clearUploadedVideo} class="btn-default btn btn-sm">
+								<button onclick={clearUploadedVideo} class="btn-default btn btn-sm">
 									🗑️ Remove
 								</button>
 							</li>
@@ -578,14 +612,14 @@
 						<div class="tooltip" data-tip="Upload video for editing (no generation)">
 							<label class="btn cursor-pointer btn-outline btn-sm btn-info">
 								📤 Upload Video to Edit
-								<input type="file" accept="video/*" on:change={handleVideoUpload} class="hidden" />
+								<input type="file" accept="video/*" onchange={handleVideoUpload} class="hidden" />
 							</label>
 						</div>
 					</div>
 				</div>
 			{/if}
 			{#if video}
-				<button on:click={clearSession} class="btn-default btn btn-outline btn-sm">
+				<button onclick={clearSession} class="btn-default btn btn-outline btn-sm">
 					🔄 Start Fresh
 				</button>
 			{/if}
@@ -596,11 +630,11 @@
 			<div class="rounded-lg bg-base-300 p-4">
 				<p class="mb-3 text-sm font-semibold text-white">Selected Images:</p>
 				<div class="flex flex-wrap gap-3">
-					{#each imagePreviews as preview, index}
+					{#each imagePreviews as preview, index (index)}
 						<div class="group relative h-24 w-24 overflow-hidden rounded-lg border-2 border-info">
 							<img src={preview} alt="preview" class="h-full w-full object-cover" />
 							<button
-								on:click={() => removeImage(index)}
+								onclick={() => removeImage(index)}
 								class="btn absolute top-1 right-1 btn-circle opacity-0 transition-opacity btn-xs btn-error group-hover:opacity-100"
 								aria-label="Remove image"
 							>

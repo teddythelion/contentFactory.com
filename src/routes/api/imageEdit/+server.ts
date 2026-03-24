@@ -102,7 +102,9 @@ function getTextFromResult(result: any): string {
 		try {
 			const val = fn();
 			if (typeof val === 'string' && val.length > 0) return val.trim();
-		} catch {}
+		} catch {
+			console.log('catch');
+		}
 	}
 	return '';
 }
@@ -143,7 +145,7 @@ function bufferToInlinePart(buffer: Buffer, mimeType = 'image/png') {
 
 function safeJsonParse(text: string): any {
 	// Strip markdown fences, BOM, zero-width chars
-	let s = text
+	const s = text
 		.replace(/```json\s*/gi, '')
 		.replace(/```\s*/g, '')
 		.replace(/^\uFEFF/, '')
@@ -153,7 +155,9 @@ function safeJsonParse(text: string): any {
 	// Direct parse
 	try {
 		return JSON.parse(s);
-	} catch {}
+	} catch {
+		console.log('catch');
+	}
 
 	// Extract between first { and last }
 	const i = s.indexOf('{');
@@ -161,7 +165,9 @@ function safeJsonParse(text: string): any {
 	if (i !== -1 && j > i) {
 		try {
 			return JSON.parse(s.substring(i, j + 1));
-		} catch {}
+		} catch {
+			console.log('catch');
+		}
 	}
 
 	throw new Error(`Cannot parse JSON from: ${s.slice(0, 200)}`);
@@ -326,7 +332,7 @@ export async function POST({ request }: { request: Request }) {
 			if (key === 'images' && value instanceof File) imageFiles.push(value);
 		}
 
-		if (!userPrompt || imageFiles.length === 0) {
+		if (!userPrompt && imageFiles.length === 0) {
 			return new Response(JSON.stringify({ error: 'Missing prompt or images' }), {
 				status: 400,
 				headers: { 'Content-Type': 'application/json' }
@@ -334,11 +340,29 @@ export async function POST({ request }: { request: Request }) {
 		}
 
 		// 1) Normalize primary to PNG
+		if (imageFiles.length === 0) {
+			// Prompt-only generation
+			const out = await editWithNanoBananaPro({
+				imageBuffers: [],
+				prompt: `${PHOTOREALISTIC_ENHANCEMENT_SYSTEM_PROMPT}\n\nUSER REQUEST:\n${userPrompt}\n\nCommercial-grade realism. Crisp detail. Accurate materials. Plausible lighting.`
+			});
+
+			return new Response(
+				JSON.stringify({
+					success: true,
+					imageUrl: out.dataUrl,
+					mode: 'prompt-only',
+					model: 'nano-banana-pro',
+					imagesUsed: 0
+				}),
+				{ headers: { 'Content-Type': 'application/json' } }
+			);
+		}
+		// 1) Normalize primary to PNG — only reached if imageFiles.length > 0
 		const primaryBuffer = await sharp(Buffer.from(await imageFiles[0].arrayBuffer()))
 			.rotate()
 			.png()
 			.toBuffer();
-
 		const meta = await sharp(primaryBuffer).metadata();
 		const width = meta.width!;
 		const height = meta.height!;

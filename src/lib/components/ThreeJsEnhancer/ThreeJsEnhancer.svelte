@@ -124,8 +124,67 @@
 </script>
 
 {#if currentView === 'enhance'}
-	<div class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/90 p-4">
-		<div class="flex h-full w-full max-w-7xl flex-col gap-4 overflow-hidden lg:flex-row">
+	<div class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/90 p-0 lg:p-4">
+
+		<!-- ── MOBILE LAYOUT (flex-col, full screen) ── -->
+		<div class="flex h-full w-full flex-col lg:hidden">
+
+			<!-- Mobile Header -->
+			<div class="flex shrink-0 items-center justify-between px-4 py-2">
+				<h2 class="text-lg font-bold text-white">Video Editor</h2>
+				<button
+					on:click={onClose}
+					class="btn btn-circle btn-ghost btn-sm"
+					aria-label="Close enhancer"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
+			</div>
+
+			<!-- Mobile Video Preview — fixed 45% height, always visible -->
+			<div class="relative shrink-0 overflow-hidden rounded-lg bg-base-300 mx-4" style="height: 45svh;">
+				{#if videoError}
+					<div class="absolute inset-0 flex items-center justify-center bg-red-900/50 backdrop-blur-lg">
+						<p class="text-red-300">{videoError}</p>
+					</div>
+				{:else if !isSceneReady}
+					<div class="absolute inset-0 z-10 flex items-center justify-center bg-black/60 backdrop-blur-lg">
+						<div class="flex flex-col items-center gap-4">
+							<div class="loading loading-lg loading-spinner text-info"></div>
+							<p class="text-center text-white">Loading 3D scene...</p>
+							<p class="text-center text-xs text-white/50">This may take a moment for large videos</p>
+						</div>
+					</div>
+				{/if}
+				<div class="relative h-full w-full">
+					<ThreeJsScene />
+				</div>
+			</div>
+
+			<!-- Mobile capture success banner — compact, non-intrusive -->
+			{#if processedVideoUrl}
+				<div class="mx-4 mt-2 shrink-0 rounded-lg border border-green-500/50 bg-green-900/30 px-3 py-2 flex items-center justify-between gap-2">
+					<p class="text-xs text-green-400">✅ Video captured!</p>
+					<button on:click={downloadProcessedVideo} class="btn btn-xs btn-success" disabled={isCapturing}>
+						⬇️ Download
+					</button>
+				</div>
+			{:else if isCapturing}
+				<div class="mx-4 mt-2 shrink-0 rounded-lg border border-blue-500/50 bg-blue-900/30 px-3 py-2">
+					<p class="text-xs text-blue-400">🎬 Capturing video...</p>
+				</div>
+			{/if}
+
+			<!-- Mobile Controls Panel — takes remaining height, scrolls independently -->
+			<div class="mt-2 min-h-0 flex-1">
+				<ControlsPanel />
+			</div>
+		</div>
+
+		<!-- ── DESKTOP LAYOUT (original, unchanged) ── -->
+		<div class="hidden h-full w-full max-w-7xl flex-col gap-4 overflow-hidden lg:flex lg:flex-row">
 			<!-- Preview Section (Left) -->
 			<div class="flex flex-1 flex-col gap-4 overflow-y-auto">
 				<div class="flex items-center justify-between">
@@ -183,9 +242,10 @@
 				{/if}
 			</div>
 
-			<!-- Controls Panel (Right) -->
+			<!-- Controls Panel (Right) — desktop only -->
 			<ControlsPanel />
 		</div>
+
 	</div>
 {/if}
 

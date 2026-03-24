@@ -9,5 +9,6 @@
 
 	"[typescript]": {
 		"editor.defaultFormatter": "esbenp.prettier-vscode"
-	}
+	},
+	"workbench.settings.alwaysShowAdvancedSettings": true
 }

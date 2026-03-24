@@ -4,7 +4,7 @@
 	import logo from '$lib/assets/logo.png';
 	import AuthModal from '$lib/components/AuthModal.svelte';
 	import UserMenu from '$lib/components/UserMenu.svelte';
-
+	import { resolve } from '$app/paths';
 	let { children } = $props();
 	let showAuthModal = $state(false);
 
@@ -40,9 +40,11 @@
 				<span class="text-sm font-semibold tracking-wide">Menu</span>
 </label>
 
-			<div class="ml-3 flex items-center gap-1">
+			<div class="ml-3 flex items-center gap-2">
 				<img src={logo} alt="Content Factory Logo" class="h-8 w-auto sm:h-10" />
-				<span class="text-xs font-semibold sm:text-base lg:text-lg">Content Factory</span>
+				<span class="hidden sm:block text-base font-semibold lg:text-lg">
+					Content Factory
+				</span>
 			</div>
 
 			<!-- Auth buttons: Show login/signup if not logged in, show UserMenu if logged in -->
@@ -85,7 +87,7 @@
 				<!-- Homepage -->
 				<li>
 					<a
-						href="/"
+						href={resolve("/")}
 						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname === '/'
 							? 'active'
 							: ''}"
@@ -113,7 +115,7 @@
 				<!-- Text to Video -->
 				<li>
 					<a
-						href="/texttovideo"
+						href={resolve("/texttovideo")}
 						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
 						'/texttovideo'
 							? 'active'
@@ -148,7 +150,7 @@
 				<!-- Text to Image -->
 				<li>
 					<a
-						href="/texttoimage"
+						href={resolve("/texttoimage")}
 						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
 						'/texttoimage'
 							? 'active'
@@ -179,7 +181,7 @@
 				<!-- Image Edit -->
 				<li>
 					<a
-						href="/imageedit"
+						href={resolve("/imageedit")}
 						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
 						'/imageedit'
 							? 'active'
@@ -208,7 +210,7 @@
 				<!-- Settings -->
 				<li>
 					<a
-						href="/settings"
+						href={resolve("/settings")}
 						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
 						'/settings'
 							? 'active'
@@ -236,7 +238,7 @@
 
 				<li>
 					<a
-						href="/content-library"
+						href={resolve("/content-library")}
 						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
 						'/content-library'
 							? 'active'

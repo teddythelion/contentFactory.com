@@ -37,6 +37,8 @@ export async function captureThreeJsVideo(
 	const fps = 30;
 	const width = canvas.width;
 	const height = canvas.height;
+	console.log(`🖼️ Canvas size: ${width}x${height}`);
+	console.log(`🖼️ Canvas client size: ${canvas.clientWidth}x${canvas.clientHeight}`);
 	const totalFrames = Math.ceil(videoDuration * fps);
 	const totalBatches = Math.ceil(totalFrames / BATCH_SIZE);
 
@@ -163,6 +165,7 @@ export async function captureThreeJsVideo(
 				sessionId,
 				totalFrames,
 				fps,
+				suppressOriginalAudio,
 				width,
 				height,
 				userId,

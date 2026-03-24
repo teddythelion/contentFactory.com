@@ -271,6 +271,11 @@
 			window.dispatchEvent(new CustomEvent('threeJsSceneReady'));
 			startPlayerPolling(); 
 			audioStudioStore.connectVideo(videoElement!);
+			videoState.setVideoDimensions(
+   			videoElement!.videoWidth,
+   			videoElement!.videoHeight,
+   			videoElement!.duration
+			);
 		});
 
 		window.addEventListener('resize', handleResize);

@@ -28,10 +28,12 @@ class AudioMixer {
 	// SFX
 	private sfxPlayer: Tone.Player | null = null;
 	private sfxGain: Tone.Volume | null = null;
+	private sfxLoopTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// Music
 	private musicPlayer: Tone.Player | null = null;
 	private musicGain: Tone.Volume | null = null;
+	private musicStopTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	private state: MixerState = {
 		originalVolume: 1,
@@ -51,7 +53,6 @@ class AudioMixer {
 
 	// ── Helpers ─────────────────────────────────────────────────────────────
 	private toDb(linear: number): number {
-		// Convert 0-1 linear to dB, -Infinity for 0
 		if (linear <= 0) return -Infinity;
 		return 20 * Math.log10(linear);
 	}
@@ -59,6 +60,21 @@ class AudioMixer {
 	private async ensureStarted() {
 		if (Tone.getContext().state !== 'running') {
 			await Tone.start();
+		}
+	}
+
+	// Clear any pending loop/stop timers
+	private clearSfxTimer() {
+		if (this.sfxLoopTimeout) {
+			clearTimeout(this.sfxLoopTimeout);
+			this.sfxLoopTimeout = null;
+		}
+	}
+
+	private clearMusicTimer() {
+		if (this.musicStopTimeout) {
+			clearTimeout(this.musicStopTimeout);
+			this.musicStopTimeout = null;
 		}
 	}
 
@@ -71,7 +87,6 @@ class AudioMixer {
 
 		this.ensureStarted();
 
-		// Use raw Web Audio context — Tone doesn't handle MediaElementSource well
 		const ctx = Tone.getContext().rawContext as AudioContext;
 		const gainNode = ctx.createGain();
 		gainNode.gain.value = this.state.originalMuted ? 0 : this.state.originalVolume;
@@ -80,7 +95,6 @@ class AudioMixer {
 		this.videoMediaSource = ctx.createMediaElementSource(videoElement);
 		this.videoMediaSource.connect(gainNode);
 
-		// Store gainNode for volume control
 		(this as any)._rawVideoGain = gainNode;
 
 		console.log('🎙️ AudioMixer: video connected via raw Web Audio');
@@ -132,7 +146,7 @@ class AudioMixer {
 
 		this.sfxPlayer = new Tone.Player({
 			url: previewUrl,
-			loop: s.sfxLoop,
+			loop: false, // We handle looping manually to respect start/end trim window
 			fadeIn: s.sfxFadeIn,
 			fadeOut: s.sfxFadeOut,
 			onload: () => {
@@ -144,8 +158,9 @@ class AudioMixer {
 
 	playSfx() {
 		if (!this.sfxPlayer || !this.sfxPlayer.loaded) return;
-		const s = this.state;
+		this.clearSfxTimer();
 
+		const s = this.state;
 		const bufferDuration = this.sfxPlayer.buffer.duration;
 		const startOffset = Math.min(s.sfxStartTime, bufferDuration);
 		const endTime = Math.min(s.sfxEndTime, bufferDuration);
@@ -155,20 +170,45 @@ class AudioMixer {
 		try {
 			this.sfxPlayer.stop();
 		} catch {
-			console.log('catch');
+			/* already stopped */
 		}
-		this.sfxPlayer.start(Tone.now(), startOffset, s.sfxLoop ? undefined : duration);
+
+		// Always play with explicit duration to respect the trim window
+		this.sfxPlayer.fadeOut = 0; // disable — we handle manually
+		this.sfxPlayer.start(Tone.now(), startOffset, duration);
+
+		// Manually schedule fade out via gain
+		if (s.sfxFadeOut > 0 && this.sfxGain) {
+			const now = Tone.now();
+			const fadeStart = now + Math.max(0, duration - s.sfxFadeOut);
+			if (fadeStart > now) {
+				this.sfxGain.volume.setValueAtTime(this.toDb(s.sfxVolume), fadeStart);
+				this.sfxGain.volume.linearRampToValueAtTime(-96, fadeStart + s.sfxFadeOut);
+			}
+		}
+
 		console.log(
-			`🔊 AudioMixer: SFX playing — offset:${startOffset}s duration:${duration.toFixed(2)}s`
+			`🔊 AudioMixer: SFX playing — offset:${startOffset}s duration:${duration.toFixed(2)}s loop:${s.sfxLoop}`
 		);
+
+		// Manual loop — reschedule playback after duration if loop is on
+		if (s.sfxLoop) {
+			this.sfxLoopTimeout = setTimeout(() => {
+				// Only re-trigger if loop is still enabled and player still exists
+				if (this.state.sfxLoop && this.sfxPlayer) {
+					this.playSfx();
+				}
+			}, duration * 1000);
+		}
 	}
 
 	stopSfx() {
+		this.clearSfxTimer();
 		if (this.sfxPlayer) {
 			try {
 				this.sfxPlayer.stop();
 			} catch {
-				console.log('catch');
+				/* already stopped */
 			}
 			this.sfxPlayer.dispose();
 			this.sfxPlayer = null;
@@ -186,7 +226,8 @@ class AudioMixer {
 
 	setSfxLoop(loop: boolean) {
 		this.state.sfxLoop = loop;
-		if (this.sfxPlayer) this.sfxPlayer.loop = loop;
+		// Replay to apply new loop setting immediately
+		if (this.sfxPlayer?.loaded) this.playSfx();
 	}
 
 	setSfxFadeIn(v: number) {
@@ -207,11 +248,12 @@ class AudioMixer {
 
 	setSfxStartTime(v: number) {
 		this.state.sfxStartTime = v;
-		this.playSfx();
+		if (this.sfxPlayer?.loaded) this.playSfx();
 	}
+
 	setSfxEndTime(v: number) {
 		this.state.sfxEndTime = v;
-		this.playSfx();
+		if (this.sfxPlayer?.loaded) this.playSfx();
 	}
 
 	// ── MUSIC ────────────────────────────────────────────────────────────────
@@ -225,7 +267,7 @@ class AudioMixer {
 
 		this.musicPlayer = new Tone.Player({
 			url: previewUrl,
-			loop: true,
+			loop: false, // We handle stop at endTime manually
 			fadeIn: s.musicFadeIn,
 			fadeOut: s.musicFadeOut,
 			onload: () => {
@@ -239,31 +281,63 @@ class AudioMixer {
 
 	playMusic() {
 		if (!this.musicPlayer || !this.musicPlayer.loaded) return;
-		const s = this.state;
+		this.clearMusicTimer();
 
+		const s = this.state;
 		const bufferDuration = this.musicPlayer.buffer.duration;
 		const startOffset = Math.min(s.musicStartTime, bufferDuration);
-		const endTime = Math.min(s.musicEndTime, bufferDuration);
+
+		// endTime of 999 means "play to end of buffer" — use bufferDuration as ceiling
+		const rawEndTime = s.musicEndTime >= 999 ? bufferDuration : s.musicEndTime;
+		const endTime = Math.min(rawEndTime, bufferDuration);
 		const duration = endTime - startOffset;
 		if (duration <= 0) return;
 
 		try {
 			this.musicPlayer.stop();
 		} catch {
-			console.log('catch');
+			/* already stopped */
 		}
-		this.musicPlayer.start(Tone.now(), startOffset);
+
+		// Pass explicit duration so music stops at endTime — not at buffer end
+		this.musicPlayer.fadeOut = 0; // disable — we handle manually
+		this.musicPlayer.start(Tone.now(), startOffset, duration);
+
+		// Manually schedule fade out via gain
+		if (s.musicFadeOut > 0 && this.musicGain) {
+			const now = Tone.now();
+			const fadeStart = now + duration - s.musicFadeOut;
+			this.musicGain.volume.cancelScheduledValues(now);
+			this.musicGain.volume.setValueAtTime(this.toDb(s.musicVolume), now);
+			this.musicGain.volume.linearRampToValueAtTime(-96, fadeStart + s.musicFadeOut);
+		}
+
 		console.log(
 			`🎵 AudioMixer: Music playing — offset:${startOffset}s duration:${duration.toFixed(2)}s`
+		);
+
+		// Schedule auto-stop at endTime in case Tone doesn't honor duration perfectly
+		this.musicStopTimeout = setTimeout(
+			() => {
+				if (this.musicPlayer) {
+					try {
+						this.musicPlayer.stop();
+					} catch {
+						/* already stopped */
+					}
+				}
+			},
+			(duration + 0.2) * 1000
 		);
 	}
 
 	stopMusic() {
+		this.clearMusicTimer();
 		if (this.musicPlayer) {
 			try {
 				this.musicPlayer.stop();
 			} catch {
-				console.log('catch');
+				/* already stopped */
 			}
 			this.musicPlayer.dispose();
 			this.musicPlayer = null;
@@ -297,11 +371,12 @@ class AudioMixer {
 
 	setMusicStartTime(v: number) {
 		this.state.musicStartTime = v;
-		this.playMusic();
+		if (this.musicPlayer?.loaded) this.playMusic();
 	}
+
 	setMusicEndTime(v: number) {
 		this.state.musicEndTime = v;
-		this.playMusic();
+		if (this.musicPlayer?.loaded) this.playMusic();
 	}
 
 	// ── Cleanup ──────────────────────────────────────────────────────────────

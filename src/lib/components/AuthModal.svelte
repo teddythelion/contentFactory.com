@@ -70,5 +70,5 @@
 			<button class="btn btn-ghost" onclick={closeModal}>Cancel</button>
 		</div>
 	</div>
-	<button class="modal-backdrop" onclick={closeModal}></button>
+	<button class="modal-backdrop" aria-label="main model" onclick={closeModal}></button>
 </dialog>

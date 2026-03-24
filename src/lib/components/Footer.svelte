@@ -3,8 +3,8 @@
 		<h4 class="footer-title">We Offer</h4>
 		<a href="/services" class="link link-hover">Services</a>
 		<a href="/branding" class="link link-hover">Branding</a>
-		<a href="/" class="link link-hover">Marketing</a>
-		<a href="/" class="link link-hover">Advertisement</a>
+		<a href="/marketing" class="link link-hover">Marketing</a>
+		<a href="/advertising" class="link link-hover">Advertisement</a>
 	</nav>
 	<nav>
 		<h6 class="footer-title">Company</h6>
@@ -15,9 +15,9 @@
 	</nav>
 	<nav>
 		<h6 class="footer-title">Legal</h6>
-		<a href="/" class="link link-hover">Terms of use</a>
-		<a href="/" class="link link-hover">Privacy policy</a>
-		<a href="/" class="link link-hover">Cookie policy</a>
+		<a href="/terms" class="link link-hover">Terms of use</a>
+		<a href="/privacy" class="link link-hover">Privacy policy</a>
+		<a href="/cookies" class="link link-hover">Cookie policy</a>
 	</nav>
 	<form>
 		<h6 class="footer-title">Newsletter</h6>

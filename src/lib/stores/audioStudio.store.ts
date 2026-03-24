@@ -8,7 +8,7 @@ import { audioMixer } from '$lib/utils/audioMixer.ts';
 interface AudioStudioState {
 	originalVolume: number;
 	originalMuted: boolean;
-
+	musicDuration: number;
 	sfxPrompt: string;
 	sfxSessionId: string | null;
 	sfxPreviewUrl: string | null;
@@ -38,7 +38,7 @@ interface AudioStudioState {
 const initialState: AudioStudioState = {
 	originalVolume: 1,
 	originalMuted: false,
-
+	musicDuration: 30,
 	sfxPrompt: '',
 	sfxSessionId: null,
 	sfxPreviewUrl: null,
@@ -59,7 +59,7 @@ const initialState: AudioStudioState = {
 	musicGenerating: false,
 	musicError: null,
 	musicStartTime: 0,
-	musicEndTime: 16,
+	musicEndTime: 8,
 	musicFadeIn: 0,
 	musicFadeOut: 0,
 	musicSuppressOriginal: false
@@ -91,6 +91,8 @@ function createAudioStudioStore() {
 			update((s) => ({ ...s, originalVolume: volume }));
 			syncOriginalToMixer();
 		},
+
+		setMusicDuration: (v: number) => update((s) => ({ ...s, musicDuration: v })),
 
 		setOriginalMuted: (muted: boolean) => {
 			update((s) => ({ ...s, originalMuted: muted }));
