@@ -37,16 +37,24 @@
 	// Save state to sessionStorage
 	$effect(() => {
     if (typeof window !== 'undefined') {
-        try {
-            sessionStorage.setItem(
-                'imageedit_state',
-                JSON.stringify({ imageUrl, prompt, status, refinePrompt })
-            );
+			try {
+				// Only save lightweight data (URLs, not base64)
+				const stateToSave = {
+					imageUrl: imageUrl.startsWith('data:') ? null : imageUrl, // ← Don't save base64
+					prompt,
+					status,
+					refinePrompt
+				};
+				sessionStorage.setItem('imageedit_state', JSON.stringify(stateToSave));
 			} catch (e) {
 				console.warn('Failed to save state:', e);
+				// If quota exceeded, clear and try again with minimal data
 				sessionStorage.removeItem('imageedit_state');
+				try {
+					sessionStorage.setItem('imageedit_state', JSON.stringify({ prompt, refinePrompt }));
+				} catch {}
 			}
-    	}
+		}
 	});
 
 	function handlePromptSelected(selectedPrompt: string) {
@@ -56,18 +64,23 @@
 	}
 
 	onMount(() => {
+		 // Cleanup old data
+    if (typeof window !== 'undefined') {
+			localStorage.removeItem('imageGen_state');
+		}
+		
 		const savedState = sessionStorage.getItem('imageedit_state');
 		if (savedState) {
 			try {
 				const state = JSON.parse(savedState);
-				imageUrl = state.imageUrl || '';
+				imageUrl = state.imageUrl || ''; // Will be null if it was base64
 				prompt = state.prompt || '';
 				status = state.status || '';
 				refinePrompt = state.refinePrompt || '';
 			} catch (e) {
 				console.error('Failed to restore state:', e);
 			}
-		}
+    }
 
 		const fromCreate = $page.url.searchParams.get('from');
 		if (fromCreate === 'create') {
