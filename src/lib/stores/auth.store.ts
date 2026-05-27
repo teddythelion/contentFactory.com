@@ -36,6 +36,8 @@ function createAuthStore() {
 	if (typeof window !== 'undefined') {
 		onAuthStateChanged(auth, async (firebaseUser) => {
 			if (firebaseUser) {
+				// Force token refresh before hitting Firestore so auth is valid
+				await firebaseUser.getIdToken(false);
 				// Check if user profile exists in Firestore
 				const userProfile = await getUserProfile(firebaseUser.uid);
 
@@ -104,9 +106,11 @@ function createAuthStore() {
 				}
 
 				update((state) => ({
+					...state,
 					user: mapFirebaseUser(result.user),
 					loading: false,
-					error: null
+					error: null,
+					initialized: true
 				}));
 
 				return { success: true, user: result.user };
@@ -130,7 +134,8 @@ function createAuthStore() {
 				set({
 					user: null,
 					loading: false,
-					error: null
+					error: null,
+					initialized: true
 				});
 
 				return { success: true };

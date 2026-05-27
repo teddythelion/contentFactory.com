@@ -2,13 +2,11 @@
 <!-- MAIN ORCHESTRATOR COMPONENT -->
 
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 	import { videoState } from '$lib/stores/video.store';
 	import { threeJsState } from '$lib/stores/threeJs.store';
 	import ThreeJsScene from './ThreeJsScene.svelte';
-	import ControlsPanel from './ControlsPanel.svelte';	
-	import { enhancedContentState } from '$lib/stores/enhancedContent.store';
-	import { authStore } from '$lib/stores/auth.store';
+	import ControlsPanel from './ControlsPanel.svelte';		
 	import { audioSessionStore } from '$lib/stores/audioSession.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
 	
@@ -37,6 +35,13 @@
 		isSceneReady = true;
 	}
 
+	// Only ONE ThreeJsScene should be mounted at a time — two instances = two video
+	// elements = audio echo (second video bypasses Web Audio routing and plays raw).
+	// We gate each instance with {#if sceneMounted && isMobile} / {#if sceneMounted && !isMobile}
+	// so Svelte mounts exactly one. sceneMounted delays render until we know the viewport.
+	let isMobile = false;
+	let sceneMounted = false;
+
 	onMount(() => {
 	// Write audioSessionId into the store so videoCapture.ts
 	// can read it without prop drilling through ControlsPanel
@@ -44,22 +49,28 @@
 
 	window.addEventListener('threeJsSceneReady', onSceneReady);
 
+	const mq = window.matchMedia('(max-width: 1023px)');
+	isMobile = mq.matches;
+	sceneMounted = true;
+	const mqHandler = (e: MediaQueryListEvent) => { isMobile = e.matches; };
+	mq.addEventListener('change', mqHandler);
+
 	return () => {
 		window.removeEventListener('threeJsSceneReady', onSceneReady);
+		mq.removeEventListener('change', mqHandler);
 		isSceneReady = false;
+		sceneMounted = false;
 		// Clear the store when the enhancer closes
 		// so it doesn't bleed into the next session
 		audioSessionStore.clear();
-		audioStudioStore.stopAll(); 
+		audioStudioStore.stopAll();
 	};
 	});
 
 	type ModalView = 'enhance' | 'post';
 	let currentView: ModalView = 'enhance';
 
-	$: enhancedContent = $enhancedContentState;
-	$: isSavingEnhanced = $enhancedContentState.isSaving;
-
+	
 	function downloadProcessedVideo() {
 		if (!processedVideoUrl) return;
 		const a = document.createElement('a');
@@ -70,57 +81,10 @@
 		a.remove();
 	}
 
-	async function autoSaveEnhancedVideo() {
-		if (!$authStore.user) {
-			enhancedContentState.setSaveError('Please sign in to save');
-			return;
-		}
 
-		enhancedContentState.startSaving();
+	
 
-		try {
-			const canvas = (window as any).__threeJsCanvas;
-			if (!canvas) throw new Error('Canvas not found');
-
-			const blob = await new Promise<Blob>((resolve, reject) => {
-				canvas.toBlob(
-					(b: Blob) => (b ? resolve(b) : reject(new Error('Failed to create blob'))),
-					'image/png',
-					0.8
-				);
-			});
-
-			const blobUrl = URL.createObjectURL(blob);
-			const contentId = `enhanced-${Date.now()}`;
-			enhancedContentState.setSavedContent(contentId, blobUrl, 'image');
-			currentView = 'post';
-
-			setTimeout(() => enhancedContentState.clearStatus(), 2000);
-		} catch (error) {
-			console.error('Error capturing:', error);
-			enhancedContentState.setSaveError('Error capturing content');
-		}
-	}
-
-	function switchToEnhanceView() { currentView = 'enhance'; }
-	function handlePostSuccess() {
-		enhancedContentState.reset();
-		currentView = 'enhance';
-	}
-
-	const onSaveAndPost = autoSaveEnhancedVideo;
-
-	function base64ToBlob(base64: string, mimeType: string): Blob {
-		const byteCharacters = atob(base64);
-		const byteArrays = [];
-		for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-			const slice = byteCharacters.slice(offset, offset + 512);
-			const byteNumbers = new Array(slice.length);
-			for (let i = 0; i < slice.length; i++) byteNumbers[i] = slice.charCodeAt(i);
-			byteArrays.push(new Uint8Array(byteNumbers));
-		}
-		return new Blob(byteArrays, { type: mimeType });
-	}
+	
 </script>
 
 {#if currentView === 'enhance'}
@@ -159,7 +123,7 @@
 					</div>
 				{/if}
 				<div class="relative h-full w-full">
-					<ThreeJsScene />
+					{#if sceneMounted && isMobile}<ThreeJsScene />{/if}
 				</div>
 			</div>
 
@@ -172,9 +136,10 @@
 					</button>
 				</div>
 			{:else if isCapturing}
-				<div class="mx-4 mt-2 shrink-0 rounded-lg border border-blue-500/50 bg-blue-900/30 px-3 py-2">
-					<p class="text-xs text-blue-400">🎬 Capturing video...</p>
-				</div>
+			<div class="mx-4 mt-2 shrink-0 rounded-lg border border-blue-500/50 bg-blue-900/30 px-3 py-2 space-y-1">
+				<p class="text-xs text-blue-400 font-semibold">🎬 Professional encoding in progress...</p>
+				<p class="text-[10px] text-gray-400">Typically takes 10-15 min • 20x faster than manual editing</p>
+			</div>
 			{/if}
 
 			<!-- Mobile Controls Panel — takes remaining height, scrolls independently -->
@@ -220,7 +185,7 @@
 						</div>
 					{/if}
 					<div class="relative h-full w-full">
-						<ThreeJsScene />
+						{#if sceneMounted && !isMobile}<ThreeJsScene />{/if}
 					</div>
 				</div>
 

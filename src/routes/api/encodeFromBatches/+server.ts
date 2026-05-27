@@ -39,6 +39,8 @@ function getTempBase(): string {
 	return isLinux ? '/dev/shm/contentfactory' : path.join(process.cwd(), 'temp');
 }
 
+interface SfxInstance { startTime: number; endTime: number; }
+
 async function runEncode(
 	sessionId: string,
 	totalFrames: number,
@@ -51,8 +53,7 @@ async function runEncode(
 	musicSessionId: string | null,
 	sfxVolume: number,
 	musicVolume: number,
-	sfxStartTime: number,
-	sfxEndTime: number,
+	sfxInstances: SfxInstance[],
 	sfxFadeIn: number,
 	sfxFadeOut: number,
 	musicStartTime: number,
@@ -134,7 +135,9 @@ async function runEncode(
 		const hasSfx = sfxSessionId && existsSync(sfxFile);
 		const hasMusic = musicSessionId && existsSync(musicFile);
 
-		if (hasAudio || hasSfx || hasMusic) {
+		const hasAnyAudioOutput = (hasAudio && !suppressOriginalAudio) || hasSfx || hasMusic;
+
+		if (hasAnyAudioOutput) {
 			console.log(`🎚️ Muxing audio — original:${hasAudio} sfx:${hasSfx} music:${hasMusic}`);
 
 			const inputs: string[] = [`"${FFMPEG_PATH}" -i "${silentOutputPath}"`];
@@ -162,18 +165,37 @@ async function runEncode(
 				});
 				inputIndex++;
 			}
-			if (hasSfx) {
-				inputs.push(`-i "${sfxFile}"`);
-				streams.push({
-					label: `[${inputIndex}:a]`,
-					volume: sfxVolume,
-					startTime: sfxStartTime,
-					endTime: sfxEndTime,
-					fadeIn: sfxFadeIn,
-					fadeOut: sfxFadeOut
+			// SFX: one input per instance (same file, different adelay)
+			const sfxStreamLabels: string[] = [];
+			if (hasSfx && sfxInstances.length > 0) {
+				sfxInstances.forEach((inst, i) => {
+					inputs.push(`-i "${sfxFile}"`);
+					const inLabel = `[${inputIndex}:a]`;
+					const outLabel = `[sfx${i}]`;
+					const delayMs = Math.round(inst.startTime * 1000);
+					const instDuration = inst.endTime - inst.startTime;
+					const filters: string[] = [
+						`adelay=${delayMs}:all=1`,
+						`volume=${sfxVolume}`
+					];
+					if (sfxFadeIn > 0) filters.push(`afade=t=in:st=${inst.startTime}:d=${sfxFadeIn}`);
+					if (sfxFadeOut > 0) {
+						const fadeOutStart = inst.endTime - sfxFadeOut;
+						filters.push(`afade=t=out:st=${fadeOutStart}:d=${sfxFadeOut}`);
+					}
+					filterParts.push(`${inLabel}${filters.join(',')}${outLabel}`);
+					sfxStreamLabels.push(outLabel);
+					inputIndex++;
 				});
+			} else if (hasSfx) {
+				// fallback: no instances — place at t=0
+				inputs.push(`-i "${sfxFile}"`);
+				const outLabel = `[sfx0]`;
+				filterParts.push(`[${inputIndex}:a]volume=${sfxVolume}${outLabel}`);
+				sfxStreamLabels.push(outLabel);
 				inputIndex++;
 			}
+			mixLabels.push(...sfxStreamLabels);
 			if (hasMusic) {
 				inputs.push(`-i "${musicFile}"`);
 				streams.push({
@@ -360,8 +382,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		musicSessionId,
 		sfxVolume = 0.4,
 		musicVolume = 0.3,
-		sfxStartTime = 0,
-		sfxEndTime = 8,
+		sfxInstances = [] as SfxInstance[],
 		sfxFadeIn = 0,
 		sfxFadeOut = 0,
 		musicStartTime = 0,
@@ -391,8 +412,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		musicSessionId,
 		sfxVolume,
 		musicVolume,
-		sfxStartTime,
-		sfxEndTime,
+		sfxInstances,
 		sfxFadeIn,
 		sfxFadeOut,
 		musicStartTime,

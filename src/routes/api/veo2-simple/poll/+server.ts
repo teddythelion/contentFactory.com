@@ -28,7 +28,7 @@ export const POST: RequestHandler = async ({ request }) => {
         const token = (await (await auth.getClient()).getAccessToken()).token;
 
         // --- Poll Veo 3.1 Operation ---
-        const modelId = 'veo-3.1-generate-preview';
+        const modelId = 'veo-3.1-generate-001';
         console.log(`📋 Polling operation: ${operation}`);
 
         const res = await fetch(

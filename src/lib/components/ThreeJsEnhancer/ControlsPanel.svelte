@@ -1,8 +1,7 @@
 <!-- src/lib/components/ThreeJsEnhancer/ControlsPanel.svelte -->
 <!-- CLEANED: Removed social posting, focused on core workflow -->
 
-<script lang="ts">
-	import { onMount } from 'svelte';
+<script lang="ts">	
 	import { enhancedContentState } from '$lib/stores/enhancedContent.store';
 	import { threeJsState } from '$lib/stores/threeJs.store';
 	import { videoState } from '$lib/stores/video.store';
@@ -13,11 +12,15 @@
 	import LogoUpload from './LogoUpload.svelte';
 	import { logoState } from '$lib/stores/logo.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
-
+	
 	// Capture progress state
 	let captureProgress = $state(0);
 	let captureMessage = $state('');
 	let showCaptureProgress = $state(false);
+
+	// Music-ready toast
+	let showMusicToast = $state(false);
+	let musicToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Mobile tab state — tracks which group is active on mobile
 	let activeMobileTab = 'shape';
@@ -28,43 +31,45 @@
 	//$: isSavingEnhanced = $enhancedContentState.isSaving;
 	let audioStudio = $derived($audioStudioStore);
 	let videoDuration = $derived($videoState.videoDuration || 8);
-	let sfxMaxTime = $derived(Math.min(8, videoDuration));
-	let musicMaxTime = $derived(videoDuration);
+let musicMaxTime = $derived(videoDuration);
 
-	// Sync original video volume/mute to the canvas video element
-	$effect(() => {		
-		if (typeof window !== 'undefined') {
-		const vid = (window as any).__threeJsVideo as HTMLVideoElement | null;
-		if (vid) {
-			vid.muted = audioStudio.originalMuted;
-			vid.volume = audioStudio.originalVolume;
-			}
-		}
-	});
-
-	interface ControlGroup {
-		id: string;
-		title: string;
-		items: ControlItem[];
-	}
-
-	interface ControlItem {
-		label: string;
-		type: 'range' | 'toggle' | 'select' | 'button' | 'color' | 'text' | 'component';
-		min?: number;
-		max?: number;
-		step?: number;
-		component?: any;
-		componentProps?: Record<string, any>;
-		options?: Array<{ value: string; label: string }> | string[];
-		action?: () => void;
-	}
+	// // Sync original video volume/mute to the canvas video element
+	// $effect(() => {		
+	// 	if (typeof window !== 'undefined') {
+	// 	const vid = (window as any).__threeJsVideo as HTMLVideoElement | null;
+	// 	if (vid) {
+	// 		vid.muted = audioStudio.originalMuted;
+	// 		vid.volume = audioStudio.originalVolume;
+	// 		}
+	// 	}
+	// });	
 
 	function handleFontSelection(fontFamily: string, fontUrl: string) {
 		text3DState.setFontWithUrl(fontFamily, fontUrl);
 	}
 
 	// ── SFX ────────────────────────────────────────────────────
+	async function handleUploadSfx(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		const objectUrl = URL.createObjectURL(file);
+
+		const formData = new FormData();
+		formData.append('file', file);
+		let sessionId = 'local';
+		try {
+			const res = await fetch('/api/saveSfxFile', { method: 'POST', body: formData });
+			if (res.ok) {
+				const data = await res.json();
+				sessionId = data.sessionId;
+			}
+		} catch {
+			console.warn('SFX upload to server failed — export will have no SFX track');
+		}
+
+		audioStudioStore.setLocalSfxFile(file.name, objectUrl, sessionId);
+	}
+
 	async function handleGenerateSfx() {
 		const prompt = $audioStudioStore.sfxPrompt.trim();
 		if (!prompt) return;
@@ -84,6 +89,31 @@
 	}
 
 	// ── MUSIC ───────────────────────────────────────────────────
+	async function handleUploadMusic(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		const objectUrl = URL.createObjectURL(file);
+
+		// Upload to server so it can be muxed into the exported video
+		const formData = new FormData();
+		formData.append('file', file);
+		let sessionId = 'local';
+		try {
+			const res = await fetch('/api/saveMusicFile', { method: 'POST', body: formData });
+			if (res.ok) {
+				const data = await res.json();
+				sessionId = data.sessionId;
+			}
+		} catch {
+			console.warn('Music upload to server failed — export will have no music track');
+		}
+
+		audioStudioStore.setLocalMusicFile(file.name, objectUrl, sessionId);
+		if (musicToastTimer) clearTimeout(musicToastTimer);
+		showMusicToast = true;
+		musicToastTimer = setTimeout(() => { showMusicToast = false; }, 6000);
+	}
+
 	async function handleGenerateMusic() {
 	const prompt = $audioStudioStore.musicPrompt.trim();
 	if (!prompt) return;
@@ -101,6 +131,10 @@
 			const data = await res.json();
 			if (!res.ok) throw new Error(data.error || 'Music generation failed');
 			audioStudioStore.setMusicResult(data.musicSessionId, data.previewUrl);
+			// Show toast — music doesn't auto-play; user needs to hit play
+			if (musicToastTimer) clearTimeout(musicToastTimer);
+			showMusicToast = true;
+			musicToastTimer = setTimeout(() => { showMusicToast = false; }, 6000);
 		} catch (err) {
 			audioStudioStore.setMusicError(err instanceof Error ? err.message : 'Music generation failed');
 		}
@@ -321,7 +355,7 @@
 			]
 		},
 		// ── AUDIO STUDIO groups — custom template rendering below ──
-		{ id: 'sfx',   title: '🔊 Sound Effects', items: [] },
+		{ id: 'sfx',   title: '🔊 Sound FX & Original Audio', items: [] },
 		{ id: 'music', title: '🎵 Music',          items: [] }	
 	]);
 
@@ -613,22 +647,7 @@
 								value={audioStudio.sfxVolume}
 								oninput={(e) => audioStudioStore.setSfxVolume(parseFloat(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
-							<div class="mt-3 mb-1 flex items-center justify-between">
-								<span class="text-sm text-white">Start Time</span>
-								<span class="text-xs text-gray-400">{audioStudio.sfxStartTime.toFixed(1)}s</span>
-							</div>
-							<input type="range" min="0" max={sfxMaxTime} step="0.1"
-								value={audioStudio.sfxStartTime}
-								oninput={(e) => audioStudioStore.setSfxStartTime(parseFloat(e.currentTarget.value))}
-								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
-							<div class="mt-3 mb-1 flex items-center justify-between">
-								<span class="text-sm text-white">End Time</span>
-								<span class="text-xs text-gray-400">{audioStudio.sfxEndTime.toFixed(1)}s</span>
-							</div>
-							<input type="range" min="0" max={sfxMaxTime} step="0.1"
-								value={audioStudio.sfxEndTime}
-								oninput={(e) => audioStudioStore.setSfxEndTime(parseFloat(e.currentTarget.value))}
-								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+							<p class="mt-2 text-xs text-gray-500">Position SFX blocks on the timeline below ↓</p>
 								<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Duration</span>
 								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
@@ -688,8 +707,12 @@
 									<button onclick={() => audioStudioStore.stopSfx()} title="Cancel" class="rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">✕</button>
 								{/if}
 							</div>
+							<label class="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-white/20 bg-gray-700/40 px-3 py-2 text-sm text-gray-300 hover:border-white/40 hover:text-white">
+								📁 {audioStudio.sfxFileName ?? 'Upload SFX File'}
+								<input type="file" accept="audio/*" class="hidden" onchange={handleUploadSfx} />
+							</label>
 							{#if audioStudio.sfxSessionId}
-								<p class="mt-2 text-xs text-green-400">✅ SFX active — will be baked into export</p>
+								<p class="mt-2 text-xs text-green-400">✅ {audioStudio.sfxFileName ?? 'SFX active'} — will be baked into export</p>
 							{/if}
 						</div>
 					</div>
@@ -767,7 +790,19 @@
 							{#if audioStudio.musicError}
 								<p class="mb-2 mt-3 text-xs text-red-400">{audioStudio.musicError}</p>
 							{/if}
-							<div class="mt-3 flex gap-2">
+							<!-- Upload local audio file -->
+							<div class="mt-3">
+								<label class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
+									📁 {audioStudio.musicFileName ?? 'Upload Audio File'}
+									<input type="file" accept="audio/*" onchange={handleUploadMusic} class="hidden" />
+								</label>
+							</div>
+							<div class="my-2 flex items-center gap-2">
+								<div class="flex-1 border-t border-white/10"></div>
+								<span class="text-xs text-gray-500">or generate</span>
+								<div class="flex-1 border-t border-white/10"></div>
+							</div>
+							<div class="flex gap-2">
 								<button onclick={handleGenerateMusic}
 									disabled={audioStudio.musicGenerating || !audioStudio.musicPrompt.trim()}
 									class="flex-1 rounded-lg bg-purple-600 px-3 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50">
@@ -782,7 +817,7 @@
 								{/if}
 							</div>
 							{#if audioStudio.musicSessionId}
-								<p class="mt-2 text-xs text-green-400">✅ Music active — will be baked into export</p>
+								<p class="mt-2 text-xs text-green-400">✅ {audioStudio.musicFileName ?? 'Music active'} — will be baked into export</p>
 							{/if}
 						</div>
 					</div>
@@ -888,6 +923,7 @@
 				disabled={$threeJsState.isCapturing}>
 				🔄 Reset All
 			</button>
+			<div class="tooltip" data-tip="Professional 3D encoding takes 10-15 min but saves you HOURS of manual work">
 			<button onclick={handleCapture}
 				class="flex-1 rounded-lg border border-white/10 bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
 				disabled={$threeJsState.isCapturing || !$videoState.isVideoLoaded}>
@@ -897,6 +933,7 @@
 					🎬 Capture & Download
 				{/if}
 			</button>
+			</div>
 		</div>
 		{#if $enhancedContentState.saveStatus}
 			<div class="alert py-2 alert-success"><p class="text-sm">{$enhancedContentState.saveStatus}</p></div>
@@ -972,25 +1009,7 @@
 									oninput={(e) => audioStudioStore.setSfxVolume(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 
-								<!-- Start Time -->
-								<div class="mt-3 flex items-center justify-between mb-1">
-									<span class="text-sm text-white">Start Time</span>
-									<span class="text-xs text-gray-400">{audioStudio.sfxStartTime.toFixed(1)}s</span>
-								</div>
-								<input type="range" min="0" max={sfxMaxTime} step="0.1"
-									value={audioStudio.sfxStartTime}
-									oninput={(e) => audioStudioStore.setSfxStartTime(parseFloat(e.currentTarget.value))}
-									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
-
-								<!-- End Time -->
-								<div class="mt-3 flex items-center justify-between mb-1">
-									<span class="text-sm text-white">End Time</span>
-									<span class="text-xs text-gray-400">{audioStudio.sfxEndTime.toFixed(1)}s</span>
-								</div>
-								<input type="range" min="0" max={sfxMaxTime} step="0.1"
-									value={audioStudio.sfxEndTime}
-									oninput={(e) => audioStudioStore.setSfxEndTime(parseFloat(e.currentTarget.value))}
-									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+								<p class="mt-2 text-xs text-gray-500">Position SFX blocks on the timeline below ↓</p>
 								<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Duration</span>
 								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
@@ -1069,9 +1088,12 @@
 										</button>
 									{/if}
 								</div>
-
+								<label class="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-white/20 bg-gray-700/40 px-3 py-2 text-sm text-gray-300 hover:border-white/40 hover:text-white">
+									📁 {audioStudio.sfxFileName ?? 'Upload SFX File'}
+									<input type="file" accept="audio/*" class="hidden" onchange={handleUploadSfx} />
+								</label>
 								{#if audioStudio.sfxSessionId}
-									<p class="mt-2 text-xs text-green-400">✅ SFX active — will be baked into export</p>
+									<p class="mt-2 text-xs text-green-400">✅ {audioStudio.sfxFileName ?? 'SFX active'} — will be baked into export</p>
 								{/if}
 							</div>
 						</div>
@@ -1160,8 +1182,21 @@
 									<p class="text-xs text-red-400 mb-2 mt-3">{audioStudio.musicError}</p>
 								{/if}
 
+								<!-- Upload local audio file -->
+								<div class="mt-3">
+									<label class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
+										📁 {audioStudio.musicFileName ?? 'Upload Audio File'}
+										<input type="file" accept="audio/*" onchange={handleUploadMusic} class="hidden" />
+									</label>
+								</div>
+								<div class="my-2 flex items-center gap-2">
+									<div class="flex-1 border-t border-white/10"></div>
+									<span class="text-xs text-gray-500">or generate</span>
+									<div class="flex-1 border-t border-white/10"></div>
+								</div>
+
 								<!-- Action buttons -->
-								<div class="flex gap-2 mt-3">
+								<div class="flex gap-2">
 									<button onclick={handleGenerateMusic}
 										disabled={audioStudio.musicGenerating || !audioStudio.musicPrompt.trim()}
 										class="flex-1 rounded-lg bg-purple-600 px-3 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50">
@@ -1189,7 +1224,7 @@
 								</div>
 
 								{#if audioStudio.musicSessionId}
-									<p class="mt-2 text-xs text-green-400">✅ Music active — will be baked into export</p>
+									<p class="mt-2 text-xs text-green-400">✅ {audioStudio.musicFileName ?? 'Music active'} — will be baked into export</p>
 								{/if}
 							</div>
 						</div>
@@ -1298,8 +1333,9 @@
 			disabled={$threeJsState.isCapturing}>
 			🔄 Reset All
 		</button>
+		<div class="tooltip rounded-lg w-full" data-tip="Professional 3D encoding takes 10-15 min but saves you HOURS of manual work">
 		<button onclick={handleCapture}
-			class="rounded-lg border border-white/10 bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+			class="rounded-lg w-full border border-white/10 bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
 			disabled={$threeJsState.isCapturing || !$videoState.isVideoLoaded}>
 			{#if $threeJsState.isCapturing}
 				🎥 Capturing...
@@ -1307,7 +1343,7 @@
 				🎬 Capture & Download
 			{/if}
 		</button>
-
+		</div>
 		{#if $enhancedContentState.saveStatus}
 			<div class="alert py-2 alert-success"><p class="text-sm">{$enhancedContentState.saveStatus}</p></div>
 		{/if}
@@ -1316,6 +1352,24 @@
 		{/if}
 	</div>
 </div>
+
+<!-- Music-ready toast — fixed to bottom-center, auto-dismisses after 6s -->
+{#if showMusicToast}
+	<div class="toast toast-bottom toast-center z-[200]">
+		<div class="alert alert-info shadow-lg flex items-center gap-3">
+			<span class="text-xl">🎵</span>
+			<div>
+				<p class="font-semibold text-sm">Music is ready!</p>
+				<p class="text-xs opacity-80">Hit play on the video to hear it in sync.</p>
+			</div>
+			<button
+				onclick={() => { showMusicToast = false; }}
+				class="btn btn-xs btn-ghost ml-2"
+				aria-label="Dismiss"
+			>✕</button>
+		</div>
+	</div>
+{/if}
 
 <style>
 	::-webkit-scrollbar { width: 8px; }

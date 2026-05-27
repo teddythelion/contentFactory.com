@@ -1,5 +1,6 @@
 // src/lib/stores/video.store.ts
 // FIXED: Don't persist large video data URLs to localStorage
+// UPDATED: Added currentTime and isPlaying as single source of truth
 
 import { writable } from 'svelte/store';
 
@@ -13,6 +14,8 @@ interface VideoState {
 	videoDuration: number;
 	videoWidth: number;
 	videoHeight: number;
+	currentTime: number; // Single source of truth for playback position
+	isPlaying: boolean; // Single source of truth for play/pause state
 }
 
 const initialState: VideoState = {
@@ -24,7 +27,9 @@ const initialState: VideoState = {
 	videoError: null,
 	videoDuration: 0,
 	videoWidth: 0,
-	videoHeight: 0
+	videoHeight: 0,
+	currentTime: 0,
+	isPlaying: false
 };
 
 function createVideoStore() {
@@ -33,7 +38,7 @@ function createVideoStore() {
 	return {
 		subscribe,
 		set,
-		
+
 		setVideo: (url: string) => {
 			update((state) => ({
 				...state,
@@ -42,18 +47,18 @@ function createVideoStore() {
 				videoError: null
 			}));
 		},
-		
+
 		setProcessedVideo: (url: string) => {
 			update((state) => ({
 				...state,
 				processedVideoUrl: url
 			}));
 		},
-		
+
 		setProcessing: (isProcessing: boolean) => {
 			update((state) => ({ ...state, isProcessing }));
 		},
-		
+
 		setError: (error: string) => {
 			update((state) => ({
 				...state,
@@ -61,11 +66,11 @@ function createVideoStore() {
 				isProcessing: false
 			}));
 		},
-		
+
 		clearError: () => {
 			update((state) => ({ ...state, videoError: null }));
 		},
-		
+
 		setVideoDimensions: (width: number, height: number, duration: number) => {
 			update((state) => ({
 				...state,
@@ -74,11 +79,21 @@ function createVideoStore() {
 				videoDuration: duration
 			}));
 		},
-		
+
+		// NEW: Update current playback time (called by video element)
+		setCurrentTime: (time: number) => {
+			update((state) => ({ ...state, currentTime: time }));
+		},
+
+		// NEW: Update play/pause state (called by video element)
+		setIsPlaying: (playing: boolean) => {
+			update((state) => ({ ...state, isPlaying: playing }));
+		},
+
 		clearVideo: () => {
 			set(initialState);
 		},
-		
+
 		reset: () => {
 			set(initialState);
 		}

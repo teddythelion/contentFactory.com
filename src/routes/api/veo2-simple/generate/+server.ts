@@ -25,7 +25,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     });
     const token = (await (await auth.getClient()).getAccessToken()).token;
 
-    const modelId = 'veo-2.0-generate-001';
+    const modelId = 'veo-3.1-generate-001';
     
     const res = await fetch(
         `https://us-central1-aiplatform.googleapis.com/v1/projects/${env.GOOGLE_PROJECT_ID}/locations/us-central1/publishers/google/models/${modelId}:predictLongRunning`,

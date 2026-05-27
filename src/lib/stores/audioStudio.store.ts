@@ -5,6 +5,12 @@
 import { writable, get } from 'svelte/store';
 import { audioMixer } from '$lib/utils/audioMixer.ts';
 
+export interface SfxInstance {
+	id: string;
+	startTime: number;
+	endTime: number;
+}
+
 interface AudioStudioState {
 	originalVolume: number;
 	originalMuted: boolean;
@@ -12,12 +18,13 @@ interface AudioStudioState {
 	sfxPrompt: string;
 	sfxSessionId: string | null;
 	sfxPreviewUrl: string | null;
+	sfxFileName: string | null;
 	sfxVolume: number;
 	sfxLoop: boolean;
 	sfxGenerating: boolean;
 	sfxError: string | null;
-	sfxStartTime: number;
-	sfxEndTime: number;
+	sfxAudioDuration: number; // actual decoded buffer duration
+	sfxInstances: SfxInstance[];
 	sfxFadeIn: number;
 	sfxFadeOut: number;
 	sfxSuppressOriginal: boolean;
@@ -25,11 +32,13 @@ interface AudioStudioState {
 	musicPrompt: string;
 	musicSessionId: string | null;
 	musicPreviewUrl: string | null;
+	musicFileName: string | null;
 	musicVolume: number;
 	musicGenerating: boolean;
 	musicError: string | null;
 	musicStartTime: number;
 	musicEndTime: number;
+	musicTrimStart: number;
 	musicFadeIn: number;
 	musicFadeOut: number;
 	musicSuppressOriginal: boolean;
@@ -42,12 +51,13 @@ const initialState: AudioStudioState = {
 	sfxPrompt: '',
 	sfxSessionId: null,
 	sfxPreviewUrl: null,
+	sfxFileName: null,
 	sfxVolume: 0.4,
 	sfxLoop: false,
 	sfxGenerating: false,
 	sfxError: null,
-	sfxStartTime: 0,
-	sfxEndTime: 8,
+	sfxAudioDuration: 0,
+	sfxInstances: [],
 	sfxFadeIn: 0,
 	sfxFadeOut: 0,
 	sfxSuppressOriginal: false,
@@ -55,21 +65,25 @@ const initialState: AudioStudioState = {
 	musicPrompt: '',
 	musicSessionId: null,
 	musicPreviewUrl: null,
+	musicFileName: null,
 	musicVolume: 0.3,
 	musicGenerating: false,
 	musicError: null,
 	musicStartTime: 0,
 	musicEndTime: 8,
+	musicTrimStart: 0,
 	musicFadeIn: 0,
 	musicFadeOut: 0,
 	musicSuppressOriginal: false
 };
 
+function makeId() {
+	return Math.random().toString(36).slice(2, 9);
+}
+
 function createAudioStudioStore() {
 	const { subscribe, set, update } = writable<AudioStudioState>(initialState);
 
-	// Derive effective mute state — muted if explicitly muted OR
-	// if either SFX or music has suppressOriginal enabled
 	function syncOriginalToMixer() {
 		const s = get({ subscribe });
 		const effectivelyMuted = s.originalMuted || s.sfxSuppressOriginal || s.musicSuppressOriginal;
@@ -77,10 +91,19 @@ function createAudioStudioStore() {
 		audioMixer.setOriginalVolume(s.originalVolume);
 	}
 
+	function onSfxLoaded(duration: number) {
+		update((s) => {
+			const instances: SfxInstance[] =
+				s.sfxInstances.length > 0
+					? [{ ...s.sfxInstances[0], endTime: s.sfxInstances[0].startTime + duration }]
+					: [{ id: makeId(), startTime: 0, endTime: duration }];
+			return { ...s, sfxAudioDuration: duration, sfxInstances: instances };
+		});
+	}
+
 	return {
 		subscribe,
 
-		// ── Connect video element to mixer (call once on scene ready) ────────
 		connectVideo: (videoElement: HTMLVideoElement) => {
 			audioMixer.connectVideo(videoElement);
 			syncOriginalToMixer();
@@ -112,16 +135,6 @@ function createAudioStudioStore() {
 			audioMixer.setSfxLoop(loop);
 		},
 
-		setSfxStartTime: (v: number) => {
-			update((s) => ({ ...s, sfxStartTime: v }));
-			audioMixer.setSfxStartTime(v);
-		},
-
-		setSfxEndTime: (v: number) => {
-			update((s) => ({ ...s, sfxEndTime: v }));
-			audioMixer.setSfxEndTime(v);
-		},
-
 		setSfxFadeIn: (v: number) => {
 			update((s) => ({ ...s, sfxFadeIn: v }));
 			audioMixer.setSfxFadeIn(v);
@@ -137,16 +150,57 @@ function createAudioStudioStore() {
 			syncOriginalToMixer();
 		},
 
+		// ── SFX instances ────────────────────────────────────────────────────
+		updateSfxInstance: (id: string, startTime: number, endTime: number) => {
+			update((s) => ({
+				...s,
+				sfxInstances: s.sfxInstances.map((inst) =>
+					inst.id === id ? { ...inst, startTime, endTime } : inst
+				)
+			}));
+		},
+
+		duplicateSfxInstance: (id: string) => {
+			update((s) => {
+				const src = s.sfxInstances.find((i) => i.id === id);
+				if (!src) return s;
+				const duration = src.endTime - src.startTime;
+				const newStart = src.endTime + 0.5;
+				const newInst: SfxInstance = { id: makeId(), startTime: newStart, endTime: newStart + duration };
+				return { ...s, sfxInstances: [...s.sfxInstances, newInst] };
+			});
+		},
+
+		removeSfxInstance: (id: string) => {
+			update((s) => ({
+				...s,
+				sfxInstances: s.sfxInstances.filter((i) => i.id !== id)
+			}));
+		},
+
+		setLocalSfxFile: (fileName: string, objectUrl: string, sessionId: string) => {
+			update((s) => ({
+				...s,
+				sfxSessionId: sessionId,
+				sfxPreviewUrl: objectUrl,
+				sfxFileName: fileName,
+				sfxGenerating: false,
+				sfxError: null,
+				sfxInstances: [] // cleared — onSfxLoaded will set after buffer decodes
+			}));
+			audioMixer.loadSfx(objectUrl, onSfxLoaded);
+		},
+
 		setSfxResult: (sessionId: string, previewUrl: string) => {
 			update((s) => ({
 				...s,
 				sfxSessionId: sessionId,
 				sfxPreviewUrl: previewUrl,
 				sfxGenerating: false,
-				sfxError: null
+				sfxError: null,
+				sfxInstances: []
 			}));
-			// Load into mixer — plays immediately with correct volume/fades
-			audioMixer.loadSfx(previewUrl);
+			audioMixer.loadSfx(previewUrl, onSfxLoaded);
 		},
 
 		setSfxGenerating: (val: boolean) =>
@@ -160,7 +214,10 @@ function createAudioStudioStore() {
 				...s,
 				sfxSessionId: null,
 				sfxPreviewUrl: null,
-				sfxGenerating: false
+				sfxFileName: null,
+				sfxGenerating: false,
+				sfxInstances: [],
+				sfxAudioDuration: 0
 			}));
 			syncOriginalToMixer();
 		},
@@ -178,8 +235,13 @@ function createAudioStudioStore() {
 
 		regenerateSfx: (generateFn: () => Promise<void>) => {
 			audioMixer.stopSfx();
-			update((s) => ({ ...s, sfxSessionId: null, sfxPreviewUrl: null }));
+			update((s) => ({ ...s, sfxSessionId: null, sfxPreviewUrl: null, sfxInstances: [] }));
 			generateFn();
+		},
+
+		syncSfxToVideo: (videoTime: number, isPlaying: boolean) => {
+			const s = get({ subscribe });
+			audioMixer.syncSfxToVideo(videoTime, isPlaying, s.sfxInstances);
 		},
 
 		// ── MUSIC ────────────────────────────────────────────────────────────
@@ -200,6 +262,11 @@ function createAudioStudioStore() {
 			audioMixer.setMusicEndTime(v);
 		},
 
+		setMusicTrimStart: (v: number) => {
+			update((s) => ({ ...s, musicTrimStart: v }));
+			audioMixer.setMusicTrimStart(v);
+		},
+
 		setMusicFadeIn: (v: number) => {
 			update((s) => ({ ...s, musicFadeIn: v }));
 			audioMixer.setMusicFadeIn(v);
@@ -215,15 +282,39 @@ function createAudioStudioStore() {
 			syncOriginalToMixer();
 		},
 
+		setLocalMusicFile: (fileName: string, objectUrl: string, sessionId: string) => {
+			update((s) => ({
+				...s,
+				musicSessionId: sessionId,
+				musicPreviewUrl: objectUrl,
+				musicFileName: fileName,
+				musicGenerating: false,
+				musicError: null,
+				musicTrimStart: 0
+			}));
+			audioMixer.loadMusic(objectUrl, (durationSeconds) => {
+				const currentStart = get({ subscribe }).musicStartTime;
+				const newEnd = currentStart + durationSeconds;
+				update((s) => ({ ...s, musicEndTime: newEnd }));
+				audioMixer.setMusicEndTime(newEnd);
+			});
+		},
+
 		setMusicResult: (sessionId: string, previewUrl: string) => {
 			update((s) => ({
 				...s,
 				musicSessionId: sessionId,
 				musicPreviewUrl: previewUrl,
 				musicGenerating: false,
-				musicError: null
+				musicError: null,
+				musicTrimStart: 0
 			}));
-			audioMixer.loadMusic(previewUrl);
+			audioMixer.loadMusic(previewUrl, (durationSeconds) => {
+				const currentStart = get({ subscribe }).musicStartTime;
+				const newEnd = currentStart + durationSeconds;
+				update((s) => ({ ...s, musicEndTime: newEnd }));
+				audioMixer.setMusicEndTime(newEnd);
+			});
 		},
 
 		setMusicGenerating: (val: boolean) =>
@@ -238,6 +329,7 @@ function createAudioStudioStore() {
 				...s,
 				musicSessionId: null,
 				musicPreviewUrl: null,
+				musicFileName: null,
 				musicGenerating: false
 			}));
 			syncOriginalToMixer();
@@ -260,9 +352,11 @@ function createAudioStudioStore() {
 			generateFn();
 		},
 
-		stopAll: () => {
-			audioMixer.stopAll();
+		syncMusicToVideo: (videoTime: number, isPlaying: boolean) => {
+			audioMixer.syncMusicToVideo(videoTime, isPlaying);
 		},
+
+		stopAll: () => { audioMixer.stopAll(); },
 
 		reset: () => {
 			audioMixer.destroy();

@@ -16,6 +16,7 @@ interface MixerState {
 	musicVolume: number;
 	musicStartTime: number;
 	musicEndTime: number;
+	musicTrimStart: number;  // seconds into the audio buffer to skip (silence clip)
 	musicFadeIn: number;
 	musicFadeOut: number;
 }
@@ -33,7 +34,15 @@ class AudioMixer {
 	// Music
 	private musicPlayer: Tone.Player | null = null;
 	private musicGain: Tone.Volume | null = null;
+	private musicRawGain: GainNode | null = null;
 	private musicStopTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	// Music playhead sync tracking
+	private musicIsPlaying: boolean = false;
+	private lastMusicVideoTime: number = -1;
+	private lastMusicStartTime: number = -1;
+	private lastMusicEndTime: number = -1;
+	private lastMusicTrimStart: number = -1;
 
 	private state: MixerState = {
 		originalVolume: 1,
@@ -47,6 +56,7 @@ class AudioMixer {
 		musicVolume: 0.3,
 		musicStartTime: 0,
 		musicEndTime: 16,
+		musicTrimStart: 0,
 		musicFadeIn: 0,
 		musicFadeOut: 0
 	};
@@ -136,80 +146,88 @@ class AudioMixer {
 	}
 
 	// ── SFX ──────────────────────────────────────────────────────────────────
-	async loadSfx(previewUrl: string) {
+	private sfxPlayingInstanceId: string | null = null;
+
+	async loadSfx(previewUrl: string, onLoaded?: (durationSeconds: number) => void) {
 		await this.ensureStarted();
 		this.stopSfx();
 
 		const s = this.state;
-
 		this.sfxGain = new Tone.Volume(this.toDb(s.sfxVolume)).toDestination();
 
 		this.sfxPlayer = new Tone.Player({
 			url: previewUrl,
-			loop: false, // We handle looping manually to respect start/end trim window
-			fadeIn: s.sfxFadeIn,
-			fadeOut: s.sfxFadeOut,
+			loop: false,
 			onload: () => {
-				console.log(`🔊 AudioMixer: SFX loaded (${this.sfxPlayer!.buffer.duration.toFixed(2)}s)`);
-				this.playSfx();
+				const dur = this.sfxPlayer!.buffer.duration;
+				console.log(`🔊 AudioMixer: SFX loaded (${dur.toFixed(2)}s)`);
+				onLoaded?.(dur);
 			}
 		}).connect(this.sfxGain);
 	}
 
-	playSfx() {
-		if (!this.sfxPlayer || !this.sfxPlayer.loaded) return;
+	// Play SFX from a specific buffer offset for a given duration
+	private _playSfxFrom(bufferOffset: number, duration: number) {
+		if (!this.sfxPlayer?.loaded || !this.sfxGain) return;
 		this.clearSfxTimer();
 
 		const s = this.state;
 		const bufferDuration = this.sfxPlayer.buffer.duration;
-		const startOffset = Math.min(s.sfxStartTime, bufferDuration);
-		const endTime = Math.min(s.sfxEndTime, bufferDuration);
-		const duration = endTime - startOffset;
-		if (duration <= 0) return;
+		const clampedOffset = Math.min(bufferOffset, bufferDuration);
+		const playDuration = Math.min(duration, bufferDuration - clampedOffset);
+		if (playDuration <= 0) return;
 
-		try {
-			this.sfxPlayer.stop();
-		} catch {
-			/* already stopped */
-		}
+		try { this.sfxPlayer.stop(); } catch { /* already stopped */ }
 
-		// Always play with explicit duration to respect the trim window
-		this.sfxPlayer.fadeOut = 0; // disable — we handle manually
-		this.sfxPlayer.start(Tone.now(), startOffset, duration);
+		this.sfxPlayer.fadeIn = 0;
+		this.sfxPlayer.fadeOut = 0;
+		this.sfxPlayer.start(Tone.now(), clampedOffset, playDuration);
 
-		// Manually schedule fade out via gain
-		if (s.sfxFadeOut > 0 && this.sfxGain) {
+		// Schedule fade out via gain
+		if (s.sfxFadeOut > 0) {
 			const now = Tone.now();
-			const fadeStart = now + Math.max(0, duration - s.sfxFadeOut);
+			const fadeStart = now + Math.max(0, playDuration - s.sfxFadeOut);
 			if (fadeStart > now) {
 				this.sfxGain.volume.setValueAtTime(this.toDb(s.sfxVolume), fadeStart);
 				this.sfxGain.volume.linearRampToValueAtTime(-96, fadeStart + s.sfxFadeOut);
 			}
 		}
 
-		console.log(
-			`🔊 AudioMixer: SFX playing — offset:${startOffset}s duration:${duration.toFixed(2)}s loop:${s.sfxLoop}`
+		this.sfxLoopTimeout = setTimeout(() => {
+			this.sfxPlayingInstanceId = null;
+		}, playDuration * 1000 + 100);
+	}
+
+	// Playhead-driven SFX sync — mirrors syncMusicToVideo logic
+	syncSfxToVideo(videoTime: number, isPlaying: boolean, instances: Array<{id: string; startTime: number; endTime: number}>) {
+		if (!this.sfxPlayer?.loaded) return;
+
+		const active = instances.find(
+			(inst) => videoTime >= inst.startTime && videoTime < inst.endTime
 		);
 
-		// Manual loop — reschedule playback after duration if loop is on
-		if (s.sfxLoop) {
-			this.sfxLoopTimeout = setTimeout(() => {
-				// Only re-trigger if loop is still enabled and player still exists
-				if (this.state.sfxLoop && this.sfxPlayer) {
-					this.playSfx();
-				}
-			}, duration * 1000);
+		if (active && isPlaying) {
+			if (this.sfxPlayingInstanceId !== active.id) {
+				this.sfxPlayingInstanceId = active.id;
+				const bufferOffset = videoTime - active.startTime;
+				const remaining = active.endTime - videoTime;
+				this._playSfxFrom(bufferOffset, remaining);
+				console.log(`🔊 SFX instance ${active.id} — offset:${bufferOffset.toFixed(2)}s remaining:${remaining.toFixed(2)}s`);
+			}
+		} else {
+			if (this.sfxPlayingInstanceId !== null) {
+				this.sfxPlayingInstanceId = null;
+				try { this.sfxPlayer?.stop(); } catch { /* already stopped */ }
+				this.clearSfxTimer();
+			}
 		}
 	}
 
 	stopSfx() {
 		this.clearSfxTimer();
+		this.sfxPlayingInstanceId = null;
 		if (this.sfxPlayer) {
-			try {
-				this.sfxPlayer.stop();
-			} catch {
-				/* already stopped */
-			}
+			try { this.sfxPlayer.stop(); } catch { /* already stopped */ }
 			this.sfxPlayer.dispose();
 			this.sfxPlayer = null;
 		}
@@ -232,113 +250,136 @@ class AudioMixer {
 
 	setSfxFadeIn(v: number) {
 		this.state.sfxFadeIn = v;
-		if (this.sfxPlayer) {
-			this.sfxPlayer.fadeIn = v;
-			this.playSfx();
-		}
+		if (this.sfxPlayer?.loaded) this.playSfx();
 	}
 
 	setSfxFadeOut(v: number) {
 		this.state.sfxFadeOut = v;
-		if (this.sfxPlayer) {
-			this.sfxPlayer.fadeOut = v;
-			this.playSfx();
-		}
-	}
-
-	setSfxStartTime(v: number) {
-		this.state.sfxStartTime = v;
 		if (this.sfxPlayer?.loaded) this.playSfx();
 	}
 
-	setSfxEndTime(v: number) {
-		this.state.sfxEndTime = v;
-		if (this.sfxPlayer?.loaded) this.playSfx();
-	}
 
 	// ── MUSIC ────────────────────────────────────────────────────────────────
-	async loadMusic(previewUrl: string) {
+	async loadMusic(previewUrl: string, onLoaded?: (durationSeconds: number) => void) {
 		await this.ensureStarted();
 		this.stopMusic();
 
 		const s = this.state;
+		const ctx = Tone.getContext().rawContext as AudioContext;
 
-		this.musicGain = new Tone.Volume(this.toDb(s.musicVolume)).toDestination();
+		// Raw GainNode for fade control — sits between Tone.Volume and destination
+		this.musicRawGain = ctx.createGain();
+		this.musicRawGain.gain.value = s.musicVolume;
+		this.musicRawGain.connect(ctx.destination);
+
+		// Tone.Volume at unity (0 dB) just for connecting the Player into the graph
+		this.musicGain = new Tone.Volume(0);
+		// Disconnect Tone's default routing, reconnect output to our raw gain node
+		(this.musicGain as any).output.disconnect();
+		(this.musicGain as any).output.connect(this.musicRawGain);
 
 		this.musicPlayer = new Tone.Player({
 			url: previewUrl,
-			loop: false, // We handle stop at endTime manually
-			fadeIn: s.musicFadeIn,
-			fadeOut: s.musicFadeOut,
+			loop: false,
 			onload: () => {
-				console.log(
-					`🎵 AudioMixer: Music loaded (${this.musicPlayer!.buffer.duration.toFixed(2)}s)`
-				);
-				this.playMusic();
+				const dur = this.musicPlayer!.buffer.duration;
+				console.log(`🎵 AudioMixer: Music loaded (${dur.toFixed(2)}s) — awaiting playhead sync`);
+				onLoaded?.(dur);
 			}
 		}).connect(this.musicGain);
 	}
 
-	playMusic() {
-		if (!this.musicPlayer || !this.musicPlayer.loaded) return;
-		this.clearMusicTimer();
+	// ── Playhead-driven music sync ────────────────────────────────────────────
+	syncMusicToVideo(videoTime: number, isVideoPlaying: boolean) {
+		if (!this.musicPlayer?.loaded) return;
 
 		const s = this.state;
+		const inRange = videoTime >= s.musicStartTime && videoTime < s.musicEndTime;
+		const shouldPlay = isVideoPlaying && inRange;
+
+		const timeDelta = Math.abs(videoTime - this.lastMusicVideoTime);
+		const isSeeked = this.lastMusicVideoTime >= 0 && timeDelta > 0.35;
+		this.lastMusicVideoTime = videoTime;
+
+		const barMoved =
+			s.musicStartTime !== this.lastMusicStartTime ||
+			s.musicEndTime   !== this.lastMusicEndTime   ||
+			s.musicTrimStart !== this.lastMusicTrimStart;
+		this.lastMusicStartTime = s.musicStartTime;
+		this.lastMusicEndTime   = s.musicEndTime;
+		this.lastMusicTrimStart = s.musicTrimStart;
+
+		if (shouldPlay) {
+			if (!this.musicIsPlaying || isSeeked || barMoved) {
+				const bufferOffset = s.musicTrimStart + Math.max(0, videoTime - s.musicStartTime);
+				const remaining    = s.musicEndTime - videoTime;
+				this._startMusicFrom(bufferOffset, remaining);
+			}
+		} else {
+			if (this.musicIsPlaying) this._haltMusic();
+		}
+	}
+
+	private _startMusicFrom(bufferOffset: number, duration: number) {
+		if (!this.musicPlayer?.loaded || !this.musicGain) return;
+		this.clearMusicTimer();
+
 		const bufferDuration = this.musicPlayer.buffer.duration;
-		const startOffset = Math.min(s.musicStartTime, bufferDuration);
+		const clampedOffset  = Math.min(bufferOffset, bufferDuration);
+		const playDuration   = Math.min(duration, bufferDuration - clampedOffset);
+		if (playDuration <= 0) return;
 
-		// endTime of 999 means "play to end of buffer" — use bufferDuration as ceiling
-		const rawEndTime = s.musicEndTime >= 999 ? bufferDuration : s.musicEndTime;
-		const endTime = Math.min(rawEndTime, bufferDuration);
-		const duration = endTime - startOffset;
-		if (duration <= 0) return;
+		try { this.musicPlayer.stop(); } catch { /* already stopped */ }
 
-		try {
-			this.musicPlayer.stop();
-		} catch {
-			/* already stopped */
+		const s   = this.state;
+		const now = Tone.now(); // single reference for player + param scheduling
+
+		// Player: Tone handles the buffer read — disable its own fades
+		this.musicPlayer.fadeIn  = 0;
+		this.musicPlayer.fadeOut = 0;
+		this.musicPlayer.start(now, clampedOffset, playDuration);
+		this.musicIsPlaying = true;
+
+		if (!this.musicRawGain) return;
+		const gainParam = this.musicRawGain.gain;
+		const linearVol = s.musicVolume;
+
+		gainParam.cancelScheduledValues(now);
+
+		if (s.musicFadeIn > 0 && clampedOffset < s.musicFadeIn) {
+			const progress = clampedOffset / s.musicFadeIn;
+			gainParam.setValueAtTime(linearVol * progress, now);
+			gainParam.linearRampToValueAtTime(linearVol, now + (s.musicFadeIn - clampedOffset));
+		} else {
+			gainParam.setValueAtTime(linearVol, now);
 		}
 
-		// Pass explicit duration so music stops at endTime — not at buffer end
-		this.musicPlayer.fadeOut = 0; // disable — we handle manually
-		this.musicPlayer.start(Tone.now(), startOffset, duration);
-
-		// Manually schedule fade out via gain
-		if (s.musicFadeOut > 0 && this.musicGain) {
-			const now = Tone.now();
-			const fadeStart = now + duration - s.musicFadeOut;
-			this.musicGain.volume.cancelScheduledValues(now);
-			this.musicGain.volume.setValueAtTime(this.toDb(s.musicVolume), now);
-			this.musicGain.volume.linearRampToValueAtTime(-96, fadeStart + s.musicFadeOut);
+		if (s.musicFadeOut > 0) {
+			const fadeOutStart = now + playDuration - s.musicFadeOut;
+			if (fadeOutStart > now) {
+				gainParam.setValueAtTime(linearVol, fadeOutStart);
+				gainParam.linearRampToValueAtTime(0, now + playDuration);
+			}
 		}
 
-		console.log(
-			`🎵 AudioMixer: Music playing — offset:${startOffset}s duration:${duration.toFixed(2)}s`
-		);
+		console.log(`🎵 Music — offset:${clampedOffset.toFixed(2)}s play:${playDuration.toFixed(2)}s fadeIn:${s.musicFadeIn}s fadeOut:${s.musicFadeOut}s`);
 
-		// Schedule auto-stop at endTime in case Tone doesn't honor duration perfectly
-		this.musicStopTimeout = setTimeout(
-			() => {
-				if (this.musicPlayer) {
-					try {
-						this.musicPlayer.stop();
-					} catch {
-						/* already stopped */
-					}
-				}
-			},
-			(duration + 0.2) * 1000
-		);
+		this.musicStopTimeout = setTimeout(() => {
+			this._haltMusic();
+		}, (playDuration + 0.15) * 1000);
+	}
+
+	private _haltMusic() {
+		this.clearMusicTimer();
+		if (this.musicPlayer) {
+			try { this.musicPlayer.stop(); } catch { /* already stopped */ }
+		}
+		this.musicIsPlaying = false;
 	}
 
 	stopMusic() {
-		this.clearMusicTimer();
+		this._haltMusic();
 		if (this.musicPlayer) {
-			try {
-				this.musicPlayer.stop();
-			} catch {
-				/* already stopped */
-			}
 			this.musicPlayer.dispose();
 			this.musicPlayer = null;
 		}
@@ -346,37 +387,53 @@ class AudioMixer {
 			this.musicGain.dispose();
 			this.musicGain = null;
 		}
+		if (this.musicRawGain) {
+			this.musicRawGain.disconnect();
+			this.musicRawGain = null;
+		}
+		this.lastMusicVideoTime = -1;
+		this.lastMusicStartTime = -1;
+		this.lastMusicEndTime   = -1;
+		this.lastMusicTrimStart = -1;
 	}
 
 	setMusicVolume(volume: number) {
 		this.state.musicVolume = volume;
-		if (this.musicGain) this.musicGain.volume.rampTo(this.toDb(volume), 0.05);
+		if (this.musicRawGain) {
+			const ctx = Tone.getContext().rawContext as AudioContext;
+			this.musicRawGain.gain.setTargetAtTime(volume, ctx.currentTime, 0.05);
+		}
 	}
 
 	setMusicFadeIn(v: number) {
 		this.state.musicFadeIn = v;
-		if (this.musicPlayer) {
-			this.musicPlayer.fadeIn = v;
-			this.playMusic();
+		if (this.musicIsPlaying) {
+			this._haltMusic();
+			// Restart from current video position — barMoved will pick it up on next sync tick
+			this.lastMusicStartTime = -1;
 		}
 	}
 
 	setMusicFadeOut(v: number) {
 		this.state.musicFadeOut = v;
-		if (this.musicPlayer) {
-			this.musicPlayer.fadeOut = v;
-			this.playMusic();
+		if (this.musicIsPlaying) {
+			this._haltMusic();
+			this.lastMusicStartTime = -1;
 		}
 	}
 
 	setMusicStartTime(v: number) {
 		this.state.musicStartTime = v;
-		if (this.musicPlayer?.loaded) this.playMusic();
+		// barMoved detection in syncMusicToVideo will handle restart
 	}
 
 	setMusicEndTime(v: number) {
 		this.state.musicEndTime = v;
-		if (this.musicPlayer?.loaded) this.playMusic();
+		// barMoved detection in syncMusicToVideo will handle restart
+	}
+
+	setMusicTrimStart(v: number) {
+		this.state.musicTrimStart = Math.max(0, v);
 	}
 
 	// ── Cleanup ──────────────────────────────────────────────────────────────

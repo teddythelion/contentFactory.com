@@ -10,6 +10,8 @@
 	import ThreeJsLogo from './ThreeJsLogo.svelte';
 	import { text3DState } from '$lib/stores/text3d.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
+	import TimelineEditor from './TimelineEditor.svelte';
+
 	let threeJsTextComponent: ThreeJsText;
 	let threeJsLogoComponent: ThreeJsLogo;
 
@@ -240,7 +242,7 @@
 
 		videoElement = document.createElement('video');
 		videoElement.crossOrigin = 'anonymous';
-		videoElement.loop = true;
+		videoElement.loop = false;
 		videoElement.muted = false;
 		videoElement.setAttribute('playsinline', '');
 		videoElement.setAttribute('webkit-playsinline', '');
@@ -719,56 +721,12 @@
 	<canvas bind:this={canvas} class="h-full w-full"></canvas>
 
 	{#if videoElement && !(window as any).__threeJsCapturing}
-		<div class="absolute bottom-0 left-0 right-0 flex items-center gap-2 bg-black/50 px-3 py-2 backdrop-blur-sm">
-			<!-- Play/Pause -->
-			<button
-				on:click={togglePlayPause}
-				aria-label={isVideoPaused ? 'Play video' : 'Pause video'}
-				class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 hover:bg-white/30 transition-colors"
-			>
-				{#if isVideoPaused}
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-white">
-						<path d="M8 5v14l11-7z"/>
-					</svg>
-				{:else}
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-white">
-						<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-					</svg>
-				{/if}
-			</button>
-
-			<!-- Current time -->
-			<span class="text-xs tabular-nums text-white/80 w-10 text-right shrink-0">
-				{formatTime(currentTime)}
-			</span>
-
-			<!-- Scrub bar -->
-			<input
-				type="range"
-				min="0"
-				max="8.0"
-				step="0.01"
-				value={currentTime}
-				on:mousedown={() => isScrubbing = true}
-				on:touchstart={() => isScrubbing = true}
-				on:input={(e) => currentTime = parseFloat(e.currentTarget.value)}
-				on:mouseup={(e) => {
-					const val = parseFloat(e.currentTarget.value);
-					if (videoElement) videoElement.currentTime = val;
-					isScrubbing = false;
-				}}
-				on:touchend={(e) => {
-					const val = parseFloat(e.currentTarget.value);
-					if (videoElement) videoElement.currentTime = val;
-					isScrubbing = false;
-				}}
-				class="flex-1 h-1.5 cursor-pointer appearance-none rounded-lg bg-white/20 accent-white"
-			/>
-
-			<!-- Duration -->
-			<span class="text-xs tabular-nums text-white/50 w-10 shrink-0">
-				{formatTime(videoDuration)}
-			</span>
+		<div class="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-sm">
+			{#if videoElement && !(window as any).__threeJsCapturing}
+				<div class="absolute bottom-0 left-0 right-0 bg-black/90 backdrop-blur-sm">
+					<TimelineEditor {videoElement} />
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>

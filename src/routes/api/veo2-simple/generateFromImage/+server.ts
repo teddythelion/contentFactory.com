@@ -123,7 +123,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         console.log("✅ Authentication successful");
 
         // --- 3. Build Veo 3.1 Payload (per documentation) ---
-        const modelId = 'veo-3.1-generate-preview';
+        const modelId = 'veo-3.1-generate-001';
 
         console.log("🎬 Building Veo 3.1 payload...");
         console.log(`   - Prompt: ${prompt}`);
