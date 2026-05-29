@@ -112,19 +112,20 @@
 					</a>
 				</li>
 
-				<!-- Text to Video -->
+				<!-- Create (consolidated image + video) -->
 				<li>
 					<a
-						href={resolve("/texttovideo")}
-						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
-						'/texttovideo'
+						href={resolve("/create")}
+						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname === '/create' ||
+						$page.url.pathname === '/texttoimage' ||
+						$page.url.pathname === '/imageedit' ||
+						$page.url.pathname === '/texttovideo'
 							? 'active'
 							: ''}"
-						data-tip="Text or Image to Video with Editing"
+						data-tip="Create — Image & Video"
 						onclick={closeSidebar}
 					>
-
-						<!-- Video icon -->
+						<!-- Sparkle / wand icon -->
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
 							viewBox="0 0 24 24"
@@ -134,76 +135,10 @@
 							fill="none"
 							stroke="currentColor"
 							class="my-1.5 inline-block size-4"
-							><path d="M23 7l-7 5 7 5V7z"></path><rect
-								x="1"
-								y="5"
-								width="15"
-								height="14"
-								rx="2"
-								ry="2"
-							></rect></svg
 						>
-						<span class="is-drawer-close:hidden">Text to Video</span>
-					</a>
-				</li>
-
-				<!-- Text to Image -->
-				<li>
-					<a
-						href={resolve("/texttoimage")}
-						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
-						'/texttoimage'
-							? 'active'
-							: ''}"
-						data-tip="Text to Image"
-						onclick={closeSidebar}
-					>
-						<!-- Image icon -->
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 24 24"
-							stroke-linejoin="round"
-							stroke-linecap="round"
-							stroke-width="2"
-							fill="none"
-							stroke="currentColor"
-							class="my-1.5 inline-block size-4"
-							><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle
-								cx="8.5"
-								cy="8.5"
-								r="1.5"
-							></circle><path d="M21 15l-5-5L5 21"></path></svg
-						>
-						<span class="is-drawer-close:hidden">Text to Image</span>
-					</a>
-				</li>
-
-				<!-- Image Edit -->
-				<li>
-					<a
-						href={resolve("/imageedit")}
-						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
-						'/imageedit'
-							? 'active'
-							: ''}"
-						data-tip="Image Edit with Ultra Refinement"
-						onclick={closeSidebar}
-					>
-						<!-- Edit icon -->
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 24 24"
-							stroke-linejoin="round"
-							stroke-linecap="round"
-							stroke-width="2"
-							fill="none"
-							stroke="currentColor"
-							class="my-1.5 inline-block size-4"
-							><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path
-								d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
-							></path></svg
-						>
-						<span class="is-drawer-close:hidden">Image Edit</span>
+							<path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/>
+						</svg>
+						<span class="is-drawer-close:hidden">Create</span>
 					</a>
 				</li>
 

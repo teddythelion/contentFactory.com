@@ -153,6 +153,10 @@ async function runEncode(
 				fadeOut: number;
 			}> = [];
 
+			// Declared early — populated by both the SFX block below and the streams loop further down
+			const filterParts: string[] = [];
+			const mixLabels: string[] = [];
+
 			if (hasAudio && !suppressOriginalAudio) {
 				inputs.push(`-i "${audioFile}"`);
 				streams.push({
@@ -173,7 +177,6 @@ async function runEncode(
 					const inLabel = `[${inputIndex}:a]`;
 					const outLabel = `[sfx${i}]`;
 					const delayMs = Math.round(inst.startTime * 1000);
-					const instDuration = inst.endTime - inst.startTime;
 					const filters: string[] = [
 						`adelay=${delayMs}:all=1`,
 						`volume=${sfxVolume}`
@@ -210,8 +213,6 @@ async function runEncode(
 			}
 
 			// Build per-stream filter chains: trim → volume → afade in → afade out → label
-			const filterParts: string[] = [];
-			const mixLabels: string[] = [];
 
 			streams.forEach((s, i) => {
 				const outLabel = `[a${i}]`;

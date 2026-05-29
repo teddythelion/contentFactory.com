@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { GOOGLE_API_KEY } from '$env/static/private';
 import sharp from 'sharp';
+import { checkUsage, incrementUsage } from '$lib/services/usage.service';
 
 const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
 
@@ -322,8 +323,18 @@ async function checkLikeness(params: {
    MAIN HANDLER
    ========================================================= */
 
-export async function POST({ request }: { request: Request }) {
+export async function POST({ request, locals }: { request: Request; locals: any }) {
 	try {
+		const userId = locals.user?.uid;
+		if (!userId) {
+			return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+		}
+
+		const usageCheck = await checkUsage(userId, 'image');
+		if (!usageCheck.allowed) {
+			return new Response(JSON.stringify({ error: 'limit_reached', usage: usageCheck }), { status: 429 });
+		}
+
 		const formData = await request.formData();
 		const userPrompt = formData.get('prompt') as string | null;
 
@@ -347,6 +358,7 @@ export async function POST({ request }: { request: Request }) {
 				prompt: `${PHOTOREALISTIC_ENHANCEMENT_SYSTEM_PROMPT}\n\nUSER REQUEST:\n${userPrompt}\n\nCommercial-grade realism. Crisp detail. Accurate materials. Plausible lighting.`
 			});
 
+			await incrementUsage(userId, 'image');
 			return new Response(
 				JSON.stringify({
 					success: true,
@@ -434,6 +446,7 @@ export async function POST({ request }: { request: Request }) {
 				console.log('Retry:', sim.similarityScore, sim.notes);
 			}
 
+			await incrementUsage(userId, 'image');
 			return new Response(
 				JSON.stringify({
 					success: true,
@@ -456,6 +469,7 @@ export async function POST({ request }: { request: Request }) {
 			prompt: `${PHOTOREALISTIC_ENHANCEMENT_SYSTEM_PROMPT}\n\n${compositeGuidance ? `COMPOSITING:\n${compositeGuidance}\n\n` : ''}USER REQUEST:\n${userPrompt}\n\nCommercial-grade realism. Crisp detail. Accurate materials. Plausible lighting.`
 		});
 
+		await incrementUsage(userId, 'image');
 		return new Response(
 			JSON.stringify({
 				success: true,

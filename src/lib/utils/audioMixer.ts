@@ -244,18 +244,15 @@ class AudioMixer {
 
 	setSfxLoop(loop: boolean) {
 		this.state.sfxLoop = loop;
-		// Replay to apply new loop setting immediately
-		if (this.sfxPlayer?.loaded) this.playSfx();
+		// State update only — syncSfxToVideo picks up the change on the next video tick
 	}
 
 	setSfxFadeIn(v: number) {
 		this.state.sfxFadeIn = v;
-		if (this.sfxPlayer?.loaded) this.playSfx();
 	}
 
 	setSfxFadeOut(v: number) {
 		this.state.sfxFadeOut = v;
-		if (this.sfxPlayer?.loaded) this.playSfx();
 	}
 
 

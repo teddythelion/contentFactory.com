@@ -3,6 +3,7 @@
 import { adminDb } from '$lib/firebase/admin';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { TIER_CONFIG, type PlanTier, type UsageCheckResult, type GenerationType } from '$lib/types/subscription';
+import { env } from '$env/dynamic/private';
 
 const USAGE_COLLECTION = 'usage_tracking';
 
@@ -40,7 +41,23 @@ async function getUserPlan(userId: string): Promise<PlanTier> {
 		return 'free';
 	}
 	const data = userDoc.data();
-	return (data?.plan as PlanTier) || 'free';
+
+	// Trust the plan field if it's a paid tier
+	const storedPlan = data?.plan as PlanTier | undefined;
+	if (storedPlan === 'pro' || storedPlan === 'starter') {
+		return storedPlan;
+	}
+
+	// Fallback: derive plan from Stripe fields in case the plan field was never set
+	// (e.g., webhook failed, or user was manually provisioned without Stripe)
+	const status = data?.subscriptionStatus as string | null;
+	const priceId = data?.stripePriceId as string | null;
+	if (status === 'active' && priceId) {
+		if (priceId === env.STRIPE_PRO_PRICE_ID) return 'pro';
+		if (priceId === env.STRIPE_STARTER_PRICE_ID) return 'starter';
+	}
+
+	return 'free';
 }
 
 async function getCurrentUsage(userId: string, plan: PlanTier): Promise<{ imagesGenerated: number; videosGenerated: number }> {

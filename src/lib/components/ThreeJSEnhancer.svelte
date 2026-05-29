@@ -6,6 +6,7 @@
 
 	export let imageUrl: string = '';
 	export let onClose: () => void;
+	export let onSendToVideoRefs: ((dataUrl: string) => void) | null = null;
 
 	let canvas: HTMLCanvasElement;
 	let scene: THREE.Scene;
@@ -15,7 +16,6 @@
 	let textMesh: THREE.Mesh | null = null;
 	let animationId: number;
 	let texture: THREE.Texture;
-	let particleSystem: THREE.Points | null = null;
 
 	// Control states
 	let rotationX = 0;
@@ -54,22 +54,20 @@
 	let textAutoRotateSpeed = 0.01;
 	let selectedFont = 'Roboto';
 	let textMode = '2d';
-	let selected3DFont = 'helvetiker';
+	let selected3DFont = 'helvetiker_regular';
 	let textExtrusionDepth = 0.5;
 	let bevelEnabled = true;
 	let bevelThickness = 0.05;
 	let bevelSize = 0.02;
 	let loadedFont: any = null;
 
-	// ===== PARTICLES =====
-	let particlesEnabled = false;
-	let particleCount = 5000;
-	let particleSize = 0.05;
-	let particleSpeed = 0.5;
-	let particleColor = '#ffffff';
-	let particleOpacity = 0.6;
-	let particleAnimation = 'none';
-	let particleAnimationSpeed = 1;
+	// ===== CROP & STRAIGHTEN =====
+	let cropLeft = 0;
+	let cropRight = 0;
+	let cropTop = 0;
+	let cropBottom = 0;
+	let straighten = 0; // degrees -45 to 45
+	let blur = 0;       // 0 to 1
 
 	// ===== LOGO OVERLAY =====
 	let logoEnabled = false;
@@ -91,6 +89,58 @@
 	let logoAnimationSpeed = 1;
 	let logoAnimationIntensity = 0.5;
 	let logoAnimationTime = 0;
+
+	// ===== IMAGE ADJUSTMENTS =====
+	let brightness = 0;       // -0.5 to 0.5
+	let contrast = 0;         // -0.5 to 0.5
+	let saturation = 0;       // -1 to 1
+	let hue = 0;              // -180 to 180
+	let temperature = 0;      // -1 to 1 (cool → warm)
+	let vignetteStrength = 0; // 0 to 1
+	let shadows = 0;          // -0.5 to 0.5
+	let mids = 0;
+	let highlights = 0;
+
+	// ===== COLOR OVERLAY =====
+	let colorOverlayEnabled = false;
+	let colorOverlayColor = '#3b82f6';
+	let colorOverlayOpacity = 0.3;
+	let colorOverlayBlendMode = 'screen'; // none, multiply, screen, overlay
+
+	// ===== GRADIENT OVERLAY =====
+	let gradientEnabled = false;
+	let gradientColor = '#000000';
+	let gradientOpacity = 0.5;
+	let gradientType = 'linear'; // linear, radial
+
+	// ===== WATERMARK =====
+	let watermarkEnabled = false;
+	let watermarkUrl = '';
+	let watermarkCorner = 'BR'; // TL, TR, BL, BR
+	let watermarkScale = 0.5;
+	let watermarkOpacity = 0.7;
+	let watermarkMesh: THREE.Mesh | null = null;
+	let watermarkTexture: THREE.Texture | null = null;
+	let watermarkLoadId = 0; // cancel stale async loads
+
+	// ===== DRAG STATE =====
+	const raycaster = new THREE.Raycaster();
+	let dragTarget: THREE.Mesh | null = null;
+	const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1));
+	const dragOffset = new THREE.Vector3();
+	const dragIntersect = new THREE.Vector3();
+	let watermarkManualX: number | null = null;
+	let watermarkManualY: number | null = null;
+	// Shape rotation drag
+	let isRotating = false;
+	let prevDragPos = { x: 0, y: 0 };
+
+	// ===== AI RE-EDIT =====
+	let aiPrompt = '';
+	let isRegenerating = false;
+
+	// Shader uniform reference for real-time updates
+	let meshShaderRef: { uniforms: Record<string, { value: any }> } | null = null;
 
 	// ===== FILTER PRESETS =====
 	const filterPresets: Record<
@@ -153,10 +203,17 @@
 		'Bebas Neue'
 	];
 	const threejsFonts = [
-		{ name: 'Helvetiker', value: 'helvetiker' },
-		{ name: 'Optimer', value: 'optimer' },
-		{ name: 'Gentilis', value: 'gentilis' },
-		{ name: 'Droid Sans', value: 'droid_sans' }
+		{ name: 'Helvetiker', value: 'helvetiker_regular' },
+		{ name: 'Helvetiker Bold', value: 'helvetiker_bold' },
+		{ name: 'Optimer', value: 'optimer_regular' },
+		{ name: 'Optimer Bold', value: 'optimer_bold' },
+		{ name: 'Gentilis', value: 'gentilis_regular' },
+		{ name: 'Gentilis Bold', value: 'gentilis_bold' },
+		{ name: 'Droid Sans', value: 'droid_sans_regular' },
+		{ name: 'Droid Sans Bold', value: 'droid_sans_bold' },
+		{ name: 'Droid Sans Mono', value: 'droid_sans_mono_regular' },
+		{ name: 'Droid Serif', value: 'droid_serif_regular' },
+		{ name: 'Droid Serif Bold', value: 'droid_serif_bold' }
 	];
 
 	let ambientLight: THREE.AmbientLight;
@@ -167,10 +224,26 @@
 		if (!imageUrl) return;
 		loadGoogleFonts();
 		initThreeJS();
+		// Add drag listeners here (after initThreeJS) so all handler functions are in scope
+		canvas.addEventListener('mousedown', onCanvasMouseDown);
+		canvas.addEventListener('mousemove', onCanvasMouseMove);
+		canvas.addEventListener('mouseup', onCanvasPointerUp);
+		canvas.addEventListener('mouseleave', onCanvasPointerUp);
+		canvas.addEventListener('touchstart', onCanvasTouchStart, { passive: false });
+		canvas.addEventListener('touchmove', onCanvasTouchMove, { passive: false });
+		canvas.addEventListener('touchend', onCanvasPointerUp);
 		return () => {
 			if (animationId) cancelAnimationFrame(animationId);
 			if (renderer) renderer.dispose();
 			if (texture) texture.dispose();
+			canvas.removeEventListener('mousedown', onCanvasMouseDown);
+			canvas.removeEventListener('mousemove', onCanvasMouseMove);
+			canvas.removeEventListener('mouseup', onCanvasPointerUp);
+			canvas.removeEventListener('mouseleave', onCanvasPointerUp);
+			canvas.removeEventListener('touchstart', onCanvasTouchStart);
+			canvas.removeEventListener('touchmove', onCanvasTouchMove);
+			canvas.removeEventListener('touchend', onCanvasPointerUp);
+			window.removeEventListener('resize', handleResize);
 		};
 	});
 
@@ -183,7 +256,7 @@
 
 	function load3DFont(fontName: string) {
 		const loader = new FontLoader();
-		const fontPath = `https://threejs.org/examples/fonts/${fontName}_regular.typeface.json`;
+		const fontPath = `/fonts/${fontName}.typeface.json`;
 		loader.load(
 			fontPath,
 			(font) => {
@@ -221,107 +294,293 @@
 		const textureLoader = new THREE.TextureLoader();
 		textureLoader.load(imageUrl, (loadedTexture) => {
 			texture = loadedTexture;
+			applyShapeDefaults(selectedShape);
 			createMesh(selectedShape);
 			animate();
+			canvas.style.cursor = selectedShape !== 'plane' ? 'grab' : 'default';
 		});
 
 		window.addEventListener('resize', handleResize);
+	}
+
+	const IMAGE_VERT = `
+		varying vec2 vUv;
+		void main() {
+			vUv = uv;
+			gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+		}
+	`;
+
+	const IMAGE_FRAG = `
+		uniform sampler2D map;
+		uniform float uBrightness;
+		uniform float uContrast;
+		uniform float uSaturation;
+		uniform float uHue;
+		uniform float uTemperature;
+		uniform float uVignette;
+		uniform float uShadows;
+		uniform float uMids;
+		uniform float uHighlights;
+		uniform float uOverlayOpacity;
+		uniform vec3  uOverlayColor;
+		uniform float uOverlayMode;
+		uniform float uGradientOpacity;
+		uniform vec3  uGradientColor;
+		uniform float uGradientType;
+		uniform float uGlow;
+		uniform float uOpacity;
+		uniform float uBlur;
+		uniform float uCropLeft;
+		uniform float uCropRight;
+		uniform float uCropTop;
+		uniform float uCropBottom;
+		uniform float uStraighten;
+		varying vec2 vUv;
+
+		vec3 rgb2hsl(vec3 c) {
+			float mx = max(c.r, max(c.g, c.b));
+			float mn = min(c.r, min(c.g, c.b));
+			float h = 0.0, s = 0.0, l = (mx + mn) / 2.0;
+			if (mx != mn) {
+				float d = mx - mn;
+				s = l > 0.5 ? d / (2.0 - mx - mn) : d / (mx + mn);
+				if (mx == c.r)      h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+				else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+				else                h = (c.r - c.g) / d + 4.0;
+				h /= 6.0;
+			}
+			return vec3(h, s, l);
+		}
+		float hue2rgb(float p, float q, float t) {
+			if (t < 0.0) t += 1.0;
+			if (t > 1.0) t -= 1.0;
+			if (t < 1.0/6.0) return p + (q-p)*6.0*t;
+			if (t < 1.0/2.0) return q;
+			if (t < 2.0/3.0) return p + (q-p)*(2.0/3.0-t)*6.0;
+			return p;
+		}
+		vec3 hsl2rgb(vec3 c) {
+			if (c.y == 0.0) return vec3(c.z);
+			float q = c.z < 0.5 ? c.z*(1.0+c.y) : c.z+c.y-c.z*c.y;
+			float p = 2.0*c.z - q;
+			return vec3(hue2rgb(p,q,c.x+1.0/3.0), hue2rgb(p,q,c.x), hue2rgb(p,q,c.x-1.0/3.0));
+		}
+
+		void main() {
+			// Straighten — rotate UV around center
+			vec2 uv = vUv;
+			if (uStraighten != 0.0) {
+				float ang = uStraighten * 3.14159265 / 180.0;
+				float s = sin(ang); float c = cos(ang);
+				vec2 centered = uv - 0.5;
+				uv = vec2(c*centered.x - s*centered.y, s*centered.x + c*centered.y) + 0.5;
+			}
+			// Crop — remap UV into crop window
+			uv.x = uCropLeft + uv.x * (1.0 - uCropLeft - uCropRight);
+			uv.y = uCropBottom + uv.y * (1.0 - uCropTop - uCropBottom);
+
+			// Blur — 5×5 box blur
+			vec4 tex;
+			if (uBlur > 0.001) {
+				float step = uBlur * 0.012;
+				tex = vec4(0.0);
+				for (int xi = -2; xi <= 2; xi++) {
+					for (int yi = -2; yi <= 2; yi++) {
+						tex += texture2D(map, uv + vec2(float(xi), float(yi)) * step);
+					}
+				}
+				tex /= 25.0;
+			} else {
+				tex = texture2D(map, uv);
+			}
+			vec3 col = tex.rgb;
+
+			// Brightness & contrast
+			col += uBrightness;
+			col = (col - 0.5) * (1.0 + uContrast) + 0.5;
+
+			// Saturation & hue
+			vec3 hsl = rgb2hsl(col);
+			hsl.y = clamp(hsl.y * (1.0 + uSaturation), 0.0, 1.0);
+			hsl.x = mod(hsl.x + uHue / 360.0, 1.0);
+			col = hsl2rgb(hsl);
+
+			// Temperature
+			col.r = clamp(col.r + uTemperature * 0.12, 0.0, 1.0);
+			col.b = clamp(col.b - uTemperature * 0.12, 0.0, 1.0);
+
+			// Shadows / mids / highlights
+			float luma = dot(col, vec3(0.299, 0.587, 0.114));
+			float shadowMask    = clamp(1.0 - luma * 3.0, 0.0, 1.0);
+			float highlightMask = clamp((luma - 0.67) * 3.0, 0.0, 1.0);
+			float midMask       = 1.0 - shadowMask - highlightMask;
+			col += uShadows    * shadowMask    * 0.4;
+			col += uMids       * midMask       * 0.4;
+			col += uHighlights * highlightMask * 0.4;
+
+			// Vignette
+			if (uVignette > 0.0) {
+				vec2 uv2 = vUv - 0.5;
+				float v = 1.0 - dot(uv2, uv2) * uVignette * 4.5;
+				col *= clamp(v, 0.0, 1.0);
+			}
+
+			// Color overlay
+			if (uOverlayOpacity > 0.0) {
+				vec3 blend = col;
+				if      (uOverlayMode < 0.5) blend = uOverlayColor;
+				else if (uOverlayMode < 1.5) blend = col * uOverlayColor;
+				else if (uOverlayMode < 2.5) blend = 1.0 - (1.0-col)*(1.0-uOverlayColor);
+				else                          blend = mix(2.0*col*uOverlayColor, 1.0-2.0*(1.0-col)*(1.0-uOverlayColor), step(0.5, luma));
+				col = mix(col, blend, uOverlayOpacity);
+			}
+
+			// Gradient overlay
+			if (uGradientOpacity > 0.0) {
+				float ga;
+				if (uGradientType > 1.5) { vec2 c2 = vUv-0.5; ga = clamp(length(c2)*2.0,0.0,1.0); }
+				else                      { ga = vUv.y; }
+				col = mix(col, uGradientColor, ga * uGradientOpacity);
+			}
+
+			// Glow / brightness boost
+			col = clamp(col * (1.0 + uGlow * 0.6), 0.0, 1.0);
+
+			col = clamp(col, 0.0, 1.0);
+			gl_FragColor = vec4(col, tex.a * uOpacity);
+		}
+	`;
+
+	function buildAdjustUniforms() {
+		// Use zero/neutral initial values — do NOT read Svelte slider state here.
+		// Reading slider vars here would add them as reactive deps of the createMesh $: block,
+		// causing a full mesh rebuild on every slider move which thrashes meshShaderRef.
+		// animate() pushes all slider values to uniforms every frame, so initials don't matter.
+		return {
+			map:             { value: texture },
+			uBrightness:     { value: 0 },
+			uContrast:       { value: 0 },
+			uSaturation:     { value: 0 },
+			uHue:            { value: 0 },
+			uTemperature:    { value: 0 },
+			uVignette:       { value: 0 },
+			uShadows:        { value: 0 },
+			uMids:           { value: 0 },
+			uHighlights:     { value: 0 },
+			uOverlayOpacity: { value: 0 },
+			uOverlayColor:   { value: new THREE.Color(0x000000) },
+			uOverlayMode:    { value: 0.0 },
+			uGradientOpacity:{ value: 0 },
+			uGradientColor:  { value: new THREE.Color(0x000000) },
+			uGradientType:   { value: 1.0 },
+			uOpacity:        { value: 1 },
+			uGlow:           { value: 0 },
+			uBlur:           { value: 0 },
+			uCropLeft:       { value: 0 },
+			uCropRight:      { value: 0 },
+			uCropTop:        { value: 0 },
+			uCropBottom:     { value: 0 },
+			uStraighten:     { value: 0 }
+		};
+	}
+
+	const SHAPE_DEFAULTS: Record<string, { x: number; y: number; z: number }> = {
+		cube:     { x: 0.4,  y: 0.6,  z: 0 },
+		sphere:   { x: 0,    y: 0,    z: 0 },
+		cylinder: { x: 0.15, y: 0.4,  z: 0 },
+		pyramid:  { x: 0.15, y: 0.35, z: 0 },
+		torus:    { x: 0.3,  y: 0.5,  z: 0 },
+		plane:    { x: 0,    y: 0,    z: 0 }
+	};
+
+	function applyShapeDefaults(shape: string) {
+		const d = SHAPE_DEFAULTS[shape];
+		if (d) { rotationX = d.x; rotationY = d.y; rotationZ = d.z; }
+	}
+
+	function onShapeChange() {
+		applyShapeDefaults(selectedShape);
+		canvas.style.cursor = selectedShape !== 'plane' ? 'grab' : 'default';
 	}
 
 	function createMesh(shape: string) {
 		if (mesh) {
 			scene.remove(mesh);
 			mesh.geometry.dispose();
-			if (Array.isArray(mesh.material)) {
-				mesh.material.forEach((mat) => mat.dispose());
-			} else {
-				mesh.material.dispose();
+			if (Array.isArray(mesh.material)) mesh.material.forEach((m) => m.dispose());
+			else mesh.material.dispose();
+		}
+		meshShaderRef = null;
+
+		let geometry: THREE.BufferGeometry;
+		switch (shape) {
+			case 'sphere':   geometry = new THREE.SphereGeometry(2, 64, 64); break;
+			case 'cube':     geometry = new THREE.BoxGeometry(3, 3, 3); break;
+			case 'cylinder': geometry = new THREE.CylinderGeometry(2, 2, 3, 64); break;
+			case 'pyramid':  geometry = new THREE.ConeGeometry(2, 3, 4); break;
+			case 'torus':    geometry = new THREE.TorusGeometry(2, 0.8, 32, 100); break;
+			case 'plane':
+			default: {
+				const img = texture.image as HTMLImageElement;
+				const ar = img.width / img.height;
+				geometry = new THREE.PlaneGeometry(6, 6 / ar);
+				break;
 			}
 		}
 
-		let geometry: THREE.BufferGeometry;
+		let material: THREE.Material;
 
-		switch (shape) {
-			case 'sphere':
-				geometry = new THREE.SphereGeometry(2, 64, 64);
-				break;
-			case 'cube':
-				geometry = new THREE.BoxGeometry(3, 3, 3);
-				break;
-			case 'cylinder':
-				geometry = new THREE.CylinderGeometry(2, 2, 3, 64);
-				break;
-			case 'pyramid':
-				geometry = new THREE.ConeGeometry(2, 3, 4);
-				break;
-			case 'torus':
-				geometry = new THREE.TorusGeometry(2, 0.8, 32, 100);
-				break;
-			case 'plane':
-			default:
-				const image = texture.image as HTMLImageElement;
-				const aspectRatio = image.width / image.height;
-				const planeWidth = 6;
-				const planeHeight = planeWidth / aspectRatio;
-				geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
-				break;
+		if (shape === 'plane') {
+			const uniforms = buildAdjustUniforms();
+			const mat = new THREE.ShaderMaterial({
+				uniforms,
+				vertexShader: IMAGE_VERT,
+				fragmentShader: IMAGE_FRAG,
+				transparent: true,
+				side: THREE.DoubleSide,
+				depthWrite: false
+			});
+			meshShaderRef = mat as any;
+			material = mat;
+		} else {
+			// 3D shapes — inject adjustments via onBeforeCompile
+			const stdMat = new THREE.MeshStandardMaterial({
+				map: texture,
+				side: THREE.DoubleSide,
+				transparent: true,
+				alphaTest: 0.01,
+				metalness: 0.1,
+				roughness: 0.7
+			});
+			const extraUniforms = buildAdjustUniforms();
+			stdMat.onBeforeCompile = (shader) => {
+				Object.assign(shader.uniforms, extraUniforms);
+				shader.fragmentShader = shader.fragmentShader.replace(
+					'#include <map_fragment>',
+					`
+					#include <map_fragment>
+					// ── Image adjustments injected ──
+					vec3 _col = diffuseColor.rgb;
+					_col += ${brightness.toFixed(4)};
+					_col = (_col - 0.5) * (1.0 + ${contrast.toFixed(4)}) + 0.5;
+					float _luma = dot(_col, vec3(0.299,0.587,0.114));
+					_col.r = clamp(_col.r + ${temperature.toFixed(4)}*0.12,0.0,1.0);
+					_col.b = clamp(_col.b - ${temperature.toFixed(4)}*0.12,0.0,1.0);
+					float _sm = clamp(1.0 - _luma*3.0,0.0,1.0);
+					float _hm = clamp((_luma-0.67)*3.0,0.0,1.0);
+					_col += ${shadows.toFixed(4)}*_sm*0.4 + ${mids.toFixed(4)}*(1.0-_sm-_hm)*0.4 + ${highlights.toFixed(4)}*_hm*0.4;
+					diffuseColor.rgb = clamp(_col, 0.0, 1.0);
+					`
+				);
+				meshShaderRef = shader as any;
+			};
+			material = stdMat;
 		}
-
-		const material =
-			shape === 'plane'
-				? new THREE.MeshBasicMaterial({
-						map: texture,
-						side: THREE.DoubleSide,
-						transparent: true,
-						alphaTest: 0.01
-					})
-				: new THREE.MeshStandardMaterial({
-						map: texture,
-						side: THREE.DoubleSide,
-						transparent: true,
-						alphaTest: 0.01,
-						metalness: 0.1,
-						roughness: 0.7,
-						emissive: new THREE.Color(0x000000),
-						emissiveIntensity: 0
-					});
 
 		mesh = new THREE.Mesh(geometry, material);
 		mesh.scale.set(scale, scale, scale);
 		scene.add(mesh);
-	}
-
-	function createParticleSystem() {
-		if (particleSystem) {
-			scene.remove(particleSystem);
-			particleSystem.geometry.dispose();
-			(particleSystem.material as THREE.Material).dispose();
-			particleSystem = null;
-		}
-
-		if (!particlesEnabled) return;
-
-		const positions = new Float32Array(particleCount * 3);
-		for (let i = 0; i < particleCount * 3; i += 3) {
-			positions[i] = (Math.random() - 0.5) * 20;
-			positions[i + 1] = (Math.random() - 0.5) * 20;
-			positions[i + 2] = (Math.random() - 0.5) * 20;
-		}
-
-		const geometry = new THREE.BufferGeometry();
-		geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-		const color = new THREE.Color(particleColor);
-		const material = new THREE.PointsMaterial({
-			color: color,
-			size: particleSize,
-			opacity: particleOpacity,
-			transparent: true,
-			sizeAttenuation: true
-		});
-
-		particleSystem = new THREE.Points(geometry, material);
-		scene.add(particleSystem);
 	}
 
 	function clearLogo() {
@@ -474,23 +733,11 @@
 
 			if (autoRotate) mesh.rotation.y += autoRotateSpeed;
 
+			// Glow for 3D shapes (MeshStandardMaterial only — plane uses shader uniform)
 			if (mesh.material instanceof THREE.MeshStandardMaterial) {
 				const glowValue = Math.max(imageGlow, shapeGlow) * 0.5;
-				if (glowValue > 0) {
-					mesh.material.emissive.set(0xffffff);
-					mesh.material.emissiveIntensity = glowValue;
-				} else {
-					mesh.material.emissive.set(0x000000);
-					mesh.material.emissiveIntensity = 0;
-				}
-			} else if (mesh.material instanceof THREE.MeshBasicMaterial) {
-				const glowValue = Math.max(imageGlow, shapeGlow);
-				if (glowValue > 0) {
-					const tint = Math.min(1.0 + glowValue * 0.3, 1.6);
-					mesh.material.color.setRGB(tint, tint, tint);
-				} else {
-					mesh.material.color.setRGB(1, 1, 1);
-				}
+				mesh.material.emissive.set(glowValue > 0 ? 0xffffff : 0x000000);
+				mesh.material.emissiveIntensity = glowValue;
 			}
 		}
 
@@ -508,29 +755,6 @@
 				textMesh.material.opacity = textOpacity;
 				textMesh.material.emissiveIntensity = textGlow;
 			}
-		}
-
-		if (particleSystem) {
-			const positions = particleSystem.geometry.attributes.position.array as Float32Array;
-
-			for (let i = 0; i < positions.length; i += 3) {
-				if (particleAnimation === 'spiral') {
-					positions[i] +=
-						Math.cos(Date.now() * 0.001 * particleAnimationSpeed) * particleSpeed * 0.01;
-					positions[i + 1] +=
-						Math.sin(Date.now() * 0.001 * particleAnimationSpeed) * particleSpeed * 0.01;
-				} else if (particleAnimation === 'wave') {
-					positions[i + 1] +=
-						Math.sin(i * 0.01 + Date.now() * 0.001 * particleAnimationSpeed) * particleSpeed * 0.01;
-				} else if (particleAnimation === 'explosion') {
-					const dist = Math.sqrt(Math.random()) * particleSpeed * 0.05;
-					positions[i] += Math.random() * dist;
-					positions[i + 1] += Math.random() * dist;
-					positions[i + 2] += Math.random() * dist;
-				}
-			}
-
-			particleSystem.geometry.attributes.position.needsUpdate = true;
 		}
 
 		if (logoMesh) {
@@ -648,6 +872,40 @@
 		if (ambientLight) ambientLight.intensity = ambientIntensity;
 		if (directionalLight) directionalLight.intensity = directionalIntensity;
 
+		// Push image-adjustment uniforms to shader (plane mode only)
+		if (meshShaderRef && selectedShape === 'plane') {
+			const u = meshShaderRef.uniforms;
+			u.uBrightness.value  = brightness;
+			u.uContrast.value    = contrast;
+			u.uSaturation.value  = saturation;
+			u.uHue.value         = hue;
+			u.uTemperature.value = temperature;
+			u.uVignette.value    = vignetteStrength;
+			u.uShadows.value     = shadows;
+			u.uMids.value        = mids;
+			u.uHighlights.value  = highlights;
+			// Glow (from presets / effects panel)
+			u.uGlow.value = Math.max(imageGlow, shapeGlow);
+			// Color overlay
+			const ovMode = colorOverlayEnabled
+				? ({ none: 0, multiply: 1, screen: 2, overlay: 3 } as Record<string,number>)[colorOverlayBlendMode] ?? 0
+				: 0;
+			u.uOverlayOpacity.value = colorOverlayEnabled ? colorOverlayOpacity : 0;
+			(u.uOverlayColor.value as THREE.Color).set(colorOverlayColor);
+			u.uOverlayMode.value    = ovMode;
+			// Gradient
+			u.uGradientOpacity.value = gradientEnabled ? gradientOpacity : 0;
+			(u.uGradientColor.value as THREE.Color).set(gradientColor);
+			u.uGradientType.value    = gradientType === 'radial' ? 2.0 : 1.0;
+			// Crop, straighten, blur
+			u.uBlur.value      = blur;
+			u.uCropLeft.value  = cropLeft;
+			u.uCropRight.value = cropRight;
+			u.uCropTop.value   = cropTop;
+			u.uCropBottom.value = cropBottom;
+			u.uStraighten.value = straighten;
+		}
+
 		renderer.render(scene, camera);
 	}
 
@@ -670,7 +928,6 @@
 		ambientIntensity = 1.0;
 		directionalIntensity = 0.4;
 		textContent = '';
-		particlesEnabled = false;
 		logoEnabled = false;
 		logoAnimation = 'none';
 		logoAnimationSpeed = 1;
@@ -682,10 +939,248 @@
 		logoRotationX = 0;
 		logoRotationY = 0;
 		logoRotationZ = 0;
+		brightness = 0; contrast = 0; saturation = 0; hue = 0;
+		temperature = 0; vignetteStrength = 0;
+		shadows = 0; mids = 0; highlights = 0;
+		colorOverlayEnabled = false; colorOverlayOpacity = 0.3;
+		gradientEnabled = false; gradientOpacity = 0.5;
+		watermarkEnabled = false;
+		watermarkUrl = '';
+		watermarkManualX = null;
+		watermarkManualY = null;
+		if (watermarkTexture) { watermarkTexture.dispose(); watermarkTexture = null; }
+		blur = 0; cropLeft = 0; cropRight = 0; cropTop = 0; cropBottom = 0; straighten = 0;
+		dragTarget = null;
+		isRotating = false;
 		createMesh(selectedShape);
-		createParticleSystem();
 		createLogoMesh(logoUrl);
 		create3DText();
+		removeWatermarkMesh();
+	}
+
+	// ── Watermark ─────────────────────────────────────────────────────────────
+	function removeWatermarkMesh() {
+		if (watermarkMesh) {
+			scene.remove(watermarkMesh);
+			watermarkMesh.geometry.dispose();
+			(watermarkMesh.material as THREE.Material).dispose();
+			watermarkMesh = null;
+		}
+	}
+
+	// Sync — places mesh using already-loaded texture. Safe to call on every slider change.
+	function placeWatermarkMesh() {
+		removeWatermarkMesh();
+		if (!watermarkEnabled || !watermarkTexture || !texture?.image) return;
+
+		const img = texture.image as HTMLImageElement;
+		const ar = img.width / img.height;
+		const planeW = 6;
+		const planeH = planeW / ar;
+		const wSize = watermarkScale * 1.5;
+		const pad = 0.15;
+
+		let px = 0, py = 0;
+		if (watermarkManualX !== null && watermarkManualY !== null) {
+			px = watermarkManualX;
+			py = watermarkManualY;
+		} else {
+			switch (watermarkCorner) {
+				case 'TL': px = -planeW/2 + wSize/2 + pad; py =  planeH/2 - wSize/2 - pad; break;
+				case 'TR': px =  planeW/2 - wSize/2 - pad; py =  planeH/2 - wSize/2 - pad; break;
+				case 'BL': px = -planeW/2 + wSize/2 + pad; py = -planeH/2 + wSize/2 + pad; break;
+				default:   px =  planeW/2 - wSize/2 - pad; py = -planeH/2 + wSize/2 + pad; break;
+			}
+		}
+
+		const geo = new THREE.PlaneGeometry(wSize, wSize);
+		const mat = new THREE.MeshBasicMaterial({
+			map: watermarkTexture, transparent: true, opacity: watermarkOpacity,
+			side: THREE.DoubleSide, depthTest: false
+		});
+		watermarkMesh = new THREE.Mesh(geo, mat);
+		watermarkMesh.position.set(px, py, 0.05);
+		scene.add(watermarkMesh);
+	}
+
+	// Async — only called when the URL changes. Cancels stale loads.
+	function loadWatermark(url: string) {
+		const id = ++watermarkLoadId;
+		new THREE.TextureLoader().load(url, (tex) => {
+			if (id !== watermarkLoadId) return; // superseded
+			if (watermarkTexture) watermarkTexture.dispose();
+			watermarkTexture = tex;
+			placeWatermarkMesh();
+		});
+	}
+
+	function createWatermarkMesh() {
+		if (!watermarkEnabled) { removeWatermarkMesh(); return; }
+		if (!watermarkUrl) return;
+		if (watermarkTexture) {
+			placeWatermarkMesh(); // texture already loaded — instant
+		} else {
+			loadWatermark(watermarkUrl);
+		}
+	}
+
+	// Only reload texture when URL changes; update position/scale/opacity instantly
+	$: if (watermarkUrl && scene) loadWatermark(watermarkUrl);
+	$: if (scene) placeWatermarkMesh();
+	// Opacity-only change — update material directly without recreating mesh
+	$: if (watermarkMesh && watermarkMesh.material instanceof THREE.MeshBasicMaterial) {
+		watermarkMesh.material.opacity = watermarkOpacity;
+	}
+
+	// ── AI Re-edit ────────────────────────────────────────────────────────────
+	async function aiRegenerate() {
+		if (!aiPrompt.trim() || isRegenerating) return;
+		isRegenerating = true;
+		try {
+			const exportBlob = await new Promise<Blob | null>((res) =>
+				renderer.domElement.toBlob((b) => res(b), 'image/png', 1.0)
+			);
+			if (!exportBlob) throw new Error('Canvas export failed');
+			const fd = new FormData();
+			fd.append('prompt', aiPrompt);
+			fd.append('images', new File([exportBlob], 'current.png', { type: 'image/png' }));
+			const resp = await fetch('/api/imageEdit', { method: 'POST', body: fd });
+			const data = await resp.json();
+			if (!data.success) throw new Error(data.error || 'Generation failed');
+			// Reload texture from new image
+			const loader = new THREE.TextureLoader();
+			loader.load(data.imageUrl, (newTex) => {
+				texture = newTex;
+				createMesh(selectedShape);
+			});
+			aiPrompt = '';
+		} catch (e) {
+			console.error('AI re-edit failed:', e);
+		} finally {
+			isRegenerating = false;
+		}
+	}
+
+	// ── Send to video refs ────────────────────────────────────────────────────
+	function sendToVideoRefs() {
+		if (!renderer || !scene || !camera || !onSendToVideoRefs) return;
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				renderer.domElement.toBlob((blob) => {
+					if (!blob) return;
+					const url = URL.createObjectURL(blob);
+					onSendToVideoRefs!(url);
+				}, 'image/png', 1.0);
+			});
+		});
+	}
+
+	// ── Drag-to-position ────────────────────────────────────────────────────
+	function getPointerNDC(clientX: number, clientY: number): THREE.Vector2 {
+		const rect = canvas.getBoundingClientRect();
+		return new THREE.Vector2(
+			((clientX - rect.left) / rect.width) * 2 - 1,
+			-((clientY - rect.top) / rect.height) * 2 + 1
+		);
+	}
+
+	function getDraggableTargets(): THREE.Mesh[] {
+		return [logoMesh, watermarkMesh].filter((m): m is THREE.Mesh => m !== null);
+	}
+
+	function beginOverlayDrag(e: MouseEvent | TouchEvent, clientX: number, clientY: number) {
+		const ndc = getPointerNDC(clientX, clientY);
+		raycaster.setFromCamera(ndc, camera);
+		const hits = raycaster.intersectObjects(getDraggableTargets());
+		if (hits.length > 0) {
+			e.preventDefault();
+			dragTarget = hits[0].object as THREE.Mesh;
+			dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), dragTarget.position);
+			raycaster.ray.intersectPlane(dragPlane, dragIntersect);
+			dragOffset.subVectors(dragTarget.position, dragIntersect);
+			canvas.style.cursor = 'grabbing';
+			return true;
+		}
+		return false;
+	}
+
+	function applyOverlayDrag(clientX: number, clientY: number) {
+		const ndc = getPointerNDC(clientX, clientY);
+		raycaster.setFromCamera(ndc, camera);
+		if (!raycaster.ray.intersectPlane(dragPlane, dragIntersect)) return;
+		const nx = dragIntersect.x + dragOffset.x;
+		const ny = dragIntersect.y + dragOffset.y;
+		// Move the Three.js object directly — do NOT write watermarkManualX/Y here
+		// because that triggers a Svelte reactive which destroys+recreates the mesh,
+		// making dragTarget point to a disposed (invisible) object from then on.
+		dragTarget!.position.set(nx, ny, dragTarget!.position.z);
+		if (dragTarget === logoMesh) {
+			// Logo position is read by animate() each frame, so state write is safe here
+			logoPositionX = nx;
+			logoPositionY = ny;
+		}
+	}
+
+	function commitDrag() {
+		// If watermark was dragged, persist its final position to state ONCE (single reactive fire)
+		const ended = dragTarget;
+		if (ended && ended === watermarkMesh) {
+			watermarkManualX = ended.position.x;
+			watermarkManualY = ended.position.y;
+		}
+		dragTarget = null;
+		isRotating = false;
+		if (canvas) canvas.style.cursor = selectedShape !== 'plane' ? 'grab' : 'default';
+	}
+
+	function onCanvasMouseDown(e: MouseEvent) {
+		if (!beginOverlayDrag(e, e.clientX, e.clientY) && selectedShape !== 'plane') {
+			isRotating = true;
+			prevDragPos = { x: e.clientX, y: e.clientY };
+			canvas.style.cursor = 'grabbing';
+		}
+	}
+
+	function onCanvasMouseMove(e: MouseEvent) {
+		if (dragTarget) {
+			e.preventDefault();
+			applyOverlayDrag(e.clientX, e.clientY);
+		} else if (isRotating) {
+			rotationY += (e.clientX - prevDragPos.x) * 0.01;
+			rotationX += (e.clientY - prevDragPos.y) * 0.01;
+			prevDragPos = { x: e.clientX, y: e.clientY };
+		} else {
+			const ndc = getPointerNDC(e.clientX, e.clientY);
+			raycaster.setFromCamera(ndc, camera);
+			const hits = raycaster.intersectObjects(getDraggableTargets());
+			canvas.style.cursor = hits.length > 0 || selectedShape !== 'plane' ? 'grab' : 'default';
+		}
+	}
+
+	function onCanvasPointerUp() { commitDrag(); }
+
+	function onCanvasTouchStart(e: TouchEvent) {
+		if (e.touches.length !== 1) return;
+		const t = e.touches[0];
+		if (!beginOverlayDrag(e, t.clientX, t.clientY) && selectedShape !== 'plane') {
+			e.preventDefault();
+			isRotating = true;
+			prevDragPos = { x: t.clientX, y: t.clientY };
+		}
+	}
+
+	function onCanvasTouchMove(e: TouchEvent) {
+		if (e.touches.length !== 1) return;
+		const t = e.touches[0];
+		if (dragTarget) {
+			e.preventDefault();
+			applyOverlayDrag(t.clientX, t.clientY);
+		} else if (isRotating) {
+			e.preventDefault();
+			rotationY += (t.clientX - prevDragPos.x) * 0.01;
+			rotationX += (t.clientY - prevDragPos.y) * 0.01;
+			prevDragPos = { x: t.clientX, y: t.clientY };
+		}
 	}
 
 	function exportImage() {
@@ -694,14 +1189,9 @@
 		requestAnimationFrame(() => {
 			requestAnimationFrame(() => {
 				try {
-					const canvas = renderer.domElement;
-					canvas.toBlob(
+					renderer.domElement.toBlob(
 						(blob) => {
-							if (!blob) {
-								alert('Export failed');
-								return;
-							}
-
+							if (!blob) { alert('Export failed'); return; }
 							const url = URL.createObjectURL(blob);
 							const link = document.createElement('a');
 							link.download = `enhanced-image-${Date.now()}.png`;
@@ -714,8 +1204,8 @@
 						'image/png',
 						1.0
 					);
-				} catch (error) {
-					console.error('Export error:', error);
+				} catch (err) {
+					console.error('Export error:', err);
 					alert('Export failed');
 				}
 			});
@@ -726,7 +1216,6 @@
 	$: if (mesh && selectedShape) createMesh(selectedShape);
 	$: if (mesh) mesh.scale.set(scale, scale, scale);
 	$: if (textContent !== undefined || textSize || textColor || selectedFont) create3DText();
-	$: if (particlesEnabled) createParticleSystem();
 	$: if (logoEnabled && logoUrl) createLogoMesh(logoUrl);
 </script>
 
@@ -773,9 +1262,10 @@
 								<label class="text-sm font-semibold text-white">3D Shape</label>
 								<select
 									bind:value={selectedShape}
+									on:change={onShapeChange}
 									class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
 								>
-									{#each shapes as shape}
+									{#each shapes as shape (shape)}
 										<option value={shape}>{shape.charAt(0).toUpperCase() + shape.slice(1)}</option>
 									{/each}
 								</select>
@@ -1085,7 +1575,7 @@
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<label class="mb-2 block text-sm font-semibold text-white">Quick Presets</label>
 								<div class="grid grid-cols-2 gap-2">
-									{#each Object.keys(filterPresets) as preset}
+									{#each Object.keys(filterPresets) as preset (preset)}
 										<button
 											on:click={() => applyFilterPreset(preset)}
 											class="btn capitalize btn-ghost btn-xs"
@@ -1099,171 +1589,287 @@
 					</details>
 				</div>
 
-				<!-- PARTICLES -->
+				<!-- IMAGE ADJUST -->
 				<div class="rounded-lg border border-white/10 bg-gray-800/50">
 					<details class="group">
-						<summary
-							class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5"
-						>
-							<span>✨ Particle System</span>
-							<svg
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180"
-							>
-								<path
-									d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
-								/>
-							</svg>
+						<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
+							<span>🎨 Image Adjust</span>
+							<svg viewBox="0 0 20 20" fill="currentColor" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180"><path d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"/></svg>
+						</summary>
+						<div class="px-2 pb-2">
+							{#each [['Brightness', brightness, -0.5, 0.5, 0.01], ['Contrast', contrast, -0.5, 0.5, 0.01], ['Saturation', saturation, -1, 1, 0.01], ['Hue', hue, -180, 180, 1], ['Blur', blur, 0, 1, 0.01]] as [label, , mn, mx, step] (label)}
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="text-sm font-semibold text-white">{label}</label>
+									<div class="mt-1 flex gap-2">
+										{#if label === 'Brightness'}
+											<input type="range" min={mn} max={mx} {step} bind:value={brightness} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+											<input type="number" min={mn} max={mx} {step} bind:value={brightness} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+										{:else if label === 'Contrast'}
+											<input type="range" min={mn} max={mx} {step} bind:value={contrast} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+											<input type="number" min={mn} max={mx} {step} bind:value={contrast} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+										{:else if label === 'Saturation'}
+											<input type="range" min={mn} max={mx} {step} bind:value={saturation} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+											<input type="number" min={mn} max={mx} {step} bind:value={saturation} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+										{:else if label === 'Hue'}
+											<input type="range" min={mn} max={mx} {step} bind:value={hue} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+											<input type="number" min={mn} max={mx} {step} bind:value={hue} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+										{:else}
+											<input type="range" min={mn} max={mx} {step} bind:value={blur} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+											<input type="number" min={mn} max={mx} {step} bind:value={blur} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					</details>
+				</div>
+
+				<!-- COLOR GRADE -->
+				<div class="rounded-lg border border-white/10 bg-gray-800/50">
+					<details class="group">
+						<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
+							<span>🌡️ Color Grade</span>
+							<svg viewBox="0 0 20 20" fill="currentColor" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180"><path d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"/></svg>
+						</summary>
+						<div class="px-2 pb-2">
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Temperature</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="-1" max="1" step="0.01" bind:value={temperature} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="-1" max="1" step="0.01" bind:value={temperature} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+								<div class="mt-1 flex justify-between text-xs text-gray-500"><span>Cool</span><span>Warm</span></div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Shadows</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="-0.5" max="0.5" step="0.01" bind:value={shadows} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="-0.5" max="0.5" step="0.01" bind:value={shadows} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Midtones</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="-0.5" max="0.5" step="0.01" bind:value={mids} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="-0.5" max="0.5" step="0.01" bind:value={mids} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Highlights</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="-0.5" max="0.5" step="0.01" bind:value={highlights} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="-0.5" max="0.5" step="0.01" bind:value={highlights} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Vignette</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="0" max="1" step="0.01" bind:value={vignetteStrength} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="0" max="1" step="0.01" bind:value={vignetteStrength} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+							</div>
+						</div>
+					</details>
+				</div>
+
+				<!-- CROP & STRAIGHTEN -->
+				<div class="rounded-lg border border-white/10 bg-gray-800/50">
+					<details class="group">
+						<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
+							<span>✂️ Crop & Straighten</span>
+							<svg viewBox="0 0 20 20" fill="currentColor" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180"><path d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"/></svg>
+						</summary>
+						<div class="px-2 pb-2">
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Straighten</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="-45" max="45" step="0.5" bind:value={straighten} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="-45" max="45" step="0.5" bind:value={straighten} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+								<div class="mt-1 flex justify-between text-xs text-gray-500"><span>-45°</span><span>+45°</span></div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Crop Left</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="0" max="0.49" step="0.01" bind:value={cropLeft} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="0" max="0.49" step="0.01" bind:value={cropLeft} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Crop Right</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="0" max="0.49" step="0.01" bind:value={cropRight} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="0" max="0.49" step="0.01" bind:value={cropRight} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Crop Top</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="0" max="0.49" step="0.01" bind:value={cropTop} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="0" max="0.49" step="0.01" bind:value={cropTop} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Crop Bottom</label>
+								<div class="mt-1 flex gap-2">
+									<input type="range" min="0" max="0.49" step="0.01" bind:value={cropBottom} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+									<input type="number" min="0" max="0.49" step="0.01" bind:value={cropBottom} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+								</div>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<button on:click={() => { cropLeft=0; cropRight=0; cropTop=0; cropBottom=0; straighten=0; }} class="btn btn-ghost btn-xs w-full">Reset Crop</button>
+							</div>
+						</div>
+					</details>
+				</div>
+
+				<!-- OVERLAY -->
+				<div class="rounded-lg border border-white/10 bg-gray-800/50">
+					<details class="group">
+						<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
+							<span>🎭 Overlay</span>
+							<svg viewBox="0 0 20 20" fill="currentColor" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180"><path d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"/></svg>
 						</summary>
 						<div class="px-2 pb-2">
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<div class="flex items-center justify-between">
-									<span class="text-sm font-semibold text-white">Enable Particles</span>
+									<span class="text-sm font-semibold text-white">Color Overlay</span>
 									<label class="relative inline-flex cursor-pointer items-center">
-										<input type="checkbox" bind:checked={particlesEnabled} class="peer sr-only" />
-										<div
-											class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"
-										></div>
+										<input type="checkbox" bind:checked={colorOverlayEnabled} class="peer sr-only"/>
+										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
 									</label>
 								</div>
 							</div>
-
-							{#if particlesEnabled}
+							{#if colorOverlayEnabled}
 								<div class="rounded-lg p-3 hover:bg-white/5">
-									<label class="text-sm font-semibold text-white">Particle Count</label>
-									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="1000"
-											max="20000"
-											step="1000"
-											bind:value={particleCount}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={particleCount}
-											min="1000"
-											max="20000"
-											step="1000"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
-									</div>
+									<label class="text-sm font-semibold text-white">Color</label>
+									<input type="color" bind:value={colorOverlayColor} class="mt-1 h-8 w-full cursor-pointer rounded border border-white/10"/>
 								</div>
-
 								<div class="rounded-lg p-3 hover:bg-white/5">
-									<label class="text-sm font-semibold text-white">Particle Size</label>
-									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="0.01"
-											max="0.5"
-											step="0.01"
-											bind:value={particleSize}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={particleSize}
-											min="0.01"
-											max="0.5"
-											step="0.01"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
-									</div>
+									<label class="text-sm font-semibold text-white">Blend Mode</label>
+									<select bind:value={colorOverlayBlendMode} class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white">
+										<option value="none">Solid</option>
+										<option value="multiply">Multiply</option>
+										<option value="screen">Screen</option>
+										<option value="overlay">Overlay</option>
+									</select>
 								</div>
-
-								<div class="rounded-lg p-3 hover:bg-white/5">
-									<label class="text-sm font-semibold text-white">Particle Speed</label>
-									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="0.1"
-											max="2"
-											step="0.1"
-											bind:value={particleSpeed}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={particleSpeed}
-											min="0.1"
-											max="2"
-											step="0.1"
-											class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
-									</div>
-								</div>
-
-								<div class="rounded-lg p-3 hover:bg-white/5">
-									<label class="text-sm font-semibold text-white">Particle Color</label>
-									<input
-										type="color"
-										bind:value={particleColor}
-										class="mt-1 h-8 w-full cursor-pointer rounded border border-white/10"
-									/>
-								</div>
-
 								<div class="rounded-lg p-3 hover:bg-white/5">
 									<label class="text-sm font-semibold text-white">Opacity</label>
 									<div class="mt-1 flex gap-2">
-										<input
-											type="range"
-											min="0"
-											max="1"
-											step="0.1"
-											bind:value={particleOpacity}
-											class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-										/>
-										<input
-											type="number"
-											bind:value={particleOpacity}
-											min="0"
-											max="1"
-											step="0.1"
-											class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-										/>
+										<input type="range" min="0" max="1" step="0.01" bind:value={colorOverlayOpacity} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+										<input type="number" min="0" max="1" step="0.01" bind:value={colorOverlayOpacity} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
 									</div>
 								</div>
-
+							{/if}
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<div class="flex items-center justify-between">
+									<span class="text-sm font-semibold text-white">Gradient Overlay</span>
+									<label class="relative inline-flex cursor-pointer items-center">
+										<input type="checkbox" bind:checked={gradientEnabled} class="peer sr-only"/>
+										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+									</label>
+								</div>
+							</div>
+							{#if gradientEnabled}
 								<div class="rounded-lg p-3 hover:bg-white/5">
-									<label class="text-sm font-semibold text-white">Animation</label>
-									<select
-										bind:value={particleAnimation}
-										class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-									>
-										<option value="none">None</option>
-										<option value="spiral">🌀 Spiral</option>
-										<option value="wave">🌊 Wave</option>
-										<option value="explosion">💥 Explosion</option>
+									<label class="text-sm font-semibold text-white">Color</label>
+									<input type="color" bind:value={gradientColor} class="mt-1 h-8 w-full cursor-pointer rounded border border-white/10"/>
+								</div>
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="text-sm font-semibold text-white">Type</label>
+									<select bind:value={gradientType} class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white">
+										<option value="linear">Linear (top → bottom)</option>
+										<option value="radial">Radial (center → edge)</option>
 									</select>
 								</div>
-
-								{#if particleAnimation !== 'none'}
-									<div class="rounded-lg p-3 hover:bg-white/5">
-										<label class="text-sm font-semibold text-white">Animation Speed</label>
-										<div class="mt-1 flex gap-2">
-											<input
-												type="range"
-												min="0.1"
-												max="5"
-												step="0.1"
-												bind:value={particleAnimationSpeed}
-												class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"
-											/>
-											<input
-												type="number"
-												bind:value={particleAnimationSpeed}
-												min="0.1"
-												max="5"
-												step="0.1"
-												class="w-20 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
-											/>
-										</div>
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="text-sm font-semibold text-white">Opacity</label>
+									<div class="mt-1 flex gap-2">
+										<input type="range" min="0" max="1" step="0.01" bind:value={gradientOpacity} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+										<input type="number" min="0" max="1" step="0.01" bind:value={gradientOpacity} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
 									</div>
-								{/if}
+								</div>
 							{/if}
+						</div>
+					</details>
+				</div>
+
+				<!-- WATERMARK -->
+				<div class="rounded-lg border border-white/10 bg-gray-800/50">
+					<details class="group">
+						<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
+							<span>🖼️ Watermark</span>
+							<svg viewBox="0 0 20 20" fill="currentColor" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180"><path d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"/></svg>
+						</summary>
+						<div class="px-2 pb-2">
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<div class="flex items-center justify-between">
+									<span class="text-sm font-semibold text-white">Enable</span>
+									<label class="relative inline-flex cursor-pointer items-center">
+										<input type="checkbox" bind:checked={watermarkEnabled} class="peer sr-only"/>
+										<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-blue-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+									</label>
+								</div>
+							</div>
+							{#if watermarkEnabled}
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="block text-sm font-semibold text-white">Upload Image</label>
+									<input type="file" accept="image/*" class="mt-1 w-full text-xs text-gray-400 file:mr-2 file:rounded file:border-0 file:bg-gray-700 file:px-2 file:py-1 file:text-xs file:text-white"
+										on:change={(e) => {
+											const f = (e.target as HTMLInputElement).files?.[0];
+											if (f) { watermarkUrl = URL.createObjectURL(f); createWatermarkMesh(); }
+										}}
+									/>
+								</div>
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="text-sm font-semibold text-white">Corner</label>
+									<div class="mt-1 grid grid-cols-2 gap-1">
+										{#each ['TL','TR','BL','BR'] as c (c)}
+											<button on:click={() => { watermarkCorner = c; watermarkManualX = null; watermarkManualY = null; createWatermarkMesh(); }}
+												class="btn btn-xs {watermarkCorner === c ? 'btn-primary' : 'btn-ghost'}">
+												{c === 'TL' ? '↖ Top Left' : c === 'TR' ? '↗ Top Right' : c === 'BL' ? '↙ Bot Left' : '↘ Bot Right'}
+											</button>
+										{/each}
+									</div>
+								</div>
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="text-sm font-semibold text-white">Scale</label>
+									<div class="mt-1 flex gap-2">
+										<input type="range" min="0.1" max="1" step="0.05" bind:value={watermarkScale} on:input={createWatermarkMesh} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+										<input type="number" min="0.1" max="1" step="0.05" bind:value={watermarkScale} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+									</div>
+								</div>
+								<div class="rounded-lg p-3 hover:bg-white/5">
+									<label class="text-sm font-semibold text-white">Opacity</label>
+									<div class="mt-1 flex gap-2">
+										<input type="range" min="0" max="1" step="0.05" bind:value={watermarkOpacity} on:input={() => { if (watermarkMesh && watermarkMesh.material instanceof THREE.MeshBasicMaterial) watermarkMesh.material.opacity = watermarkOpacity; }} class="h-2 flex-1 rounded-lg bg-gray-700 accent-blue-500"/>
+										<input type="number" min="0" max="1" step="0.05" bind:value={watermarkOpacity} class="w-16 rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"/>
+									</div>
+								</div>
+							{/if}
+						</div>
+					</details>
+				</div>
+
+				<!-- AI RE-EDIT -->
+				<div class="rounded-lg border border-white/10 bg-gray-800/50">
+					<details class="group">
+						<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
+							<span>🤖 AI Re-edit</span>
+							<svg viewBox="0 0 20 20" fill="currentColor" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180"><path d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"/></svg>
+						</summary>
+						<div class="px-2 pb-2">
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<label class="text-sm font-semibold text-white">Describe your change</label>
+								<textarea bind:value={aiPrompt} placeholder="e.g. make the background sunset orange, add a dramatic shadow..." rows="3" class="mt-1 w-full resize-none rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white placeholder-gray-500"></textarea>
+							</div>
+							<div class="rounded-lg p-3 hover:bg-white/5">
+								<button on:click={aiRegenerate} disabled={isRegenerating || !aiPrompt.trim()} class="btn btn-primary btn-sm w-full">
+									{isRegenerating ? '⏳ Regenerating...' : '✨ Regenerate with AI'}
+								</button>
+								<p class="mt-1 text-xs text-gray-500">Exports current canvas → sends to Nano Banana → reloads as new texture</p>
+							</div>
 						</div>
 					</details>
 				</div>
@@ -1274,7 +1880,7 @@
 						<summary
 							class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5"
 						>
-							<span>🎨 Logo Overlay</span>
+							<span>🖼️ Image Overlay</span>
 							<svg
 								viewBox="0 0 20 20"
 								fill="currentColor"
@@ -1288,7 +1894,7 @@
 						<div class="px-2 pb-2">
 							<div class="rounded-lg p-3 hover:bg-white/5">
 								<div class="flex items-center justify-between">
-									<span class="text-sm font-semibold text-white">Enable Logo</span>
+									<span class="text-sm font-semibold text-white">Enable Overlay</span>
 									<label class="relative inline-flex cursor-pointer items-center">
 										<input type="checkbox" bind:checked={logoEnabled} class="peer sr-only" />
 										<div
@@ -1300,7 +1906,7 @@
 
 							{#if logoEnabled}
 								<div class="rounded-lg p-3 hover:bg-white/5">
-									<label class="block text-sm font-semibold text-white">Upload Logo</label>
+									<label class="block text-sm font-semibold text-white">Upload Image</label>
 									<input
 										type="file"
 										accept="image/*"
@@ -1531,7 +2137,7 @@
 										on:change={create3DText}
 										class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
 									>
-										{#each googleFonts as font}
+										{#each googleFonts as font (font)}
 											<option value={font}>{font}</option>
 										{/each}
 									</select>
@@ -1544,7 +2150,7 @@
 										on:change={() => load3DFont(selected3DFont)}
 										class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white"
 									>
-										{#each threejsFonts as font}
+										{#each threejsFonts as font (font.value)}
 											<option value={font.value}>{font.name}</option>
 										{/each}
 									</select>
@@ -1766,6 +2372,9 @@
 			<!-- ACTION BUTTONS -->
 			<div class="mt-auto flex flex-col gap-2 border-t border-white/10 pt-4">
 				<button on:click={resetAll} class="btn btn-ghost btn-sm">🔄 Reset All</button>
+				{#if onSendToVideoRefs}
+					<button on:click={sendToVideoRefs} class="btn btn-sm btn-secondary">🎬 Send to Video Refs</button>
+				{/if}
 				<button on:click={exportImage} class="btn btn-sm btn-primary">⬇️ Export Image</button>
 			</div>
 		</div>
