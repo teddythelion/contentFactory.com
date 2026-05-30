@@ -55,6 +55,7 @@
 		if (newMode === mode || isGenerating) return;
 		mode = newMode;
 		// Clear edit source — an image file can't render as a video element and vice versa
+		if (editSourceUrl?.startsWith('blob:')) URL.revokeObjectURL(editSourceUrl);
 		editSourceUrl = null;
 		editSourceFileName = '';
 		error = '';
@@ -63,6 +64,8 @@
 
 	// ── Clear all ─────────────────────────────────────────────────────────────
 	function clearAll() {
+		if (editSourceUrl?.startsWith('blob:')) URL.revokeObjectURL(editSourceUrl);
+		referencePreviews.forEach(p => { if (p?.startsWith('blob:')) URL.revokeObjectURL(p); });
 		generatedContent = null;
 		contentType = null;
 		prompt = '';
@@ -87,24 +90,39 @@
 		return true;
 	}
 
+	// ── HEIC guard — browsers can't render HEIC natively ─────────────────────
+	function isHeic(file: File): boolean {
+		return (
+			file.type === 'image/heic' ||
+			file.type === 'image/heif' ||
+			/\.heic$/i.test(file.name) ||
+			/\.heif$/i.test(file.name)
+		);
+	}
+
 	// ── Reference images ──────────────────────────────────────────────────────
 	function addReferenceImages(event: Event) {
 		if (!canAddRef || isGenerating) return;
 		const input = event.target as HTMLInputElement;
-		const newFiles = Array.from(input.files ?? []).slice(0, 3 - referenceFiles.length);
+		const allFiles = Array.from(input.files ?? []);
 		input.value = '';
+		if (!allFiles.length) return;
+		const heicFiles = allFiles.filter(isHeic);
+		if (heicFiles.length) {
+			showToastMsg('HEIC/HEIF images are not supported. Please convert to JPEG or PNG first.');
+			return;
+		}
+		const newFiles = allFiles.slice(0, 3 - referenceFiles.length);
 		if (!newFiles.length) return;
-		newFiles.forEach(file => {
-			const reader = new FileReader();
-			reader.onload = e => {
-				referencePreviews = [...referencePreviews, e.target!.result as string];
-			};
-			reader.readAsDataURL(file);
-		});
+		// createObjectURL is synchronous — thumbnail appears instantly, no async gap
+		const newPreviews = newFiles.map(f => URL.createObjectURL(f));
+		referencePreviews = [...referencePreviews, ...newPreviews];
 		referenceFiles = [...referenceFiles, ...newFiles];
 	}
 
 	function removeReference(i: number) {
+		const preview = referencePreviews[i];
+		if (preview?.startsWith('blob:')) URL.revokeObjectURL(preview);
 		referenceFiles = referenceFiles.filter((_, idx) => idx !== i);
 		referencePreviews = referencePreviews.filter((_, idx) => idx !== i);
 	}
@@ -115,17 +133,19 @@
 		const file = input.files?.[0];
 		if (!file) return;
 		input.value = '';
+		if (isHeic(file)) {
+			showToastMsg('HEIC/HEIF images are not supported. Please convert to JPEG or PNG first.');
+			return;
+		}
+		if (editSourceUrl?.startsWith('blob:')) URL.revokeObjectURL(editSourceUrl);
 		editSourceFileName = file.name;
-		const reader = new FileReader();
-		reader.onload = e => {
-			editSourceUrl = e.target!.result as string;
-			generatedContent = null;
-			contentType = null;
-		};
-		reader.readAsDataURL(file);
+		editSourceUrl = URL.createObjectURL(file);
+		generatedContent = null;
+		contentType = null;
 	}
 
 	function clearEditSource() {
+		if (editSourceUrl?.startsWith('blob:')) URL.revokeObjectURL(editSourceUrl);
 		editSourceUrl = null;
 		editSourceFileName = '';
 	}

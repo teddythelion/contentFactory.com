@@ -142,6 +142,14 @@
 	// Shader uniform reference for real-time updates
 	let meshShaderRef: { uniforms: Record<string, { value: any }> } | null = null;
 
+	// ===== PROCESSING PIPELINE (for 3D shapes) =====
+	// Renders the image through our adjustment shader into a RenderTarget,
+	// then applies that pre-processed texture to the 3D MeshStandardMaterial.
+	let processScene: THREE.Scene | null = null;
+	let processCamera: THREE.OrthographicCamera | null = null;
+	let processTarget: THREE.WebGLRenderTarget | null = null;
+	let processShaderRef: { uniforms: Record<string, { value: any }> } | null = null;
+
 	// ===== FILTER PRESETS =====
 	const filterPresets: Record<
 		string,
@@ -236,6 +244,7 @@
 			if (animationId) cancelAnimationFrame(animationId);
 			if (renderer) renderer.dispose();
 			if (texture) texture.dispose();
+			if (processTarget) processTarget.dispose();
 			canvas.removeEventListener('mousedown', onCanvasMouseDown);
 			canvas.removeEventListener('mousemove', onCanvasMouseMove);
 			canvas.removeEventListener('mouseup', onCanvasPointerUp);
@@ -295,6 +304,7 @@
 		textureLoader.load(imageUrl, (loadedTexture) => {
 			texture = loadedTexture;
 			applyShapeDefaults(selectedShape);
+			setupProcessingPipeline();
 			createMesh(selectedShape);
 			animate();
 			canvas.style.cursor = selectedShape !== 'plane' ? 'grab' : 'default';
@@ -504,6 +514,32 @@
 		canvas.style.cursor = selectedShape !== 'plane' ? 'grab' : 'default';
 	}
 
+	function setupProcessingPipeline() {
+		const img = texture.image as HTMLImageElement;
+		const w = Math.min(img.width || 1024, 2048);
+		const h = Math.min(img.height || 1024, 2048);
+
+		processScene = new THREE.Scene();
+		processCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+		const uniforms = buildAdjustUniforms();
+		const mat = new THREE.ShaderMaterial({
+			uniforms,
+			vertexShader: IMAGE_VERT,
+			fragmentShader: IMAGE_FRAG,
+			transparent: false,
+			depthWrite: false
+		});
+		processShaderRef = mat as unknown as { uniforms: Record<string, { value: unknown }> };
+		const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+		processScene.add(quad);
+
+		processTarget = new THREE.WebGLRenderTarget(w, h, {
+			minFilter: THREE.LinearFilter,
+			magFilter: THREE.LinearFilter
+		});
+	}
+
 	function createMesh(shape: string) {
 		if (mesh) {
 			scene.remove(mesh);
@@ -544,38 +580,17 @@
 			meshShaderRef = mat as any;
 			material = mat;
 		} else {
-			// 3D shapes — inject adjustments via onBeforeCompile
-			const stdMat = new THREE.MeshStandardMaterial({
-				map: texture,
+			// 3D shapes — use plain MeshStandardMaterial; adjustments are pre-processed
+			// through the processing pipeline (WebGLRenderTarget) each frame in animate().
+			const map3D = processTarget ? processTarget.texture : texture;
+			material = new THREE.MeshStandardMaterial({
+				map: map3D,
 				side: THREE.DoubleSide,
 				transparent: true,
 				alphaTest: 0.01,
 				metalness: 0.1,
 				roughness: 0.7
 			});
-			const extraUniforms = buildAdjustUniforms();
-			stdMat.onBeforeCompile = (shader) => {
-				Object.assign(shader.uniforms, extraUniforms);
-				shader.fragmentShader = shader.fragmentShader.replace(
-					'#include <map_fragment>',
-					`
-					#include <map_fragment>
-					// ── Image adjustments injected ──
-					vec3 _col = diffuseColor.rgb;
-					_col += ${brightness.toFixed(4)};
-					_col = (_col - 0.5) * (1.0 + ${contrast.toFixed(4)}) + 0.5;
-					float _luma = dot(_col, vec3(0.299,0.587,0.114));
-					_col.r = clamp(_col.r + ${temperature.toFixed(4)}*0.12,0.0,1.0);
-					_col.b = clamp(_col.b - ${temperature.toFixed(4)}*0.12,0.0,1.0);
-					float _sm = clamp(1.0 - _luma*3.0,0.0,1.0);
-					float _hm = clamp((_luma-0.67)*3.0,0.0,1.0);
-					_col += ${shadows.toFixed(4)}*_sm*0.4 + ${mids.toFixed(4)}*(1.0-_sm-_hm)*0.4 + ${highlights.toFixed(4)}*_hm*0.4;
-					diffuseColor.rgb = clamp(_col, 0.0, 1.0);
-					`
-				);
-				meshShaderRef = shader as any;
-			};
-			material = stdMat;
 		}
 
 		mesh = new THREE.Mesh(geometry, material);
@@ -872,9 +887,8 @@
 		if (ambientLight) ambientLight.intensity = ambientIntensity;
 		if (directionalLight) directionalLight.intensity = directionalIntensity;
 
-		// Push image-adjustment uniforms to shader (plane mode only)
-		if (meshShaderRef && selectedShape === 'plane') {
-			const u = meshShaderRef.uniforms;
+		// Helper: push all adjustment uniforms to a shader ref
+		function pushUniforms(u: Record<string, { value: unknown }>, includeCrop: boolean) {
 			u.uBrightness.value  = brightness;
 			u.uContrast.value    = contrast;
 			u.uSaturation.value  = saturation;
@@ -884,26 +898,43 @@
 			u.uShadows.value     = shadows;
 			u.uMids.value        = mids;
 			u.uHighlights.value  = highlights;
-			// Glow (from presets / effects panel)
-			u.uGlow.value = Math.max(imageGlow, shapeGlow);
-			// Color overlay
+			u.uGlow.value        = Math.max(imageGlow, shapeGlow);
 			const ovMode = colorOverlayEnabled
-				? ({ none: 0, multiply: 1, screen: 2, overlay: 3 } as Record<string,number>)[colorOverlayBlendMode] ?? 0
+				? ({ none: 0, multiply: 1, screen: 2, overlay: 3 } as Record<string, number>)[colorOverlayBlendMode] ?? 0
 				: 0;
 			u.uOverlayOpacity.value = colorOverlayEnabled ? colorOverlayOpacity : 0;
 			(u.uOverlayColor.value as THREE.Color).set(colorOverlayColor);
-			u.uOverlayMode.value    = ovMode;
-			// Gradient
+			u.uOverlayMode.value     = ovMode;
 			u.uGradientOpacity.value = gradientEnabled ? gradientOpacity : 0;
 			(u.uGradientColor.value as THREE.Color).set(gradientColor);
 			u.uGradientType.value    = gradientType === 'radial' ? 2.0 : 1.0;
-			// Crop, straighten, blur
-			u.uBlur.value      = blur;
-			u.uCropLeft.value  = cropLeft;
-			u.uCropRight.value = cropRight;
-			u.uCropTop.value   = cropTop;
-			u.uCropBottom.value = cropBottom;
-			u.uStraighten.value = straighten;
+			if (includeCrop) {
+				u.uBlur.value       = blur;
+				u.uCropLeft.value   = cropLeft;
+				u.uCropRight.value  = cropRight;
+				u.uCropTop.value    = cropTop;
+				u.uCropBottom.value = cropBottom;
+				u.uStraighten.value = straighten;
+			}
+		}
+
+		// Plane: push directly to its ShaderMaterial uniforms
+		if (selectedShape === 'plane' && meshShaderRef) {
+			pushUniforms(meshShaderRef.uniforms, true);
+		}
+
+		// 3D shapes: push to processing pipeline, render to target, swap texture onto mesh
+		if (selectedShape !== 'plane' && processShaderRef && processScene && processCamera && processTarget) {
+			pushUniforms(processShaderRef.uniforms, true);
+			renderer.setRenderTarget(processTarget);
+			renderer.render(processScene, processCamera);
+			renderer.setRenderTarget(null);
+			// Swap the processed texture onto the 3D mesh if not already set
+			if (mesh?.material instanceof THREE.MeshStandardMaterial &&
+				mesh.material.map !== processTarget.texture) {
+				mesh.material.map = processTarget.texture;
+				mesh.material.needsUpdate = true;
+			}
 		}
 
 		renderer.render(scene, camera);
