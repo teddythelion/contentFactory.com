@@ -35,8 +35,14 @@ export async function captureThreeJsVideo(
 
 	const videoDuration = videoElement.duration;
 	const fps = 30;
+	// Physical pixel dimensions — what gl.readPixels actually reads.
 	const width = canvas.width;
 	const height = canvas.height;
+	// Logical (CSS) pixel dimensions — target output resolution.
+	// On a 2× DPR display, canvas.width = clientWidth * 2. We down-scale on the server
+	// so the encoded video is at a sane resolution, not 4× larger than the display size.
+	const outWidth = canvas.clientWidth;
+	const outHeight = canvas.clientHeight;
 	console.log(`🖼️ Canvas size: ${width}x${height}`);
 	console.log(`🖼️ Canvas client size: ${canvas.clientWidth}x${canvas.clientHeight}`);
 	const totalFrames = Math.ceil(videoDuration * fps);
@@ -82,13 +88,23 @@ export async function captureThreeJsVideo(
 					videoElement.addEventListener('seeked', () => resolve(), { once: true });
 				});
 
+				// Single source of truth — use the actual position the browser seeked to,
+				// not the mathematical i/fps target (they can diverge due to frame quantization).
+				const actualTime = videoElement.currentTime;
+
+				// Force texture dirty — Three.js VideoTexture relies on requestVideoFrameCallback
+				// on modern browsers, which may not fire synchronously after a manual seek on a
+				// paused video. Without this, the GPU slot stays at frame 0 the whole capture.
+				const mainVideoTexture = (window as any).__threeJsVideoTexture;
+				if (mainVideoTexture) mainVideoTexture.needsUpdate = true;
+
 				const textMesh = (window as any).__textMesh;
 				if (textMesh?._videoTexture) {
 					textMesh._videoTexture.needsUpdate = true;
 				}
 
 				const updateScene = (window as any).__threeJsUpdateScene;
-				if (updateScene) updateScene(targetTime);
+				if (updateScene) updateScene(actualTime);
 
 				threeRenderer.render(threeScene, threeCamera);
 				gl.finish();
@@ -168,6 +184,8 @@ export async function captureThreeJsVideo(
 				suppressOriginalAudio,
 				width,
 				height,
+				outWidth,
+				outHeight,
 				userId,
 				audioSessionId,
 				sfxSessionId: audioStudio.sfxSessionId,

@@ -279,7 +279,7 @@
 			status = 'Preparing editor...';
 			try {
 				const fd = new FormData();
-				if (activeUrl.startsWith('data:video')) {
+				if (activeUrl.startsWith('data:video') || activeUrl.startsWith('blob:')) {
 					const blob = await (await fetch(activeUrl)).blob();
 					fd.append('videoFile', blob, 'video.mp4');
 				} else {
@@ -557,8 +557,8 @@
 						<video
 							src={activeUrl}
 							controls
-							class="w-full rounded-xl object-cover"
-							style="min-height: 320px;"
+							class="w-full rounded-xl object-contain"
+							style="min-height: 320px; max-height: 560px; background:#000;"
 						>
 							<track kind="captions" src="" label="English" srclang="en" />
 						</video>

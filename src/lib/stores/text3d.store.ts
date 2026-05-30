@@ -7,6 +7,9 @@ export interface Text3DState {
 	// Enable/Disable
 	enabled: boolean;
 	use3D: boolean; // Legacy - always true now, kept for compatibility
+	// TEXT MODE: Troika (Google Fonts, SDF pseudo-3D) vs True 3D (TextGeometry, real geometry)
+	textMode: 'troika' | 'true3d';
+	true3dFontFile: string; // typeface.json filename from static/fonts/
 	// VIDEO TEXTURE ON TEXT (INSANE FEATURE!)
 	useVideoTexture: boolean;
 	videoTextureScale: number; // How to scale/fit video on letters
@@ -86,6 +89,8 @@ const initialState: Text3DState = {
 	// Enable/Disable
 	enabled: false,
 	use3D: true,
+	textMode: 'troika',
+	true3dFontFile: 'helvetiker_bold.typeface.json',
 	// VIDEO TEXTURE
 	useVideoTexture: false,
 	videoTextureScale: 1.0,
@@ -247,6 +252,16 @@ function createText3DStore() {
 		// Set animation type
 		setAnimation: (animationType: Text3DState['animationType']) => {
 			update((state) => ({ ...state, animationType }));
+		},
+
+		// Set text mode (troika = Google Fonts 2.5-D, true3d = TextGeometry)
+		setTextMode: (mode: 'troika' | 'true3d') => {
+			update((state) => ({ ...state, textMode: mode }));
+		},
+
+		// Set True 3D font file
+		setTrue3dFont: (fontFile: string) => {
+			update((state) => ({ ...state, true3dFontFile: fontFile }));
 		},
 
 		// Toggle auto-rotate

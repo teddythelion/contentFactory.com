@@ -2,7 +2,7 @@
 <!-- HANDLES ALL THREE.JS SCENE LOGIC WITH ENHANCED PARTICLES + LOGO -->
 
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import * as THREE from 'three';
 	import { videoState } from '$lib/stores/video.store';
 	import { threeJsState } from '$lib/stores/threeJs.store';
@@ -23,6 +23,7 @@
 	let renderer: THREE.WebGLRenderer | null = null;
 	let mesh: THREE.Mesh | null = null;
 	let animationId: number | null = null;
+	let destroyed = false;
 	let videoTexture: THREE.VideoTexture | null = null;
 	let videoElement: HTMLVideoElement | null = null;
 
@@ -116,7 +117,12 @@
 	onMount(() => {
 		if (!videoUrl) return;
 
-		initThreeJS();
+		// Wait one rAF so the browser has finished painting the canvas container
+		// and clientWidth/clientHeight are non-zero before we create the renderer.
+		requestAnimationFrame(() => {
+			initThreeJS();
+		});
+
 		canvas.addEventListener('mousedown', onMouseDown);
 		canvas.addEventListener('mousemove', onMouseMove);
 		canvas.addEventListener('mouseup', onMouseUp);
@@ -124,10 +130,14 @@
 		canvas.addEventListener('touchmove', onTouchMove);
 		canvas.addEventListener('touchend', onTouchEnd);
 
-		tick().then(() => animate());
+		// NOTE: animate() is called only once, from inside loadedmetadata,
+		// AFTER the mesh and video texture exist. Do NOT call it here —
+		// a second concurrent RAF loop causes 2x accumulation on += state
+		// (auto-rotate, particle rotation) and leaks after unmount.
 
 		return () => {
-			 if (playerInterval) clearInterval(playerInterval);
+			destroyed = true; // stops the RAF loop regardless of animationId
+			if (playerInterval) clearInterval(playerInterval);
 			if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
 			audioStudioStore.stopAll();
 			if (particleSystem) {
@@ -181,6 +191,8 @@
 			(window as any).__threeJsCamera = null;
 			(window as any).__threeJsCapturing = false;
 			(window as any).__threeJsUpdateScene = null;
+			(window as any).__threeJsVideoTexture = null;
+			threeJsState.setSceneReady(false);
 
 			if (canvas) {
 				canvas.removeEventListener('mousedown', onMouseDown);
@@ -256,6 +268,9 @@
 			const proxyUrl = `/api/proxyVideo?url=${encodeURIComponent(videoUrl)}`;
 			videoElement.src = proxyUrl;
 			console.log('🔄 Using proxy for GCS video:', proxyUrl);
+		} else if (videoUrl.startsWith('blob:')) {
+			videoElement.crossOrigin = '';
+			videoElement.src = videoUrl;
 		} else {
 			videoElement.src = videoUrl;
 		}
@@ -266,12 +281,14 @@
 			videoTexture.minFilter = THREE.LinearFilter;
 			videoTexture.magFilter = THREE.LinearFilter;
 			videoTexture.generateMipmaps = false;
+			(window as any).__threeJsVideoTexture = videoTexture;
 
 			createMesh(selectedShape);
 			videoElement!.play().catch((err) => console.error('Play error:', err));
 			animate();
 			window.dispatchEvent(new CustomEvent('threeJsSceneReady'));
-			startPlayerPolling(); 
+			threeJsState.setSceneReady(true);
+			startPlayerPolling();
 			audioStudioStore.connectVideo(videoElement!);
 			videoState.setVideoDimensions(
    			videoElement!.videoWidth,
@@ -498,17 +515,22 @@
 		for (let i = 0; i < particleCount; i++) {
 			const i3 = i * 3;
 			if (particleAnimation === 'fountain') {
+				// Start all particles at the base of the fountain
 				positions[i3] = (Math.random() - 0.5) * 2;
 				positions[i3 + 1] = -particleSpread / 2;
 				positions[i3 + 2] = (Math.random() - 0.5) * 2;
+				// Stagger initial velocities so the fountain isn't a single burst on load
+				velocities[i3] = (Math.random() - 0.5) * 0.05;
+				velocities[i3 + 1] = (0.15 + Math.random() * 0.2) * particleAnimationSpeed;
+				velocities[i3 + 2] = (Math.random() - 0.5) * 0.05;
 			} else {
 				positions[i3] = (Math.random() - 0.5) * particleSpread;
 				positions[i3 + 1] = (Math.random() - 0.5) * particleSpread;
 				positions[i3 + 2] = (Math.random() - 0.5) * particleSpread;
+				velocities[i3] = (Math.random() - 0.5) * particleSpeed * 0.1;
+				velocities[i3 + 1] = (Math.random() - 0.5) * particleSpeed * 0.1;
+				velocities[i3 + 2] = (Math.random() - 0.5) * particleSpeed * 0.1;
 			}
-			velocities[i3] = (Math.random() - 0.5) * particleSpeed * 0.1;
-			velocities[i3 + 1] = (Math.random() - 0.5) * particleSpeed * 0.1;
-			velocities[i3 + 2] = (Math.random() - 0.5) * particleSpeed * 0.1;
 			phases[i] = Math.random() * Math.PI * 2;
 			sizes[i] = particleSize * (0.5 + Math.random());
 			const hue = (i / particleCount) * 360;
@@ -570,13 +592,14 @@
 		for (let i = 0; i < particleCount; i++) {
 			const i3 = i * 3;
 			switch (particleAnimation) {
-				case 'spiral':
+				case 'spiral': {
 					const spiralRadius = 5 + Math.sin(animationTime + phases[i]) * 2;
-					const spiralAngle = animationTime * 2 + i * 0.1;
+					const spiralAngle = animationTime * 2 * particleAnimationSpeed + i * 0.1;
 					positions[i3] = Math.cos(spiralAngle) * spiralRadius;
 					positions[i3 + 1] = (i / particleCount - 0.5) * particleSpread;
 					positions[i3 + 2] = Math.sin(spiralAngle) * spiralRadius;
 					break;
+				}
 				case 'wave':
 					positions[i3] += velocities[i3] * particleSpeed;
 					positions[i3 + 1] = Math.sin(animationTime + phases[i] + positions[i3] * 0.5) * 3;
@@ -604,13 +627,19 @@
 					positions[i3 + 2] = Math.sin(orbitSpeed) * orbitRadius;
 					break;
 				case 'fountain':
-					positions[i3 + 1] += velocities[i3 + 1] * particleSpeed * 10;
-					velocities[i3 + 1] -= 0.02;
+					// Use velocity directly (no particleSpeed multiplier) so the fountain
+					// behaves consistently. particleAnimationSpeed controls the launch force.
+					positions[i3] += velocities[i3];
+					positions[i3 + 1] += velocities[i3 + 1];
+					positions[i3 + 2] += velocities[i3 + 2];
+					velocities[i3 + 1] -= 0.003; // gravity
 					if (positions[i3 + 1] < -particleSpread / 2) {
 						positions[i3] = (Math.random() - 0.5) * 2;
 						positions[i3 + 1] = -particleSpread / 2;
 						positions[i3 + 2] = (Math.random() - 0.5) * 2;
-						velocities[i3 + 1] = Math.random() * 0.5 + 0.3;
+						velocities[i3] = (Math.random() - 0.5) * 0.05;
+						velocities[i3 + 1] = (0.15 + Math.random() * 0.2) * particleAnimationSpeed;
+						velocities[i3 + 2] = (Math.random() - 0.5) * 0.05;
 					}
 					break;
 				case 'pulse':
@@ -649,10 +678,15 @@
 	}
 
 	function animate() {
+		if (destroyed) return; // component unmounted — stop the loop permanently
 		if ((window as any).__threeJsCapturing) { animationId = requestAnimationFrame(animate); return; }
 
 		animationId = requestAnimationFrame(animate);
-		const animationTime = videoElement?.currentTime ?? 0;
+		// Use wall-clock time for live preview so particle/text animations always advance
+		// regardless of whether the video is playing or paused.
+		// During capture, __threeJsUpdateScene is called with videoElement.currentTime
+		// directly, keeping frame-accurate rendering for the export.
+		const animationTime = performance.now() * 0.001;
 
 		if (mesh) {
 			mesh.rotation.x = rotationX;

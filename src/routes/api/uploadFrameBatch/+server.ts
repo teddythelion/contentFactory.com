@@ -31,19 +31,19 @@ export const POST: RequestHandler = async ({ request }) => {
 		const uint8Array = new Uint8Array(arrayBuffer);
 		const bytesPerFrame = width * height * 4;
 
-		// Write individual frames
+		// Write all frames in the batch in parallel — no reason to serialize disk writes
+		const writes: Promise<void>[] = [];
 		for (let i = 0; i < frameCount; i++) {
 			const globalFrameNumber = parseInt(startFrame) + i;
 			const frameStart = i * bytesPerFrame;
-			const frameEnd = frameStart + bytesPerFrame;
-			const frameBuffer = uint8Array.slice(frameStart, frameEnd);
-
+			const frameBuffer = uint8Array.subarray(frameStart, frameStart + bytesPerFrame);
 			const framePath = path.join(
 				tempDir,
 				`frame-${globalFrameNumber.toString().padStart(6, '0')}.raw`
 			);
-			await writeFile(framePath, Buffer.from(frameBuffer));
+			writes.push(writeFile(framePath, Buffer.from(frameBuffer)));
 		}
+		await Promise.all(writes);
 
 		console.log(`✅ Batch ${batchNumber} saved`);
 

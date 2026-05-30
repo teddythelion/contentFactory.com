@@ -48,6 +48,7 @@ interface ThreeJsState {
 
 	// Capture state
 	isCapturing: boolean;
+	isSceneReady: boolean;
 }
 
 const initialState: ThreeJsState = {
@@ -83,7 +84,8 @@ const initialState: ThreeJsState = {
 	particleColorMode: 'solid',
 	particleGradientColor: '#00ffff',
 
-	isCapturing: false
+	isCapturing: false,
+	isSceneReady: false
 };
 
 function createThreeJsStore() {
@@ -147,6 +149,9 @@ function createThreeJsStore() {
 		},
 		setCapturing: (isCapturing: boolean) => {
 			update((state) => ({ ...state, isCapturing }));
+		},
+		setSceneReady: (isSceneReady: boolean) => {
+			update((state) => ({ ...state, isSceneReady }));
 		}
 	};
 }

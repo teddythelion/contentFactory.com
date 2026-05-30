@@ -9,6 +9,7 @@
 	import ControlsPanel from './ControlsPanel.svelte';		
 	import { audioSessionStore } from '$lib/stores/audioSession.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
+	import { text3DState } from '$lib/stores/text3d.store';
 	
 	export let videoUrl: string;
 	export let onClose: () => void;
@@ -60,10 +61,11 @@
 		mq.removeEventListener('change', mqHandler);
 		isSceneReady = false;
 		sceneMounted = false;
-		// Clear the store when the enhancer closes
-		// so it doesn't bleed into the next session
+		// Reset all tool state so the next session starts fresh
 		audioSessionStore.clear();
 		audioStudioStore.stopAll();
+		threeJsState.reset();
+		text3DState.reset();
 	};
 	});
 

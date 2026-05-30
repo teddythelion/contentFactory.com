@@ -1,16 +1,27 @@
 <!-- src/lib/components/ThreeJsEnhancer/ThreeJsText.svelte -->
-<!-- 3D TEXT RENDERER - TROIKA VERSION - VIDEO TIME SYNCED -->
+<!-- 3D TEXT RENDERER - DUAL MODE: Troika (Google Fonts 2.5-D) + Three.js TextGeometry (True 3D) -->
 
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as THREE from 'three';
 	import { Text } from 'troika-three-text';
+	import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+	import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 	import { text3DState } from '$lib/stores/text3d.store';
 
 	export let scene: THREE.Scene | undefined;
 	let colorCycleFrame: number;
-	let textMesh: any = null;
+	let textMesh: any = null;         // Troika Text mesh
+	let trueTextMesh: THREE.Mesh | null = null; // True 3D TextGeometry mesh
 	let isInitialized = false;
+	let loadedFontFile = '';
+	let loadedText = '';
+	let loadedFontSize = 0;
+	let loadedExtrudeDepth = -1;
+	let loadedBevelEnabled = false;
+	let loadedBevelThickness = -1;
+	let loadedBevelSize = -1;
+	let fontLoader = new FontLoader();
 
 	$: textState = $text3DState;
 
@@ -20,14 +31,21 @@
 		isInitialized = true;
 	}
 
-	// Watch specific properties that should trigger updates
-	// This prevents infinite loops by not watching the entire state object
-	$: if (isInitialized && textMesh) {
-		// Only update when text is enabled
-		if (textState.enabled) {
-			updateTextProperties();
+	// React to all text state changes — routes to the active renderer
+	$: if (isInitialized && textState) {
+		if (textState.textMode === 'troika') {
+			// Ensure True 3D mesh is gone
+			if (trueTextMesh) disposeTrueTextMesh();
+			// Ensure Troika mesh exists
+			if (!textMesh) createTextMesh();
+			else if (textState.enabled) updateTextProperties();
+			else hideText();
 		} else {
-			hideText();
+			// Ensure Troika mesh is gone
+			if (textMesh) disposeTroikaMesh();
+			// Build or update True 3D mesh
+			if (textState.enabled) createOrUpdateTrueTextMesh();
+			else hideTrueText();
 		}
 	}
 	onMount(() => {
@@ -45,14 +63,165 @@
 		animateColor();
 		return () => {
 			cancelAnimationFrame(colorCycleFrame);
-			if (textMesh && scene) {
-				scene.remove(textMesh);
-				textMesh.dispose();
-				textMesh = null;
-			}
+			disposeTroikaMesh();
+			disposeTrueTextMesh();
 			isInitialized = false;
 		};
 	});
+
+	function disposeTroikaMesh() {
+		if (textMesh && scene) {
+			scene.remove(textMesh);
+			textMesh.dispose();
+			textMesh = null;
+		}
+	}
+
+	function disposeTrueTextMesh() {
+		if (trueTextMesh && scene) {
+			scene.remove(trueTextMesh);
+			if (trueTextMesh.geometry) trueTextMesh.geometry.dispose();
+			if ((trueTextMesh as any)._videoTexture) {
+				(trueTextMesh as any)._videoTexture.dispose();
+				(trueTextMesh as any)._videoTexture = null;
+			}
+			trueTextMesh = null;
+			loadedFontFile = '';
+			loadedText = '';
+			loadedFontSize = 0;
+			loadedExtrudeDepth = -1;
+			loadedBevelEnabled = false;
+			loadedBevelThickness = -1;
+			loadedBevelSize = -1;
+		}
+	}
+
+	function applyVideoTextureToMesh(mesh: THREE.Mesh) {
+		const videoElement = (window as any).__threeJsVideo as HTMLVideoElement;
+		if (!videoElement) return;
+		const { x, y } = textState.videoTextureOffset;
+		const scale = textState.videoTextureScale;
+		if (!(mesh as any)._videoTexture) {
+			(mesh as any)._videoTexture = new THREE.VideoTexture(videoElement);
+			(mesh as any)._videoTexture.colorSpace = THREE.SRGBColorSpace;
+		}
+		const vt = (mesh as any)._videoTexture;
+		vt.repeat.set(scale, scale);
+		vt.offset.set(x, y);
+		vt.needsUpdate = true;
+		mesh.material = new THREE.MeshStandardMaterial({
+			map: vt,
+			side: THREE.DoubleSide,
+			metalness: textState.metalness,
+			roughness: textState.roughness
+		});
+	}
+
+	function applyStandardMaterialToMesh(mesh: THREE.Mesh) {
+		if ((mesh as any)._videoTexture) {
+			(mesh as any)._videoTexture.dispose();
+			(mesh as any)._videoTexture = null;
+		}
+		mesh.material = new THREE.MeshStandardMaterial({
+			color: new THREE.Color(textState.materialColor),
+			metalness: textState.metalness,
+			roughness: textState.roughness,
+			emissive: new THREE.Color(textState.emissive),
+			emissiveIntensity: textState.emissiveIntensity,
+			side: THREE.DoubleSide
+		});
+	}
+
+	function createOrUpdateTrueTextMesh() {
+		if (!scene) return;
+		const fontFile = textState.true3dFontFile;
+		const currentText = textState.text || 'Sample Text';
+		const fontUrl = `/fonts/${fontFile}`;
+		const needsRebuild =
+			!trueTextMesh ||
+			fontFile !== loadedFontFile ||
+			currentText !== loadedText ||
+			textState.fontSize !== loadedFontSize ||
+			textState.extrudeDepth !== loadedExtrudeDepth ||
+			textState.bevelEnabled !== loadedBevelEnabled ||
+			textState.bevelThickness !== loadedBevelThickness ||
+			textState.bevelSize !== loadedBevelSize;
+
+		if (needsRebuild) {
+			disposeTrueTextMesh();
+			loadedFontFile = fontFile;
+			loadedText = currentText;
+			loadedFontSize = textState.fontSize;
+			loadedExtrudeDepth = textState.extrudeDepth;
+			loadedBevelEnabled = textState.bevelEnabled;
+			loadedBevelThickness = textState.bevelThickness;
+			loadedBevelSize = textState.bevelSize;
+
+			fontLoader.load(fontUrl, (font) => {
+				if (!scene) return;
+				const geo = new TextGeometry(currentText, {
+					font,
+					size: textState.fontSize / 50,
+					depth: textState.extrudeDepth,
+					curveSegments: 6,
+					bevelEnabled: textState.bevelEnabled,
+					bevelThickness: textState.bevelThickness,
+					bevelSize: textState.bevelSize * 0.5,
+					bevelSegments: 3
+				});
+				geo.computeBoundingBox();
+				geo.center();
+
+				trueTextMesh = new THREE.Mesh(geo);
+				if (textState.useVideoTexture) {
+					applyVideoTextureToMesh(trueTextMesh);
+				} else {
+					applyStandardMaterialToMesh(trueTextMesh);
+				}
+				trueTextMesh.scale.setScalar(textState.scale3D);
+				trueTextMesh.position.set(
+					textState.position3D.x,
+					textState.position3D.y,
+					textState.position3D.z
+				);
+				trueTextMesh.rotation.set(
+					textState.rotation3D.x,
+					textState.rotation3D.y,
+					textState.rotation3D.z
+				);
+				trueTextMesh.visible = textState.enabled;
+				scene.add(trueTextMesh);
+				(window as any).__textMesh = trueTextMesh;
+			});
+		} else if (trueTextMesh) {
+			updateTrueTextProperties();
+		}
+	}
+
+	function updateTrueTextProperties() {
+		if (!trueTextMesh || !scene) return;
+		if (textState.useVideoTexture) {
+			applyVideoTextureToMesh(trueTextMesh);
+		} else {
+			applyStandardMaterialToMesh(trueTextMesh);
+		}
+		trueTextMesh.scale.setScalar(textState.scale3D);
+		trueTextMesh.position.set(
+			textState.position3D.x,
+			textState.position3D.y,
+			textState.position3D.z
+		);
+		trueTextMesh.rotation.set(
+			textState.rotation3D.x,
+			textState.rotation3D.y,
+			textState.rotation3D.z
+		);
+		trueTextMesh.visible = textState.enabled;
+	}
+
+	function hideTrueText() {
+		if (trueTextMesh) trueTextMesh.visible = false;
+	}
 
 	function createTextMesh() {
 		if (!scene) {
@@ -72,9 +241,7 @@
 		textMesh.font = textState.fontUrl || defaultRobotoUrl;
 
 		scene.add(textMesh);
-		// DEBUG: Expose for testing
 		(window as any).__textMesh = textMesh;
-		// Initial sync
 		textMesh.sync();
 	}
 	function updateTextProperties() {
@@ -200,9 +367,18 @@
 			textMesh.sync();
 		}
 	}
-	// ✅ FIXED: Export animation function that accepts animationTime parameter
 	export function updateAnimation(animationTime: number) {
+		// Route to whichever mesh is active
+		if (textState.textMode === 'true3d') {
+			if (!trueTextMesh || !textState.enabled || !trueTextMesh.visible) return;
+			animateMesh(trueTextMesh, animationTime, false);
+			return;
+		}
 		if (!textMesh || !textState.enabled || !textMesh.visible) return;
+		animateMesh(textMesh, animationTime, true);
+	}
+
+	function animateMesh(mesh: any, animationTime: number, isTroika: boolean) {
 
 		// Calculate base rotation (includes autoRotate)
 		let rotX = textState.rotation3D.x;
@@ -213,92 +389,97 @@
 			rotY += animationTime * textState.autoRotateSpeed;
 		}
 
+		const sync = () => { if (isTroika && mesh.sync) mesh.sync(); };
+
 		switch (textState.animationType) {
 			case 'spin':
 				rotY += animationTime * 0.02;
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
 			case 'wave':
-				textMesh.position.y = textState.position3D.y + Math.sin(animationTime) * 0.5;
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.position.y = textState.position3D.y + Math.sin(animationTime) * 0.5;
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
 			case 'float':
-				textMesh.position.y = textState.position3D.y + Math.sin(animationTime * 2) * 0.3;
+				mesh.position.y = textState.position3D.y + Math.sin(animationTime * 2) * 0.3;
 				rotY += animationTime * 0.005;
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
-			case 'bounce':
+			case 'bounce': {
 				const bounceHeight = Math.abs(Math.sin(animationTime * 3)) * 0.8;
-				textMesh.position.y = textState.position3D.y + bounceHeight;
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.position.y = textState.position3D.y + bounceHeight;
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
-			case 'pulse':
+			}
+			case 'pulse': {
 				const pulseScale = 1 + Math.sin(animationTime * 2) * 0.15;
-				textMesh.scale.setScalar(textState.scale3D * pulseScale);
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.scale.setScalar(textState.scale3D * pulseScale);
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
+			}
 			case 'swing':
-				textMesh.rotation.x = rotX;
-				textMesh.rotation.y = rotY;
-				textMesh.rotation.z = Math.sin(animationTime * 1.5) * 0.3;
-				textMesh.sync();
+				mesh.rotation.x = rotX;
+				mesh.rotation.y = rotY;
+				mesh.rotation.z = Math.sin(animationTime * 1.5) * 0.3;
+				sync();
 				break;
-			case 'jitter':
+			case 'jitter': {
 				const jitterX = (Math.random() - 0.5) * 0.05;
 				const jitterY = (Math.random() - 0.5) * 0.05;
-				textMesh.position.x = textState.position3D.x + jitterX;
-				textMesh.position.y = textState.position3D.y + jitterY;
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.position.x = textState.position3D.x + jitterX;
+				mesh.position.y = textState.position3D.y + jitterY;
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
+			}
 			case 'spiral':
 				rotY += animationTime * 0.03;
-				textMesh.position.y = textState.position3D.y + Math.sin(animationTime * 2) * 0.6;
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.position.y = textState.position3D.y + Math.sin(animationTime * 2) * 0.6;
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
-			case 'elastic':
+			case 'elastic': {
 				const elasticScale =
 					1 + Math.sin(animationTime * 4) * Math.exp(-animationTime * 0.001) * 0.3;
-				textMesh.scale.setScalar(textState.scale3D * elasticScale);
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.scale.setScalar(textState.scale3D * elasticScale);
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
+			}
 			case 'glitch':
 				if (Math.random() > 0.95) {
-					const glitchX = (Math.random() - 0.5) * 0.2;
-					const glitchY = (Math.random() - 0.5) * 0.2;
-					textMesh.position.x = textState.position3D.x + glitchX;
-					textMesh.position.y = textState.position3D.y + glitchY;
+					mesh.position.x = textState.position3D.x + (Math.random() - 0.5) * 0.2;
+					mesh.position.y = textState.position3D.y + (Math.random() - 0.5) * 0.2;
 				} else {
-					textMesh.position.x = textState.position3D.x;
-					textMesh.position.y = textState.position3D.y;
+					mesh.position.x = textState.position3D.x;
+					mesh.position.y = textState.position3D.y;
 				}
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
-			case 'orbit':
+			case 'orbit': {
 				const orbitRadius = 0.5;
-				textMesh.position.x = textState.position3D.x + Math.cos(animationTime) * orbitRadius;
-				textMesh.position.z = textState.position3D.z + Math.sin(animationTime) * orbitRadius;
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.position.x = textState.position3D.x + Math.cos(animationTime) * orbitRadius;
+				mesh.position.z = textState.position3D.z + Math.sin(animationTime) * orbitRadius;
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
+			}
 			case 'wobble':
-				textMesh.rotation.x = Math.sin(animationTime * 3) * 0.1;
-				textMesh.rotation.y = rotY;
-				textMesh.rotation.z = Math.cos(animationTime * 3 * 1.3) * 0.1;
-				textMesh.sync();
+				mesh.rotation.x = Math.sin(animationTime * 3) * 0.1;
+				mesh.rotation.y = rotY;
+				mesh.rotation.z = Math.cos(animationTime * 3 * 1.3) * 0.1;
+				sync();
 				break;
 			case 'none':
 			default:
-				textMesh.rotation.set(rotX, rotY, rotZ);
-				textMesh.sync();
+				mesh.rotation.set(rotX, rotY, rotZ);
+				sync();
 				break;
 		}
 	}

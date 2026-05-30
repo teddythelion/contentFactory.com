@@ -1,52 +1,62 @@
 import type { RequestHandler } from './$types';
 
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, request }) => {
 	try {
 		const videoUrl = url.searchParams.get('url');
 
 		if (!videoUrl) {
-			return new Response(
-				JSON.stringify({ error: 'Video URL is required' }),
-				{
-					status: 400,
-					headers: { 'Content-Type': 'application/json' }
-				}
-			);
+			return new Response(JSON.stringify({ error: 'Video URL is required' }), {
+				status: 400,
+				headers: { 'Content-Type': 'application/json' }
+			});
 		}
 
-		console.log('📹 Proxying video from:', videoUrl);
-
-		const response = await fetch(videoUrl);
-
-		if (!response.ok) {
-			console.error('❌ Failed to fetch video:', response.status);
-			return new Response(
-				JSON.stringify({ error: 'Failed to fetch video' }),
-				{
-					status: response.status,
-					headers: { 'Content-Type': 'application/json' }
-				}
-			);
+		// Forward the Range header so the browser can seek within the video.
+		// Without this, the browser receives the video as a non-seekable stream
+		// and videoElement.currentTime = targetTime never fires 'seeked' at the
+		// correct position — all captured frames end up at t=0.
+		const rangeHeader = request.headers.get('range');
+		const upstreamHeaders: Record<string, string> = {};
+		if (rangeHeader) {
+			upstreamHeaders['Range'] = rangeHeader;
 		}
 
-		const videoBuffer = await response.arrayBuffer();
+		const upstream = await fetch(videoUrl, { headers: upstreamHeaders });
 
-		return new Response(videoBuffer, {
-			headers: {
-				'Content-Type': 'video/mp4',
-				'Content-Length': videoBuffer.byteLength.toString(),
-				'Access-Control-Allow-Origin': '*',
-				'Cache-Control': 'public, max-age=3600'
-			}
+		if (!upstream.ok && upstream.status !== 206) {
+			console.error('❌ Failed to fetch video from upstream:', upstream.status);
+			return new Response(JSON.stringify({ error: 'Failed to fetch video' }), {
+				status: upstream.status,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}
+
+		const responseHeaders: Record<string, string> = {
+			'Content-Type': upstream.headers.get('Content-Type') || 'video/mp4',
+			'Access-Control-Allow-Origin': '*',
+			'Cache-Control': 'public, max-age=3600',
+			// Tell the browser that byte-range requests are supported.
+			// Required for the <video> element to enable seeking.
+			'Accept-Ranges': 'bytes'
+		};
+
+		// Forward range-related headers from the upstream GCS response.
+		const contentLength = upstream.headers.get('Content-Length');
+		if (contentLength) responseHeaders['Content-Length'] = contentLength;
+
+		const contentRange = upstream.headers.get('Content-Range');
+		if (contentRange) responseHeaders['Content-Range'] = contentRange;
+
+		// Stream the body instead of buffering the whole video in memory.
+		return new Response(upstream.body, {
+			status: upstream.status,
+			headers: responseHeaders
 		});
 	} catch (error) {
 		console.error('❌ Video proxy error:', error);
-		return new Response(
-			JSON.stringify({ error: 'Failed to proxy video' }),
-			{
-				status: 500,
-				headers: { 'Content-Type': 'application/json' }
-			}
-		);
+		return new Response(JSON.stringify({ error: 'Failed to proxy video' }), {
+			status: 500,
+			headers: { 'Content-Type': 'application/json' }
+		});
 	}
 };

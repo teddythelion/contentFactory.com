@@ -47,6 +47,8 @@ async function runEncode(
 	fps: number,
 	width: number,
 	height: number,
+	outWidth: number,
+	outHeight: number,
 	userId: string,
 	audioSessionId: string | null,
 	sfxSessionId: string | null,
@@ -86,12 +88,13 @@ async function runEncode(
 				const pngPath = path.join(sessionDir, `frame-${j.toString().padStart(6, '0')}.png`);
 
 				batchPromises.push(
-					readFile(rawPath).then((rawBuffer) =>
-						sharp(rawBuffer, { raw: { width, height, channels: 4 } })
-							.png()
-							.toFile(pngPath)
-							.then(() => unlink(rawPath))
-					)
+					readFile(rawPath).then((rawBuffer) => {
+						let img = sharp(rawBuffer, { raw: { width, height, channels: 4 } });
+						if (outWidth !== width || outHeight !== height) {
+							img = img.resize(outWidth, outHeight);
+						}
+						return img.png().toFile(pngPath).then(() => unlink(rawPath));
+					})
 				);
 			}
 
@@ -377,6 +380,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		fps,
 		width,
 		height,
+		outWidth = width,
+		outHeight = height,
 		userId,
 		audioSessionId,
 		sfxSessionId,
@@ -407,6 +412,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		fps,
 		width,
 		height,
+		outWidth,
+		outHeight,
 		userId,
 		audioSessionId,
 		sfxSessionId,
