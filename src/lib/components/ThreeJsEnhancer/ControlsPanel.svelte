@@ -13,6 +13,15 @@
 	import { logoState } from '$lib/stores/logo.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
 	
+	function resetAll() {
+		(window as any).__threeJsVideo?.pause();
+		videoState.setIsPlaying(false);
+		threeJsState.reset();
+		text3DState.reset();
+		logoState.reset();
+		audioStudioStore.reset();
+	}
+
 	// Capture progress state
 	let captureProgress = $state(0);
 	let captureMessage = $state('');
@@ -950,7 +959,7 @@ let musicMaxTime = $derived(videoDuration);
 	<!-- Mobile action buttons — pinned to bottom -->
 	<div class="shrink-0 flex flex-col gap-2 border-t border-white/10 bg-gray-900/80 px-3 py-3">
 		<div class="flex gap-2">
-			<button onclick={() => threeJsState.resetVisuals()}
+			<button onclick={resetAll}
 				class="flex-1 rounded-lg border border-white/10 bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-700/50 disabled:opacity-50"
 				disabled={$threeJsState.isCapturing}>
 				🔄 Reset All
@@ -1374,7 +1383,7 @@ let musicMaxTime = $derived(videoDuration);
 
 	<!-- ACTION BUTTONS (desktop) -->
 	<div class="mt-auto flex flex-col gap-2 border-t border-white/10 pt-4">
-		<button onclick={() => threeJsState.resetVisuals()}
+		<button onclick={resetAll}
 			class="rounded-lg border border-white/10 bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-700/50 disabled:opacity-50"
 			disabled={$threeJsState.isCapturing}>
 			🔄 Reset All

@@ -118,11 +118,11 @@ export const POST: RequestHandler = async ({ request }) => {
 
             console.log('🔗 Signed URL generated successfully');
 
-            return new Response(JSON.stringify({ 
-                done: true, 
-                video: signedUrl 
-            }), { 
-                headers: { 'Content-Type': 'application/json' } 
+            return new Response(JSON.stringify({
+                done: true,
+                video: signedUrl
+            }), {
+                headers: { 'Content-Type': 'application/json' }
             });
         } catch (urlError) {
             console.error('❌ Failed to generate signed URL:', urlError);

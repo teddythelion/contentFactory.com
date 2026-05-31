@@ -42,7 +42,7 @@
 
 	// Timeline dimensions - extend to fit all audio
 	const PIXELS_PER_SECOND = 80; // Zoom level
-	const TRACK_HEIGHT = 60;
+	const TRACK_HEIGHT = 38;
 	let sfxMaxEnd = $derived(
 		audioStudio.sfxInstances.length > 0
 			? Math.max(...audioStudio.sfxInstances.map((i) => i.endTime))
@@ -278,8 +278,8 @@
 	<!-- Header with play/pause controls -->
 	<div class="timeline-header">
 		<div class="timeline-header-left">
-			<h3 class="text-sm font-semibold text-white">🎵 Audio Timeline</h3>
-			<p class="text-xs text-gray-400">Drag blocks • Resize edges • Click to seek</p>
+			<h3 class="text-xs font-semibold text-white">🎵 Audio Timeline</h3>
+			<p class="timeline-hint">Drag blocks • Resize edges • Click to seek</p>
 		</div>
 		<div class="timeline-controls-row">
 			<span class="time-display">{formatTime(currentTime)} / {formatTime(videoDuration)}</span>
@@ -291,12 +291,12 @@
 			>
 				{#if isPlaying}
 					<!-- Pause icon -->
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3">
 						<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
 					</svg>
 				{:else}
 					<!-- Play icon -->
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3">
 						<path d="M8 5v14l11-7z"/>
 					</svg>
 				{/if}
@@ -340,7 +340,6 @@
 
 			<!-- Music Track -->
 			<div class="track music-track" style="height: {TRACK_HEIGHT}px;">
-				<div class="track-label">🎵 Music</div>
 				{#if audioStudio.musicSessionId}
 					<div
 						class="audio-block music-block"
@@ -368,7 +367,7 @@
 
 						<!-- Block content -->
 						<div class="block-content">
-							<div class="block-title">Music</div>
+							<div class="block-title">🎵 Music</div>
 							<div class="block-times">
 								{audioStudio.musicStartTime.toFixed(1)}s – {audioStudio.musicEndTime.toFixed(1)}s
 							</div>
@@ -378,13 +377,12 @@
 						<div class="resize-handle resize-end" onmousedown={startResizeMusicEnd}></div>
 					</div>
 				{:else}
-					<div class="track-placeholder">Generate music to see it here</div>
+					<div class="track-placeholder">🎵 Generate music to see it here</div>
 				{/if}
 			</div>
 
 			<!-- SFX Track -->
 			<div class="track sfx-track" style="height: {TRACK_HEIGHT}px;">
-				<div class="track-label">🔊 SFX</div>
 				{#if audioStudio.sfxSessionId}
 					{#each audioStudio.sfxInstances as inst (inst.id)}
 						<div
@@ -395,7 +393,7 @@
 							<div class="resize-handle resize-start" onmousedown={(e) => startSfxInteraction(e, inst, 'resizeStart')}></div>
 
 							<div class="block-content">
-								<div class="block-title">SFX</div>
+								<div class="block-title">🔊 SFX</div>
 								<div class="block-times">{inst.startTime.toFixed(1)}s – {inst.endTime.toFixed(1)}s</div>
 							</div>
 
@@ -408,7 +406,7 @@
 						</div>
 					{/each}
 				{:else}
-					<div class="track-placeholder">Generate or upload SFX to see it here</div>
+					<div class="track-placeholder">🔊 Generate or upload SFX to see it here</div>
 				{/if}
 			</div>
 		</div>
@@ -447,8 +445,8 @@
 	.timeline-editor {
 		display: flex;
 		flex-direction: column;
-		gap: 12px;
-		padding: 12px;
+		gap: 6px;
+		padding: 8px;
 		background: rgba(17, 24, 39, 0.5);
 		border: 1px solid rgba(255, 255, 255, 0.1);
 		border-radius: 8px;
@@ -458,24 +456,29 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 12px;
+		gap: 8px;
 	}
 
 	.timeline-header-left {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 2px;
 		flex: 1;
+	}
+
+	.timeline-hint {
+		font-size: 9px;
+		color: rgba(156, 163, 175, 1);
 	}
 
 	.timeline-controls-row {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 8px;
 	}
 
 	.time-display {
-		font-size: 12px;
+		font-size: 10px;
 		font-weight: 600;
 		color: rgba(255, 255, 255, 0.9);
 		font-variant-numeric: tabular-nums;
@@ -487,8 +490,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 36px;
-		height: 36px;
+		width: 24px;
+		height: 24px;
 		border-radius: 50%;
 		background: rgba(59, 130, 246, 0.8);
 		border: 1px solid rgba(59, 130, 246, 1);
@@ -499,7 +502,7 @@
 
 	.play-pause-btn:hover:not(:disabled) {
 		background: rgba(59, 130, 246, 1);
-		box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+		box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
 	}
 
 	.play-pause-btn:disabled {
@@ -509,23 +512,24 @@
 
 	.timeline-scroll {
 		overflow-x: auto;
-		overflow-y: hidden;
+		overflow-y: auto;
+		max-height: 160px;
 		background: #1a1a1a;
 		border-radius: 4px;
-		padding: 8px 0;
+		padding: 4px 0;
 	}
 
 	.timeline-canvas {
 		position: relative;
-		min-height: 180px;
+		min-height: 110px;
 	}
 
 	/* Time Ruler */
 	.time-ruler {
 		position: relative;
-		height: 24px;
+		height: 16px;
 		border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-		margin-bottom: 8px;
+		margin-bottom: 4px;
 	}
 
 	.time-marker {
@@ -535,15 +539,15 @@
 
 	.time-tick {
 		width: 1px;
-		height: 8px;
+		height: 5px;
 		background: rgba(255, 255, 255, 0.3);
 	}
 
 	.time-label {
 		position: absolute;
-		top: 10px;
-		left: 4px;
-		font-size: 10px;
+		top: 6px;
+		left: 3px;
+		font-size: 8px;
 		color: rgba(255, 255, 255, 0.5);
 		white-space: nowrap;
 	}
@@ -561,18 +565,18 @@
 		width: 2px;
 		height: 100%;
 		background: rgba(251, 191, 36, 0.6);
-		box-shadow: 0 0 4px rgba(251, 191, 36, 0.4);
+		box-shadow: 0 0 3px rgba(251, 191, 36, 0.4);
 	}
 
 	.video-end-label {
 		position: absolute;
 		top: -2px;
-		left: 4px;
-		font-size: 9px;
+		left: 3px;
+		font-size: 8px;
 		font-weight: 700;
 		color: rgba(251, 191, 36, 0.9);
 		background: rgba(0, 0, 0, 0.7);
-		padding: 2px 4px;
+		padding: 1px 3px;
 		border-radius: 2px;
 		white-space: nowrap;
 	}
@@ -591,28 +595,28 @@
 		width: 2px;
 		height: 100%;
 		background: #ef4444;
-		box-shadow: 0 0 4px rgba(239, 68, 68, 0.8);
+		box-shadow: 0 0 3px rgba(239, 68, 68, 0.8);
 	}
 
 	.playhead-handle {
 		position: absolute;
 		top: 0;
-		left: -4px;
-		width: 10px;
-		height: 10px;
+		left: -3px;
+		width: 8px;
+		height: 8px;
 		background: #ef4444;
 		border-radius: 50%;
 	}
 
 	.playhead-time {
 		position: absolute;
-		top: 12px;
-		left: 6px;
-		font-size: 9px;
+		top: 10px;
+		left: 5px;
+		font-size: 8px;
 		font-weight: 700;
 		color: #ef4444;
 		background: rgba(0, 0, 0, 0.8);
-		padding: 2px 4px;
+		padding: 1px 3px;
 		border-radius: 2px;
 		white-space: nowrap;
 	}
@@ -620,22 +624,10 @@
 	/* Tracks */
 	.track {
 		position: relative;
-		margin-bottom: 8px;
+		margin-bottom: 4px;
 		background: rgba(255, 255, 255, 0.03);
-		border-radius: 4px;
+		border-radius: 3px;
 		border: 1px solid rgba(255, 255, 255, 0.05);
-	}
-
-	.track-label {
-		position: absolute;
-		left: 8px;
-		top: 50%;
-		transform: translateY(-50%);
-		font-size: 11px;
-		font-weight: 600;
-		color: rgba(255, 255, 255, 0.4);
-		pointer-events: none;
-		z-index: 1;
 	}
 
 	.track-placeholder {
@@ -643,17 +635,18 @@
 		left: 50%;
 		top: 50%;
 		transform: translate(-50%, -50%);
-		font-size: 11px;
+		font-size: 9px;
 		color: rgba(255, 255, 255, 0.3);
 		font-style: italic;
+		white-space: nowrap;
 	}
 
 	/* Audio Blocks */
 	.audio-block {
 		position: absolute;
-		top: 8px;
-		height: calc(100% - 16px);
-		border-radius: 4px;
+		top: 4px;
+		height: calc(100% - 8px);
+		border-radius: 3px;
 		cursor: move;
 		user-select: none;
 		overflow: hidden;
@@ -661,35 +654,37 @@
 	}
 
 	.audio-block:hover {
-		box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+		box-shadow: 0 0 6px rgba(255, 255, 255, 0.3);
 	}
 
 	.music-block {
 		background: linear-gradient(135deg, rgba(147, 51, 234, 0.6), rgba(126, 34, 206, 0.6));
-		border: 2px solid rgba(147, 51, 234, 0.8);
+		border: 1px solid rgba(147, 51, 234, 0.8);
 	}
 
 	.sfx-block {
 		background: linear-gradient(135deg, rgba(37, 99, 235, 0.6), rgba(29, 78, 216, 0.6));
-		border: 2px solid rgba(37, 99, 235, 0.8);
+		border: 1px solid rgba(37, 99, 235, 0.8);
 	}
 
 	.block-content {
-		padding: 8px;
+		padding: 1px 6px;
 		pointer-events: none;
 	}
 
 	.block-title {
-		font-size: 11px;
+		font-size: 9px;
 		font-weight: 700;
 		color: white;
 		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+		margin-top: 2px;
 	}
 
 	.block-times {
-		font-size: 9px;
+		font-size: 8px;
 		color: rgba(255, 255, 255, 0.8);
-		margin-top: 2px;
+		margin-top: -2px;
+		padding-left: 3px;
 	}
 
 	/* Fade overlays — show crescendo/decrescendo shape on music block ends */
@@ -716,7 +711,7 @@
 		position: absolute;
 		top: 0;
 		bottom: 0;
-		width: 8px;
+		width: 6px;
 		cursor: ew-resize;
 		background: rgba(255, 255, 255, 0.2);
 		opacity: 0;
@@ -730,23 +725,23 @@
 
 	.resize-start {
 		left: 0;
-		border-top-left-radius: 4px;
-		border-bottom-left-radius: 4px;
+		border-top-left-radius: 3px;
+		border-bottom-left-radius: 3px;
 	}
 
 	.resize-end {
 		right: 0;
-		border-top-right-radius: 4px;
-		border-bottom-right-radius: 4px;
+		border-top-right-radius: 3px;
+		border-bottom-right-radius: 3px;
 	}
 
 	/* Block Actions */
 	.block-actions {
 		position: absolute;
-		top: 4px;
-		right: 4px;
+		top: 2px;
+		right: 2px;
 		display: flex;
-		gap: 4px;
+		gap: 2px;
 		opacity: 0;
 		transition: opacity 0.2s;
 	}
@@ -756,12 +751,12 @@
 	}
 
 	.block-action-btn {
-		width: 20px;
-		height: 20px;
+		width: 16px;
+		height: 16px;
 		background: rgba(0, 0, 0, 0.6);
 		border: 1px solid rgba(255, 255, 255, 0.2);
-		border-radius: 3px;
-		font-size: 12px;
+		border-radius: 2px;
+		font-size: 9px;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
@@ -776,29 +771,29 @@
 	/* Fine-tune Controls */
 	.timeline-controls {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-		gap: 8px;
+		grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+		gap: 6px;
 	}
 
 	.control-group {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 2px;
 	}
 
 	.control-label {
-		font-size: 11px;
+		font-size: 9px;
 		font-weight: 600;
 		color: rgba(255, 255, 255, 0.7);
 	}
 
 	.control-input {
-		padding: 6px 8px;
+		padding: 3px 6px;
 		background: rgba(31, 41, 55, 0.8);
 		border: 1px solid rgba(255, 255, 255, 0.1);
 		border-radius: 4px;
 		color: white;
-		font-size: 12px;
+		font-size: 11px;
 		outline: none;
 		transition: border-color 0.2s;
 	}
@@ -807,9 +802,10 @@
 		border-color: rgba(59, 130, 246, 0.5);
 	}
 
-	/* Scrollbar */
+	/* Scrollbars — horizontal and vertical */
 	.timeline-scroll::-webkit-scrollbar {
-		height: 8px;
+		width: 5px;
+		height: 5px;
 	}
 
 	.timeline-scroll::-webkit-scrollbar-track {
@@ -824,5 +820,9 @@
 
 	.timeline-scroll::-webkit-scrollbar-thumb:hover {
 		background: rgba(255, 255, 255, 0.3);
+	}
+
+	.timeline-scroll::-webkit-scrollbar-corner {
+		background: transparent;
 	}
 </style>

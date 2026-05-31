@@ -102,6 +102,9 @@
 		isGenerating = true;
 		status = 'Generating...';
 		video = '';
+		videoGcsUri = '';
+		extensionCount = 0;
+		showExtendPanel = false;
 		savedContentId = '';
 		saveStatus = '';
 

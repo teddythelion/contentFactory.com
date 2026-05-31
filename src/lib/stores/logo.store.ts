@@ -29,7 +29,18 @@ export interface LogoState {
 	fadeOutDuration: number;
 
 	// Animation & Effects
-	animationType: 'none' | 'spin' | 'pulse' | 'bounce' | 'explode' | 'warp' | 'glitch' | 'flip3d' | 'spiral' | 'shimmer' | 'particle-assemble';
+	animationType:
+		| 'none'
+		| 'spin'
+		| 'pulse'
+		| 'bounce'
+		| 'explode'
+		| 'warp'
+		| 'glitch'
+		| 'flip3d'
+		| 'spiral'
+		| 'shimmer'
+		| 'particle-assemble';
 	animationSpeed: number;
 	rotation3D: {
 		x: number;
@@ -56,8 +67,8 @@ const initialState: LogoState = {
 
 	startTime: 0,
 	endTime: 8,
-	fadeInDuration: 0.5,
-	fadeOutDuration: 0.5,
+	fadeInDuration: 0.0,
+	fadeOutDuration: 0.0,
 
 	animationType: 'none',
 	animationSpeed: 1.0,
@@ -79,14 +90,14 @@ function createLogoStore() {
 		update,
 
 		setEnabled: (enabled: boolean) => {
-			update(state => ({ ...state, enabled }));
+			update((state) => ({ ...state, enabled }));
 		},
 
 		uploadLogo: (file: File) => {
 			const reader = new FileReader();
 			reader.onload = (e) => {
 				const dataUrl = e.target?.result as string;
-				update(state => ({
+				update((state) => ({
 					...state,
 					logoDataUrl: dataUrl,
 					logoFileName: file.name,
@@ -97,7 +108,7 @@ function createLogoStore() {
 		},
 
 		setLogoDataUrl: (dataUrl: string, fileName: string = 'generated-logo.png') => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				logoDataUrl: dataUrl,
 				logoFileName: fileName,
@@ -106,7 +117,7 @@ function createLogoStore() {
 		},
 
 		clearLogo: () => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				logoDataUrl: null,
 				logoFileName: null,
@@ -116,37 +127,37 @@ function createLogoStore() {
 
 		// Updated to accept optional z
 		setPosition: (x: number, y: number, z?: number) => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				position: { x, y, z: z ?? state.position.z }
 			}));
 		},
 
 		setAnimation: (animationType: LogoState['animationType']) => {
-			update(state => ({ ...state, animationType }));
+			update((state) => ({ ...state, animationType }));
 		},
 
 		setAnimationSpeed: (speed: number) => {
-			update(state => ({ ...state, animationSpeed: speed }));
+			update((state) => ({ ...state, animationSpeed: speed }));
 		},
 
 		setRotation3D: (axis: 'x' | 'y' | 'z', value: number) => {
-			update(state => ({
+			update((state) => ({
 				...state,
 				rotation3D: { ...state.rotation3D, [axis]: value }
 			}));
 		},
 
 		toggleAutoRotate: () => {
-			update(state => ({ ...state, autoRotate: !state.autoRotate }));
+			update((state) => ({ ...state, autoRotate: !state.autoRotate }));
 		},
 
 		setAutoRotateSpeed: (speed: number) => {
-			update(state => ({ ...state, autoRotateSpeed: speed }));
+			update((state) => ({ ...state, autoRotateSpeed: speed }));
 		},
 
 		updateProperty: <K extends keyof LogoState>(key: K, value: LogoState[K]) => {
-			update(state => ({ ...state, [key]: value }));
+			update((state) => ({ ...state, [key]: value }));
 		},
 
 		// Position presets — calibrated to your reference points:
@@ -154,19 +165,19 @@ function createLogoStore() {
 		// derived center ~x:53.5, y:50 — spacing ~31 units horiz, ~8 units vert
 		presets: {
 			topLeft: () => {
-				update(state => ({ ...state, position: { ...state.position, x: 54, y: 46 } }));
+				update((state) => ({ ...state, position: { ...state.position, x: 54, y: 46 } }));
 			},
 			topRight: () => {
-				update(state => ({ ...state, position: { ...state.position, x: 85, y: 46 } }));
+				update((state) => ({ ...state, position: { ...state.position, x: 85, y: 46 } }));
 			},
 			bottomLeft: () => {
-				update(state => ({ ...state, position: { ...state.position, x: 54, y: 54 } }));
+				update((state) => ({ ...state, position: { ...state.position, x: 54, y: 54 } }));
 			},
 			bottomRight: () => {
-				update(state => ({ ...state, position: { ...state.position, x: 85, y: 54 } }));
+				update((state) => ({ ...state, position: { ...state.position, x: 85, y: 54 } }));
 			},
 			center: () => {
-				update(state => ({ ...state, position: { ...state.position, x: 53, y: 50 } }));
+				update((state) => ({ ...state, position: { ...state.position, x: 53, y: 50 } }));
 			}
 		},
 
