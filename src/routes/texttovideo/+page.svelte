@@ -20,6 +20,11 @@
 	let duration = $state(8);
 	let operation = $state('');
 	let video = $state('');
+	let videoObject = $state<Record<string, unknown> | null>(null); // full Video object — kept for chained extensions
+	let extensionCount = $state(0);     // 0–20 max extensions
+	let isExtending = $state(false);
+	let extendPrompt = $state('');
+	let showExtendPanel = $state(false);
 	let status = $state('');
 	let isGenerating = $state(false);
 	let aspectRatios = $state('16:9');
@@ -78,6 +83,10 @@
 	function clearSession() {
 		sessionStorage.removeItem('texttovideo_state');
 		video = '';
+		videoObject = null;
+		extensionCount = 0;
+		showExtendPanel = false;
+		extendPrompt = '';
 		prompt = '';
 		status = '';
 		uploadedImages = [];
@@ -102,7 +111,7 @@
 		isGenerating = true;
 		status = 'Generating...';
 		video = '';
-		videoGcsUri = '';
+		videoObject = null;
 		extensionCount = 0;
 		showExtendPanel = false;
 		savedContentId = '';
@@ -197,6 +206,7 @@
 					isGenerating = false;
 				} else if (data.video) {
 					video = data.video;
+					videoObject = data.videoObject || null;
 					saveToSession();
 					status = 'Done! Ready to enhance or download.';
 					isGenerating = false;
@@ -219,6 +229,69 @@
 			isGenerating = false;
 		}
 	}
+	// ── VIDEO EXTENSION ──────────────────────────────────────────────────────
+	async function startExtend() {
+		if (!videoObject || extensionCount >= 20 || isExtending || !$authStore.user) return;
+
+		isExtending = true;
+		status = 'Submitting extension request...';
+
+		try {
+			const res = await fetch('/api/veo2-simple/extend', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ videoObject, prompt: extendPrompt })
+			});
+			const data = await res.json();
+
+			if (data.error) {
+				status = `Error: ${data.error}`;
+				isExtending = false;
+				return;
+			}
+
+			operation = data.operation;
+			status = 'Extending... this takes about 30–60 seconds';
+			setTimeout(pollExtend, 30000);
+		} catch (err) {
+			status = `Error: ${err instanceof Error ? err.message : 'Extension failed'}`;
+			isExtending = false;
+		}
+	}
+
+	async function pollExtend() {
+		try {
+			const res = await fetch('/api/veo2-simple/poll', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ operation })
+			});
+			const data = await res.json();
+
+			if (data.done) {
+				if (data.video) {
+					video = data.video;
+					// Update the video object so the next extension chains off the new combined video
+					videoObject = data.videoObject || videoObject;
+					extensionCount++;
+					saveToSession();
+					status = `Extended! (${extensionCount}/20) +8s added — ready to enhance, extend again, or download.`;
+					showExtendPanel = false;
+					extendPrompt = '';
+				} else {
+					status = `Error: ${data.error || 'Extension failed'}`;
+				}
+				isExtending = false;
+			} else {
+				status = `Still extending... (${extensionCount + 1}/20 in progress)`;
+				setTimeout(pollExtend, 15000);
+			}
+		} catch (err) {
+			status = `Error: ${err instanceof Error ? err.message : 'Polling failed'}`;
+			isExtending = false;
+		}
+	}
+
 	function handlePromptSelected(selectedPrompt: string) {
 		prompt = selectedPrompt;
 		showPromptCoach = false;
@@ -250,7 +323,7 @@
 				height: aspectRatios === '16:9' ? 1080 : aspectRatios === '9:16' ? 1920 : 1080,
 				format: 'mp4',
 				duration: duration,
-				model: 'veo-2',
+				model: 'veo-3.1',
 				generationTime: 0,
 				tags: []
 			});
@@ -277,7 +350,7 @@
 		const files = target.files;
 
 		if (files && files.length > 0) {
-			uploadedImages = Array.from(files);
+			uploadedImages = Array.from(files).slice(0, 3);
 			imagePreviews = [];
 			//isProcessingImages = true;
 
@@ -489,7 +562,8 @@
 		</fieldset>
 
 		<fieldset class="fieldset">
-			<legend class="fieldset-legend">Upload Image (Optional)</legend>
+			<legend class="fieldset-legend">Reference Images (Optional — max 3)</legend>
+			<p class="mb-2 text-xs text-white opacity-75">1 → animate · 2 → start/end interpolation · 3 → start/mid/end interpolation</p>
 			<input
 				type="file"
 				accept="image/*"
@@ -498,8 +572,14 @@
 				class="file-input w-full file-input-info"
 			/>
 			{#if uploadedImages.length > 0}
-				<p class="mt-2 text-sm text-success">
-					{uploadedImages.length} image(s) selected
+				<p class="mt-2 text-sm {uploadedImages.length > 3 ? 'text-warning' : 'text-success'}">
+					{uploadedImages.length === 1
+						? '1 image — animates from this frame'
+						: uploadedImages.length === 2
+						? '2 images — interpolates start → end'
+						: uploadedImages.length === 3
+						? '3 images — interpolates start → mid → end'
+						: `${uploadedImages.length} selected — only first 3 will be used`}
 				</p>
 			{/if}
 		</fieldset>
@@ -533,6 +613,45 @@
 				>
 					{isSaving ? 'Saving...' : '💾 Save to Library'}
 				</button>
+			{/if}
+
+			<!-- Extend Video — only shown after a Veo-generated video is ready -->
+			{#if videoObject && !isGenerating && !isVideoUploaded && extensionCount < 20}
+				<button
+					onclick={() => (showExtendPanel = !showExtendPanel)}
+					disabled={isExtending}
+					class="btn btn-warning {isExtending ? 'btn-disabled' : ''}"
+				>
+					{isExtending ? 'Extending...' : `⏩ Extend Video (+8s) · ${extensionCount}/20`}
+				</button>
+
+				{#if showExtendPanel}
+					<div class="rounded-lg border border-warning/30 bg-warning/5 p-4 flex flex-col gap-3">
+						<p class="text-xs text-warning/80">
+							Adds 8 seconds to the end of the current video. The output will be a single combined video.
+							Prompt is optional — leave blank to let Veo continue naturally.
+						</p>
+						<textarea
+							bind:value={extendPrompt}
+							placeholder="Optional: describe what should happen next..."
+							class="textarea textarea-bordered min-h-[80px] w-full bg-base-100 text-white text-sm"
+							disabled={isExtending}
+						></textarea>
+						<button
+							onclick={startExtend}
+							disabled={isExtending}
+							class="btn btn-warning btn-sm {isExtending ? 'btn-disabled' : ''}"
+						>
+							{isExtending ? 'Processing...' : '⏩ Start Extension'}
+						</button>
+					</div>
+				{/if}
+			{/if}
+
+			{#if extensionCount >= 20}
+				<div class="alert alert-warning py-2">
+					<span class="text-sm">Maximum 20 extensions reached for this video.</span>
+				</div>
 			{/if}
 
 			{#if savedContentId}

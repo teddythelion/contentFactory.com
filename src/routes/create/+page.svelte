@@ -10,7 +10,7 @@
 	import type { UsageCheckResult } from '$lib/types/subscription';
 
 	// ── Core state ────────────────────────────────────────────────────────────
-	let mode = $state<'image' | 'video'>('image');
+	let mode = $state<'image' | 'video' | 'extend'>('image');
 	let prompt = $state('');
 	let generatedContent = $state<string | null>(null);
 	let contentType = $state<'image' | 'video' | null>(null);
@@ -33,6 +33,13 @@
 	let audioSessionId = $state<string | null>(null);
 	let showAdvanced = $state(false);
 
+	// Extend mode
+	let videoObject = $state<Record<string, unknown> | null>(null);
+	let extensionCount = $state(0);
+	let isExtending = $state(false);
+	let extendPrompt = $state('');
+	let extendOperation = $state<string | null>(null);
+
 	// UI toggles
 	let showPromptCoach = $state(false);
 	let showAuthModal = $state(false);
@@ -49,12 +56,16 @@
 	let canAddRef = $derived(referenceFiles.length < 3);
 	let activeUrl = $derived(generatedContent ?? editSourceUrl);
 	let activeContentType = $derived(contentType ?? (editSourceUrl ? mode : null));
+	// Video available to extend — must be a Veo-generated video from this session
+	let extendSourceUrl = $derived(
+		mode === 'extend' && contentType === 'video' && generatedContent ? generatedContent : null
+	);
+	let canExtend = $derived(!!videoObject && !isExtending && !isGenerating && extensionCount < 20);
 
 	// ── Mode switch ───────────────────────────────────────────────────────────
-	function switchMode(newMode: 'image' | 'video') {
-		if (newMode === mode || isGenerating) return;
+	function switchMode(newMode: 'image' | 'video' | 'extend') {
+		if (newMode === mode || isGenerating || isExtending) return;
 		mode = newMode;
-		// Clear edit source — an image file can't render as a video element and vice versa
 		if (editSourceUrl?.startsWith('blob:')) URL.revokeObjectURL(editSourceUrl);
 		editSourceUrl = null;
 		editSourceFileName = '';
@@ -78,6 +89,11 @@
 		isGenerating = false;
 		status = '';
 		error = '';
+		videoObject = null;
+		extensionCount = 0;
+		isExtending = false;
+		extendPrompt = '';
+		extendOperation = null;
 	}
 
 	// ── Auth guard ────────────────────────────────────────────────────────────
@@ -90,7 +106,7 @@
 		return true;
 	}
 
-	// ── HEIC guard — browsers can't render HEIC natively ─────────────────────
+	// ── HEIC guard ────────────────────────────────────────────────────────────
 	function isHeic(file: File): boolean {
 		return (
 			file.type === 'image/heic' ||
@@ -114,7 +130,6 @@
 		}
 		const newFiles = allFiles.slice(0, 3 - referenceFiles.length);
 		if (!newFiles.length) return;
-		// createObjectURL is synchronous — thumbnail appears instantly, no async gap
 		const newPreviews = newFiles.map(f => URL.createObjectURL(f));
 		referencePreviews = [...referencePreviews, ...newPreviews];
 		referenceFiles = [...referenceFiles, ...newFiles];
@@ -154,7 +169,7 @@
 	async function generate() {
 		if (!requireAuth() || !prompt.trim() || isGenerating) return;
 
-		const usageCheck = await canGenerate(mode);
+		const usageCheck = await canGenerate(mode === 'extend' ? 'video' : mode);
 		if (!usageCheck.allowed) {
 			usageLimitData = usageCheck;
 			showUsageLimitModal = true;
@@ -165,6 +180,8 @@
 		error = '';
 		generatedContent = null;
 		contentType = null;
+		videoObject = null;
+		extensionCount = 0;
 		status = mode === 'image' ? 'Generating...' : 'Starting...';
 
 		try {
@@ -173,11 +190,9 @@
 				isGenerating = false;
 			} else {
 				await startVideoGeneration();
-				// isGenerating stays true; pollVideo will clear it
 			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			// Billing / quota errors → show the upgrade modal instead of a raw error string
 			if (msg.toLowerCase().includes('billing') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('limit') || msg.toLowerCase().includes('limit_reached')) {
 				showUsageLimitModal = true;
 			} else {
@@ -203,7 +218,6 @@
 			return;
 		}
 		if (!data.success) throw new Error(data.error || 'Image generation failed');
-
 		if (!data.imageUrl) throw new Error('No image received from server');
 		generatedContent = data.imageUrl;
 		contentType = 'image';
@@ -249,8 +263,8 @@
 				} else if (data.video) {
 					generatedContent = data.video;
 					contentType = 'video';
+					videoObject = data.videoObject ?? null;
 					status = '';
-					// Server (generateFromImage endpoint) already calls incrementUsage — no client call needed
 				}
 			} else if (data.error) {
 				isGenerating = false;
@@ -261,6 +275,66 @@
 			}
 		} catch (err) {
 			isGenerating = false;
+			error = err instanceof Error ? err.message : 'Polling failed';
+		}
+	}
+
+	// ── Extend: run extension ─────────────────────────────────────────────────
+	async function startExtend() {
+		if (!requireAuth() || !videoObject || isExtending || extensionCount >= 20) return;
+
+		isExtending = true;
+		error = '';
+		status = 'Submitting extension...';
+
+		try {
+			const res = await fetch('/api/veo2-simple/extend', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ videoObject, prompt: extendPrompt })
+			});
+			const data = await res.json();
+			if (data.error) throw new Error(data.error);
+			extendOperation = data.operation;
+			status = 'Extending... ~30–60 seconds';
+			setTimeout(pollExtend, 30000);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Extension failed';
+			status = '';
+			isExtending = false;
+		}
+	}
+
+	async function pollExtend() {
+		try {
+			const res = await fetch('/api/veo2-simple/poll', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ operation: extendOperation })
+			});
+			const data = await res.json();
+			if (data.done) {
+				isExtending = false;
+				if (data.error) {
+					error = data.error;
+					status = '';
+				} else if (data.video) {
+					generatedContent = data.video;
+					contentType = 'video';
+					videoObject = data.videoObject ?? videoObject;
+					extensionCount++;
+					extendPrompt = '';
+					status = `Extended! ${extensionCount}/20 — +8s added`;
+				}
+			} else if (data.error) {
+				isExtending = false;
+				error = data.error;
+			} else {
+				status = `Still extending... (${extensionCount + 1}/20 in progress)`;
+				setTimeout(pollExtend, 15000);
+			}
+		} catch (err) {
+			isExtending = false;
 			error = err instanceof Error ? err.message : 'Polling failed';
 		}
 	}
@@ -295,29 +369,21 @@
 		}
 	}
 
-	// ── Send to video refs (image mode only) ──────────────────────────────────
+	// ── Send to video refs ────────────────────────────────────────────────────
 	async function sendToVideoRefs() {
 		if (!generatedContent) return;
 		const url = generatedContent;
-
-		// Clear existing refs from image generation, add generated image as first slot
 		referencePreviews = [url];
 		try {
 			const blob = await (await fetch(url)).blob();
 			referenceFiles = [new File([blob], 'generated-ref.png', { type: blob.type || 'image/png' })];
-		} catch {
-			referenceFiles = [];
-		}
-
-		// Clear canvas and switch to video mode
+		} catch { referenceFiles = []; }
 		generatedContent = null;
 		contentType = null;
 		mode = 'video';
-
-		showToastMsg('Generated image sent as video reference. Re-add any other references manually if needed.');
+		showToastMsg('Generated image sent as video reference.');
 	}
 
-	// ── Send locally uploaded edit source to video refs ──────────────────────
 	async function sendEditSourceToVideoRefs() {
 		if (!editSourceUrl) return;
 		const url = editSourceUrl;
@@ -349,14 +415,12 @@
 		const a = document.createElement('a');
 
 		if (activeUrl.startsWith('data:')) {
-			// Data URL (images) — blob it locally
 			const blob = await (await fetch(activeUrl)).blob();
 			a.href = URL.createObjectURL(blob);
 			a.download = fileName;
 			a.click();
 			URL.revokeObjectURL(a.href);
 		} else {
-			// Remote URL (videos) — proxy through server to avoid CORS
 			a.href = `/api/content/download?url=${encodeURIComponent(activeUrl)}&name=${encodeURIComponent(fileName)}`;
 			a.download = fileName;
 			document.body.appendChild(a);
@@ -364,6 +428,7 @@
 			document.body.removeChild(a);
 		}
 	}
+
 </script>
 
 <!-- ── Modals & Overlays ────────────────────────────────────────────────────── -->
@@ -372,7 +437,7 @@
 <UsageLimitModal
 	bind:show={showUsageLimitModal}
 	usageData={usageLimitData}
-	generationType={mode}
+	generationType={mode === 'extend' ? 'video' : mode}
 />
 
 {#if showPromptCoach}
@@ -457,7 +522,6 @@
 
 			<!-- ── Header ────────────────────────────────────────────────────────── -->
 			<div class="flex items-center gap-3 px-5 py-4 border-b border-base-300">
-				<!-- Logo text -->
 				<div class="flex items-center gap-2 text-base-content/80 shrink-0">
 					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4 text-primary">
 						<path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/>
@@ -470,7 +534,7 @@
 					<button
 						class="join-item btn btn-sm gap-1.5 {mode === 'image' ? 'btn-neutral' : 'btn-ghost opacity-60'}"
 						onclick={() => switchMode('image')}
-						disabled={isGenerating}
+						disabled={isGenerating || isExtending}
 					>
 						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 							<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
@@ -480,12 +544,22 @@
 					<button
 						class="join-item btn btn-sm gap-1.5 {mode === 'video' ? 'btn-neutral' : 'btn-ghost opacity-60'}"
 						onclick={() => switchMode('video')}
-						disabled={isGenerating}
+						disabled={isGenerating || isExtending}
 					>
 						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 							<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
 						</svg>
 						Video
+					</button>
+					<button
+						class="join-item btn btn-sm gap-1.5 {mode === 'extend' ? 'btn-warning' : 'btn-ghost opacity-60'}"
+						onclick={() => switchMode('extend')}
+						disabled={isGenerating || isExtending}
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+							<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
+						</svg>
+						Extend
 					</button>
 				</div>
 
@@ -493,7 +567,7 @@
 				<button
 					class="btn btn-sm btn-ghost text-error ml-auto gap-1.5"
 					onclick={clearAll}
-					disabled={isGenerating}
+					disabled={isGenerating || isExtending}
 				>
 					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 						<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
@@ -505,11 +579,57 @@
 			<!-- ── Canvas ─────────────────────────────────────────────────────────── -->
 			<div class="px-5 pt-5">
 				<div
-					class="relative rounded-xl bg-base-100 overflow-hidden border-2 {hasContent ? 'border-base-300' : 'border-dashed border-base-300/60'}"
+					class="relative rounded-xl bg-base-100 overflow-hidden border-2 {hasContent || extendSourceUrl ? 'border-base-300' : 'border-dashed border-base-300/60'}"
 					style="min-height: 320px;"
 				>
-					{#if isGenerating}
-						<!-- Generating state -->
+					{#if mode === 'extend'}
+						<!-- ── Extend canvas ── -->
+						{#if isExtending}
+							<div class="absolute inset-0 flex flex-col items-center justify-center gap-4">
+								<div class="loading loading-spinner loading-lg text-warning/60"></div>
+								<div class="text-center">
+									<p class="font-medium text-base-content/80">Extending video...</p>
+									<p class="text-xs text-base-content/40 mt-1">Usually 30–60 seconds</p>
+								</div>
+							</div>
+
+						{:else if extendSourceUrl}
+							<!-- Video ready to extend or just extended -->
+							<video
+								src={extendSourceUrl}
+								controls
+								class="w-full rounded-xl object-contain"
+								style="min-height: 320px; max-height: 560px; background:#000;"
+							>
+								<track kind="captions" src="" label="English" srclang="en" />
+							</video>
+							<div class="absolute top-3 right-3 flex gap-2">
+								{#if extensionCount > 0}
+									<div class="badge badge-warning gap-1 shadow-lg text-xs font-medium px-3 py-3">
+										{extensionCount}/20 extensions
+									</div>
+								{/if}
+								<button onclick={downloadContent} class="btn btn-sm btn-neutral gap-1.5 shadow-lg">
+									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+										<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+									</svg>
+									Download
+								</button>
+							</div>
+
+						{:else}
+							<div class="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6">
+								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="size-10 text-warning/40">
+									<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
+								</svg>
+								<div class="text-center">
+									<p class="text-sm font-medium text-base-content/60">Generate a video first</p>
+									<p class="text-xs text-base-content/35 mt-1 max-w-xs leading-relaxed">Switch to the Video tab, generate a video, then come back here to extend it. The Veo API only extends videos it generated — uploaded videos aren't supported.</p>
+								</div>
+							</div>
+						{/if}
+
+					{:else if isGenerating}
 						<div class="absolute inset-0 flex flex-col items-center justify-center gap-4">
 							<div class="loading loading-spinner loading-lg text-base-content/40"></div>
 							<div class="text-center">
@@ -521,16 +641,14 @@
 						</div>
 
 					{:else if activeContentType === 'image' && activeUrl}
-						<!-- Image content -->
 						<img
 							src={activeUrl}
 							alt="Generated"
 							class="w-full object-contain rounded-xl"
 							style="min-height: 320px; max-height: 560px;"
 						/>
-						<!-- Overlay actions -->
 						<div class="absolute top-3 right-3 flex gap-2">
-							<button onclick={downloadContent} class="btn btn-sm btn-neutral gap-1.5 shadow-lg" title="Download">
+							<button onclick={downloadContent} class="btn btn-sm btn-neutral gap-1.5 shadow-lg">
 								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 									<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
 								</svg>
@@ -553,7 +671,6 @@
 						</div>
 
 					{:else if activeContentType === 'video' && activeUrl}
-						<!-- Video content -->
 						<video
 							src={activeUrl}
 							controls
@@ -562,9 +679,8 @@
 						>
 							<track kind="captions" src="" label="English" srclang="en" />
 						</video>
-						<!-- Overlay actions -->
 						<div class="absolute top-3 right-3 flex gap-2">
-							<button onclick={downloadContent} class="btn btn-sm btn-neutral gap-1.5 shadow-lg" title="Download">
+							<button onclick={downloadContent} class="btn btn-sm btn-neutral gap-1.5 shadow-lg">
 								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 									<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
 								</svg>
@@ -576,10 +692,17 @@
 								</svg>
 								Edit content
 							</button>
+							{#if videoObject}
+								<button onclick={() => switchMode('extend')} class="btn btn-sm btn-warning gap-1.5 shadow-lg">
+									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+										<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
+									</svg>
+									Extend
+								</button>
+							{/if}
 						</div>
 
 					{:else}
-						<!-- Empty state -->
 						<div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-base-content/25">
 							{#if mode === 'image'}
 								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="size-10">
@@ -598,182 +721,235 @@
 			</div>
 
 			<!-- ── Bottom controls ────────────────────────────────────────────────── -->
-			<div class="px-5 pb-5 pt-4 {isGenerating ? 'opacity-50 pointer-events-none select-none' : ''}">
+			<div class="px-5 pb-5 pt-4">
 
-				<!-- Prompt + action buttons -->
-				<div class="flex gap-3 rounded-xl bg-base-100 border border-base-300 p-3">
-					<textarea
-						value={prompt}
-						oninput={e => (prompt = e.currentTarget.value)}
-						placeholder={mode === 'image'
-							? 'Describe the image you want to create...'
-							: 'Describe the video you want to create...'}
-						class="flex-1 bg-transparent resize-none text-sm outline-none min-h-[48px] max-h-[180px] placeholder:text-base-content/30"
-						rows="2"
-						disabled={isGenerating}
-					></textarea>
-					<div class="flex flex-col gap-2 shrink-0">
-						<button
-							onclick={() => (showPromptCoach = true)}
-							class="btn btn-sm btn-neutral gap-1.5 whitespace-nowrap"
-							disabled={isGenerating}
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
-								<path d="M15 4V2m0 2v16m0-16H9m6 0h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-							</svg>
-							Prompt engineer
-						</button>
-						<button
-							onclick={generate}
-							disabled={isGenerating || !prompt.trim()}
-							class="btn btn-sm {isGenerating ? 'btn-neutral' : 'btn-primary'} gap-1.5"
-						>
-							{#if isGenerating}
-								<div class="loading loading-spinner loading-xs"></div>
-								Generating
-							{:else}
-								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
-									<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-								</svg>
-								Generate
-							{/if}
-						</button>
-					</div>
-				</div>
+				{#if mode === 'extend'}
+					<!-- ── Extend controls ── -->
+					<div class="flex flex-col gap-3 {isExtending ? 'opacity-50 pointer-events-none select-none' : ''}">
 
-				{#if isGenerating && status}
-					<p class="text-center text-xs text-base-content/40 mt-2">Controls are disabled while generation is in progress</p>
-				{/if}
+						{#if extensionCount >= 20}
+							<div class="alert alert-warning py-2 text-sm">
+								<span>Maximum 20 extensions reached for this video.</span>
+							</div>
+						{/if}
 
-				{#if error}
-					<div class="alert alert-error py-2 mt-3 text-sm">
-						<span>❌ {error}</span>
-					</div>
-				{/if}
+						{#if error}
+							<div class="alert alert-error py-2 text-sm">
+								<span>❌ {error}</span>
+							</div>
+						{/if}
 
-				<!-- Edit source + Reference images -->
-				<div class="mt-4 grid grid-cols-3 gap-4">
+						{#if status}
+							<p class="text-center text-xs text-base-content/50">{status}</p>
+						{/if}
 
-					<!-- Edit source (1 col) -->
-					<div>
-						<p class="text-xs font-medium text-base-content/50 mb-2">Edit source</p>
-						{#if editSourceUrl}
-							<div class="rounded-xl border border-base-300 bg-base-100 p-3 text-center">
-								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-5 mx-auto mb-1 text-success">
-									<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
-								</svg>
-								<p class="text-xs text-base-content/60 truncate">{editSourceFileName}</p>
-								<button onclick={clearEditSource} class="btn btn-xs btn-ghost text-error mt-2 gap-1">
-									✕ Remove
+						<!-- Prompt for extension -->
+						<div class="flex gap-3 rounded-xl bg-base-100 border border-base-300 p-3">
+							<textarea
+								bind:value={extendPrompt}
+								placeholder="Optional: describe what should happen next... (leave blank to let Veo continue naturally)"
+								class="flex-1 bg-transparent resize-none text-sm outline-none min-h-[48px] max-h-[120px] placeholder:text-base-content/30"
+								rows="2"
+								disabled={isExtending}
+							></textarea>
+							<div class="flex flex-col gap-2 shrink-0">
+								<button
+									onclick={startExtend}
+									disabled={!canExtend}
+									class="btn btn-sm {canExtend ? 'btn-warning' : 'btn-neutral opacity-40'} gap-1.5"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+										<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
+									</svg>
+									{extensionCount > 0 ? `Extend again (${extensionCount}/20)` : 'Extend +8s'}
 								</button>
 							</div>
-						{:else}
-							<label class="block cursor-pointer rounded-xl border-2 border-dashed border-base-300 hover:border-base-content/25 transition-colors">
-								<div class="p-4 text-center">
-									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-5 mx-auto mb-2 text-base-content/30">
-										<polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
-									</svg>
-									<p class="text-xs text-base-content/40 leading-tight">
-										{mode === 'image' ? 'Upload image to edit' : 'Upload video to edit'}
-									</p>
-									{#if mode === 'video'}
-										<p class="text-xs text-base-content/25 mt-1 leading-tight">Loads into canvas for editing — not a generation reference.</p>
-									{/if}
-								</div>
-								<input
-									type="file"
-									accept={mode === 'image' ? 'image/*' : 'video/*'}
-									class="hidden"
-									onchange={handleEditSourceUpload}
-									disabled={isGenerating}
-								/>
-							</label>
+						</div>
+
+						{#if !videoObject}
+							<p class="text-xs text-base-content/35 text-center pt-1">
+								Switch to the <strong>Video</strong> tab, generate a video, then return here to extend it.
+							</p>
 						{/if}
 					</div>
 
-					<!-- Reference images (2 cols) -->
-					<div class="col-span-2">
-						<div class="flex items-center justify-between mb-2">
-							<p class="text-xs font-medium text-base-content/50">Reference images</p>
-							<p class="text-xs text-base-content/35">{referenceFiles.length}/3 — influences generation</p>
-						</div>
-						<div class="grid grid-cols-3 gap-2">
-							<!-- Filled slots -->
-							{#each referencePreviews as preview, i (i)}
-								<div class="relative rounded-lg overflow-hidden bg-base-300 h-20">
-									<img src={preview} alt="ref {i + 1}" class="w-full h-full object-cover" />
-									<button
-										onclick={() => removeReference(i)}
-										class="btn btn-xs btn-circle btn-error absolute top-1 right-1 opacity-90 shadow"
-										disabled={isGenerating}
-									>✕</button>
-								</div>
-							{/each}
-							<!-- Empty slots -->
-							{#each { length: 3 - referenceFiles.length } as _, i (i)}
-								<label class="flex items-center justify-center h-20 rounded-lg border-2 border-dashed border-base-300 hover:border-base-content/25 transition-colors cursor-pointer {isGenerating ? 'opacity-40 pointer-events-none' : ''}">
-									<span class="text-2xl text-base-content/20">+</span>
-									<input
-										type="file"
-										accept="image/*"
-										class="hidden"
-										onchange={addReferenceImages}
-										disabled={isGenerating}
-									/>
-								</label>
-							{/each}
-						</div>
-					</div>
-				</div>
+				{:else}
+					<!-- ── Image / Video controls ── -->
+					<div class="{isGenerating ? 'opacity-50 pointer-events-none select-none' : ''}">
 
-				<!-- Scroll hint arrow (decorative) -->
-				<div class="flex justify-center mt-4">
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4 text-base-content/20">
-						<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>
-					</svg>
-				</div>
+						<div class="flex gap-3 rounded-xl bg-base-100 border border-base-300 p-3">
+							<textarea
+								value={prompt}
+								oninput={e => (prompt = e.currentTarget.value)}
+								placeholder={mode === 'image'
+									? 'Describe the image you want to create...'
+									: 'Describe the video you want to create...'}
+								class="flex-1 bg-transparent resize-none text-sm outline-none min-h-[48px] max-h-[180px] placeholder:text-base-content/30"
+								rows="2"
+								disabled={isGenerating}
+							></textarea>
+							<div class="flex flex-col gap-2 shrink-0">
+								<button
+									onclick={() => (showPromptCoach = true)}
+									class="btn btn-sm btn-neutral gap-1.5 whitespace-nowrap"
+									disabled={isGenerating}
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+										<path d="M15 4V2m0 2v16m0-16H9m6 0h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+									</svg>
+									Prompt engineer
+								</button>
+								<button
+									onclick={generate}
+									disabled={isGenerating || !prompt.trim()}
+									class="btn btn-sm {isGenerating ? 'btn-neutral' : 'btn-primary'} gap-1.5"
+								>
+									{#if isGenerating}
+										<div class="loading loading-spinner loading-xs"></div>
+										Generating
+									{:else}
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+											<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+										</svg>
+										Generate
+									{/if}
+								</button>
+							</div>
+						</div>
 
-				<!-- Advanced options (video mode only) -->
-				{#if mode === 'video'}
-					<div class="mt-2 border-t border-base-300/50 pt-4">
-						<button
-							onclick={() => (showAdvanced = !showAdvanced)}
-							class="flex items-center gap-2 text-xs text-base-content/40 hover:text-base-content/60 transition-colors w-full"
-							disabled={isGenerating}
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3 transition-transform {showAdvanced ? 'rotate-180' : ''}">
-								<polyline points="6 9 12 15 18 9"/>
-							</svg>
-							Advanced options
-						</button>
-						{#if showAdvanced}
-							<div class="mt-3 grid grid-cols-2 gap-4">
-								<div>
-									<p class="text-xs text-base-content/40 mb-1">Duration</p>
-									<select
-										bind:value={duration}
-										class="select select-bordered select-sm w-full text-sm"
-										disabled={isGenerating}
-									>
-										<option value={4}>4 seconds</option>
-										<option value={6}>6 seconds</option>
-										<option value={8}>8 seconds</option>
-									</select>
-								</div>
-								<div>
-									<p class="text-xs text-base-content/40 mb-1">Aspect ratio</p>
-									<select
-										bind:value={aspectRatio}
-										class="select select-bordered select-sm w-full text-sm"
-										disabled={isGenerating}
-									>
-										<option value="16:9">16:9 — landscape</option>
-										<option value="9:16">9:16 — portrait</option>
-										<option value="4:3">4:3</option>
-									</select>
-								</div>
+						{#if isGenerating && status}
+							<p class="text-center text-xs text-base-content/40 mt-2">Controls are disabled while generation is in progress</p>
+						{/if}
+
+						{#if error}
+							<div class="alert alert-error py-2 mt-3 text-sm">
+								<span>❌ {error}</span>
 							</div>
 						{/if}
+
+						<!-- Edit source + Reference images -->
+						<div class="mt-4 grid grid-cols-3 gap-4">
+
+							<!-- Edit source -->
+							<div>
+								<p class="text-xs font-medium text-base-content/50 mb-2">Edit source</p>
+								{#if editSourceUrl}
+									<div class="rounded-xl border border-base-300 bg-base-100 p-3 text-center">
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-5 mx-auto mb-1 text-success">
+											<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+										</svg>
+										<p class="text-xs text-base-content/60 truncate">{editSourceFileName}</p>
+										<button onclick={clearEditSource} class="btn btn-xs btn-ghost text-error mt-2 gap-1">
+											✕ Remove
+										</button>
+									</div>
+								{:else}
+									<label class="block cursor-pointer rounded-xl border-2 border-dashed border-base-300 hover:border-base-content/25 transition-colors">
+										<div class="p-4 text-center">
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-5 mx-auto mb-2 text-base-content/30">
+												<polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+											</svg>
+											<p class="text-xs text-base-content/40 leading-tight">
+												{mode === 'image' ? 'Upload image to edit' : 'Upload video to edit'}
+											</p>
+											{#if mode === 'video'}
+												<p class="text-xs text-base-content/25 mt-1 leading-tight">Loads into canvas for editing — not a generation reference.</p>
+											{/if}
+										</div>
+										<input
+											type="file"
+											accept={mode === 'image' ? 'image/*' : 'video/*'}
+											class="hidden"
+											onchange={handleEditSourceUpload}
+											disabled={isGenerating}
+										/>
+									</label>
+								{/if}
+							</div>
+
+							<!-- Reference images -->
+							<div class="col-span-2">
+								<div class="flex items-center justify-between mb-2">
+									<p class="text-xs font-medium text-base-content/50">Reference images</p>
+									<p class="text-xs text-base-content/35">{referenceFiles.length}/3 — influences generation</p>
+								</div>
+								<div class="grid grid-cols-3 gap-2">
+									{#each referencePreviews as preview, i (i)}
+										<div class="relative rounded-lg overflow-hidden bg-base-300 h-20">
+											<img src={preview} alt="ref {i + 1}" class="w-full h-full object-cover" />
+											<button
+												onclick={() => removeReference(i)}
+												class="btn btn-xs btn-circle btn-error absolute top-1 right-1 opacity-90 shadow"
+												disabled={isGenerating}
+											>✕</button>
+										</div>
+									{/each}
+									{#each { length: 3 - referenceFiles.length } as _, i (i)}
+										<label class="flex items-center justify-center h-20 rounded-lg border-2 border-dashed border-base-300 hover:border-base-content/25 transition-colors cursor-pointer {isGenerating ? 'opacity-40 pointer-events-none' : ''}">
+											<span class="text-2xl text-base-content/20">+</span>
+											<input
+												type="file"
+												accept="image/*"
+												class="hidden"
+												onchange={addReferenceImages}
+												disabled={isGenerating}
+											/>
+										</label>
+									{/each}
+								</div>
+							</div>
+						</div>
+
+						<div class="flex justify-center mt-4">
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4 text-base-content/20">
+								<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>
+							</svg>
+						</div>
+
+						<!-- Advanced options (video mode only) -->
+						{#if mode === 'video'}
+							<div class="mt-2 border-t border-base-300/50 pt-4">
+								<button
+									onclick={() => (showAdvanced = !showAdvanced)}
+									class="flex items-center gap-2 text-xs text-base-content/40 hover:text-base-content/60 transition-colors w-full"
+									disabled={isGenerating}
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3 transition-transform {showAdvanced ? 'rotate-180' : ''}">
+										<polyline points="6 9 12 15 18 9"/>
+									</svg>
+									Advanced options
+								</button>
+								{#if showAdvanced}
+									<div class="mt-3 grid grid-cols-2 gap-4">
+										<div>
+											<p class="text-xs text-base-content/40 mb-1">Duration</p>
+											<select
+												bind:value={duration}
+												class="select select-bordered select-sm w-full text-sm"
+												disabled={isGenerating}
+											>
+												<option value={4}>4 seconds</option>
+												<option value={6}>6 seconds</option>
+												<option value={8}>8 seconds</option>
+											</select>
+										</div>
+										<div>
+											<p class="text-xs text-base-content/40 mb-1">Aspect ratio</p>
+											<select
+												bind:value={aspectRatio}
+												class="select select-bordered select-sm w-full text-sm"
+												disabled={isGenerating}
+											>
+												<option value="16:9">16:9 — landscape</option>
+												<option value="9:16">9:16 — portrait</option>
+												<option value="4:3">4:3</option>
+											</select>
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/if}
+
 					</div>
 				{/if}
 

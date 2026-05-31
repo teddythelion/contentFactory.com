@@ -1,149 +1,82 @@
-import { GoogleAuth } from 'google-auth-library';
-import { Storage } from '@google-cloud/storage';
-import { readFileSync } from 'fs';
-import { env } from '$env/dynamic/private';
+import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
+import { GOOGLE_API_KEY } from '$env/static/private';
 import type { RequestHandler } from './$types';
-//updated
+
+const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+
 export const POST: RequestHandler = async ({ request }) => {
-    try {
-        const { operation } = await request.json();
+	try {
+		const { operation: operationName } = await request.json();
 
-        if (!operation) {
-            return new Response(JSON.stringify({ 
-                done: false, 
-                error: 'Operation name is required' 
-            }), { 
-                status: 400,
-                headers: { 'Content-Type': 'application/json' } 
-            });
-        }
+		if (!operationName) {
+			return new Response(JSON.stringify({ done: false, error: 'Operation name is required' }), {
+				status: 400,
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
 
-        // --- Authentication ---
-        console.log('🔐 Authenticating...');
-        const key = JSON.parse(readFileSync(env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
-        const auth = new GoogleAuth({ 
-            credentials: key, 
-            scopes: ['https://www.googleapis.com/auth/cloud-platform'] 
-        });
-        const token = (await (await auth.getClient()).getAccessToken()).token;
+		console.log(`📋 Polling operation: ${operationName}`);
 
-        // --- Poll Veo 3.1 Operation ---
-        const modelId = 'veo-3.1-generate-001';
-        console.log(`📋 Polling operation: ${operation}`);
+		// getVideosOperation requires a real GenerateVideosOperation instance (not a plain
+		// object) because it calls operation._fromAPIResponse() internally. We create one
+		// and stamp the name so the SDK can look it up and populate the result correctly.
+		const opInstance = new GenerateVideosOperation();
+		(opInstance as unknown as Record<string, unknown>).name = operationName;
 
-        const res = await fetch(
-            `https://us-central1-aiplatform.googleapis.com/v1/projects/${env.GOOGLE_PROJECT_ID}/locations/us-central1/publishers/google/models/${modelId}:fetchPredictOperation`,
-            {
-                method: 'POST',
-                headers: { 
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    operationName: operation
-                })
-            }
-        );
+		const operation = await ai.operations.getVideosOperation({ operation: opInstance });
 
-        if (!res.ok) {
-            console.error('❌ Polling failed:', res.status, res.statusText);
-            const text = await res.text();
-            console.error('Error response:', text);
-            return new Response(JSON.stringify({ 
-                done: false, 
-                error: `Polling failed: ${res.status}` 
-            }), { 
-                status: 200,
-                headers: { 'Content-Type': 'application/json' } 
-            });
-        }
+		if (!operation.done) {
+			console.log('⏳ Still processing...');
+			return new Response(JSON.stringify({ done: false }), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
 
-        const data = await res.json();
-        console.log('📊 Poll Response:', JSON.stringify(data, null, 2));
+		console.log('✅ Operation complete');
 
-        // Check if operation is complete
-        if (!data.done) {
-            console.log('⏳ Operation still processing...');
-            return new Response(JSON.stringify({ 
-                done: false 
-            }), { 
-                headers: { 'Content-Type': 'application/json' } 
-            });
-        }
+		const generatedVideo = operation.response?.generatedVideos?.[0];
+		if (!generatedVideo?.video) {
+			console.error('❌ No video in response');
+			return new Response(JSON.stringify({ done: true, error: 'No video generated' }), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
 
-        // Operation is done - check for video
-        console.log('✅ Operation complete');
-        const gcsUri = data.response?.videos?.[0]?.gcsUri;
+		const videoFile = generatedVideo.video;
+		const fileUri = videoFile?.uri;
 
-        if (!gcsUri) {
-            console.error('❌ No GCS URI found in response');
-            return new Response(JSON.stringify({ 
-                done: true, 
-                error: 'No video generated' 
-            }), { 
-                headers: { 'Content-Type': 'application/json' } 
-            });
-        }
+		if (!fileUri) {
+			console.error('❌ No URI on video file');
+			return new Response(JSON.stringify({ done: true, error: 'No video URI in response' }), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
 
-        console.log(`📹 Video URI: ${gcsUri}`);
+		console.log(`📹 Video file URI: ${fileUri}`);
 
-        // Parse GCS URI: gs://bucket-name/path/to/file.mp4
-        const match = gcsUri.match(/gs:\/\/([^/]+)\/(.+)/);
-        if (!match) {
-            console.error('❌ Invalid GCS URI format:', gcsUri);
-            return new Response(JSON.stringify({ 
-                done: true, 
-                error: 'Invalid video URI format',
-                uri: gcsUri
-            }), { 
-                headers: { 'Content-Type': 'application/json' } 
-            });
-        }
+		// Proxy URL for the <video> element — keeps the API key server-side
+		const proxyUrl = `/api/proxyVideo?url=${encodeURIComponent(fileUri)}`;
 
-        const bucketName = match[1];
-        const filePath = match[2];
+		// Pass the full video object back to the frontend so the extend endpoint
+		// receives it verbatim and passes it as `video:` to generateVideos —
+		// matching the official extension example exactly.
+		return new Response(JSON.stringify({
+			done: true,
+			video: proxyUrl,       // used by <video src=...>
+			videoObject: videoFile, // { uri, mimeType, videoBytes? } — stored for extension
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+		});
 
-        console.log(`🪣 Bucket: ${bucketName}, Path: ${filePath}`);
-
-        // Generate signed URL (valid for 1 hour)
-        try {
-            const storage = new Storage({ credentials: key });
-            const bucket = storage.bucket(bucketName);
-            const file = bucket.file(filePath);
-
-            const [signedUrl] = await file.getSignedUrl({
-                action: 'read',
-                expires: Date.now() + 3600000, // 1 hour
-            });
-
-            console.log('🔗 Signed URL generated successfully');
-
-            return new Response(JSON.stringify({
-                done: true,
-                video: signedUrl
-            }), {
-                headers: { 'Content-Type': 'application/json' }
-            });
-        } catch (urlError) {
-            console.error('❌ Failed to generate signed URL:', urlError);
-            return new Response(JSON.stringify({ 
-                done: true, 
-                error: 'Failed to generate signed URL',
-                details: urlError instanceof Error ? urlError.message : String(urlError)
-            }), { 
-                headers: { 'Content-Type': 'application/json' } 
-            });
-        }
-
-    } catch (error) {
-        console.error('❌ Request processing error:', error);
-        return new Response(JSON.stringify({ 
-            done: true,
-            error: 'Polling failed',
-            details: error instanceof Error ? error.message : String(error)
-        }), { 
-            status: 500,
-            headers: { 'Content-Type': 'application/json' } 
-        });
-    }
+	} catch (error) {
+		console.error('❌ Poll error:', error);
+		return new Response(JSON.stringify({
+			done: true,
+			error: 'Polling failed',
+			details: error instanceof Error ? error.message : String(error),
+		}), {
+			status: 500,
+			headers: { 'Content-Type': 'application/json' },
+		});
+	}
 };

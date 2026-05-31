@@ -1,3 +1,4 @@
+import { GOOGLE_API_KEY } from '$env/static/private';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, request }) => {
@@ -21,7 +22,17 @@ export const GET: RequestHandler = async ({ url, request }) => {
 			upstreamHeaders['Range'] = rangeHeader;
 		}
 
-		const upstream = await fetch(videoUrl, { headers: upstreamHeaders });
+		// Gemini Files API URLs need the API key added server-side and use the
+		// /download/ path for media streaming. We handle that transparently here
+		// so the API key is never exposed to the browser.
+		let fetchUrl = videoUrl;
+		if (videoUrl.includes('generativelanguage.googleapis.com')) {
+			fetchUrl = videoUrl.includes('?')
+				? `${videoUrl}&key=${GOOGLE_API_KEY}`
+				: `${videoUrl}:download?alt=media&key=${GOOGLE_API_KEY}`;
+		}
+
+		const upstream = await fetch(fetchUrl, { headers: upstreamHeaders });
 
 		if (!upstream.ok && upstream.status !== 206) {
 			console.error('❌ Failed to fetch video from upstream:', upstream.status);
