@@ -1,5 +1,6 @@
 <!-- src/routes/create/+page.svelte -->
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { authStore } from '$lib/stores/auth.store';
 	import { canGenerate } from '$lib/stores/subscription.store';
 	import PromptCoachRefine from '$lib/components/PromptCoachRefine.svelte';
@@ -61,6 +62,18 @@
 		mode === 'extend' && contentType === 'video' && generatedContent ? generatedContent : null
 	);
 	let canExtend = $derived(!!videoObject && !isExtending && !isGenerating && extensionCount < 20);
+
+	// ── Load from content library ─────────────────────────────────────────────
+	onMount(() => {
+		const params = new URLSearchParams(window.location.search);
+		const editUrl = params.get('edit');
+		const editType = params.get('type') as 'image' | 'video' | null;
+		if (editUrl && editType) {
+			mode = editType;
+			editSourceUrl = editUrl;
+			editSourceFileName = editUrl.split('/').pop()?.split('?')[0] || 'content';
+		}
+	});
 
 	// ── Mode switch ───────────────────────────────────────────────────────────
 	function switchMode(newMode: 'image' | 'video' | 'extend') {
@@ -414,12 +427,25 @@
 		const fileName = `content-factory-${Date.now()}.${ext}`;
 		const a = document.createElement('a');
 
-		if (activeUrl.startsWith('data:')) {
+		if (activeUrl.startsWith('data:') || activeUrl.startsWith('blob:')) {
+			// Already in memory — client-side fetch is fine
 			const blob = await (await fetch(activeUrl)).blob();
 			a.href = URL.createObjectURL(blob);
 			a.download = fileName;
 			a.click();
 			URL.revokeObjectURL(a.href);
+		} else if (activeUrl.startsWith('/api/proxyVideo') || activeUrl.includes('googleapis.com')) {
+			// Veo-generated proxy URLs and GCS/Gemini signed URLs both go through proxyVideo.
+			// GCS signed URLs block browser-side fetch (CORS), so server proxy is required.
+			const proxyBase = activeUrl.startsWith('/api/proxyVideo')
+				? activeUrl
+				: `/api/proxyVideo?url=${encodeURIComponent(activeUrl)}`;
+			const sep = proxyBase.includes('?') ? '&' : '?';
+			a.href = `${proxyBase}${sep}download=${encodeURIComponent(fileName)}`;
+			a.download = fileName;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
 		} else {
 			a.href = `/api/content/download?url=${encodeURIComponent(activeUrl)}&name=${encodeURIComponent(fileName)}`;
 			a.download = fileName;
@@ -526,7 +552,7 @@
 					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4 text-primary">
 						<path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/>
 					</svg>
-					<span class="font-semibold text-sm">Creation factory</span>
+					<span class="font-semibold text-sm">Creation Lab</span>
 				</div>
 
 				<!-- Mode toggle -->

@@ -4,6 +4,7 @@ import type { RequestHandler } from './$types';
 export const GET: RequestHandler = async ({ url, request }) => {
 	try {
 		const videoUrl = url.searchParams.get('url');
+		const downloadName = url.searchParams.get('download'); // present = force download with this filename
 
 		if (!videoUrl) {
 			return new Response(JSON.stringify({ error: 'Video URL is required' }), {
@@ -46,10 +47,12 @@ export const GET: RequestHandler = async ({ url, request }) => {
 			'Content-Type': upstream.headers.get('Content-Type') || 'video/mp4',
 			'Access-Control-Allow-Origin': '*',
 			'Cache-Control': 'public, max-age=3600',
-			// Tell the browser that byte-range requests are supported.
-			// Required for the <video> element to enable seeking.
 			'Accept-Ranges': 'bytes'
 		};
+
+		if (downloadName) {
+			responseHeaders['Content-Disposition'] = `attachment; filename="${downloadName}"`;
+		}
 
 		// Forward range-related headers from the upstream GCS response.
 		const contentLength = upstream.headers.get('Content-Length');

@@ -355,8 +355,8 @@ let musicMaxTime = $derived(videoDuration);
 				{ label: 'Rotation Z', type: 'range', min: -3.14, max: 3.14, step: 0.01 },
 				{ label: 'Auto Rotate Logo', type: 'toggle' },
 				{ label: 'Auto Rotate Speed', type: 'range', min: 0.001, max: 0.1, step: 0.001 },
-				{ label: 'Start Time', type: 'range', min: 0, max: 8, step: 0.1 },
-				{ label: 'End Time', type: 'range', min: 0, max: 8, step: 0.1 },
+				{ label: 'Start Time', type: 'range', min: 0, max: videoDuration, step: 0.1 },
+				{ label: 'End Time', type: 'range', min: 0, max: videoDuration, step: 0.1 },
 				{ label: 'Fade In Duration', type: 'range', min: 0, max: 2, step: 0.1 },
 				{ label: 'Fade Out Duration', type: 'range', min: 0, max: 2, step: 0.1 },
 				{

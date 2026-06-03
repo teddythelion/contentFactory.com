@@ -69,18 +69,20 @@
 		return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 	}
 
-	async function downloadItem(item: ContentItem) {
-		const fileName = item.title.endsWith('.mp4') || item.title.endsWith('.jpg') 
-			? item.title 
+	function downloadItem(item: ContentItem) {
+		const fileName = item.title.endsWith('.mp4') || item.title.endsWith('.jpg')
+			? item.title
 			: `${item.title}.${item.format}`;
-		
+
+		// GCS signed URLs block browser-side fetch (CORS), route through server proxy instead
+		const proxyUrl = `/api/proxyVideo?url=${encodeURIComponent(item.publicUrl)}&download=${encodeURIComponent(fileName)}`;
 		const link = document.createElement('a');
-		link.href = `/api/content/download?url=${encodeURIComponent(item.publicUrl)}&name=${encodeURIComponent(fileName)}`;
+		link.href = proxyUrl;
 		link.download = fileName;
 		document.body.appendChild(link);
 		link.click();
 		document.body.removeChild(link);
-}
+	}
 
 	async function deleteItem(contentId: string) {
 		if (!confirm('Delete this item?')) return;
@@ -102,12 +104,9 @@
 		}
 	}
 
-	async function loadIntoEditor(item: ContentItem) {
-		if (item.type === 'image') {
-			console.log('Loading image into editor:', item);
-		} else {
-			console.log('Loading video into enhancer:', item);
-		}
+	function loadIntoEditor(item: ContentItem) {
+		const params = new URLSearchParams({ edit: item.publicUrl, type: item.type });
+		window.location.href = `/create?${params.toString()}`;
 	}
 
 	$: filteredItems = items.filter((item) => item.type === activeTab);

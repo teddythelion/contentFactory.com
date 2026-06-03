@@ -22,6 +22,7 @@
 	let loadedBevelThickness = -1;
 	let loadedBevelSize = -1;
 	let fontLoader = new FontLoader();
+	let fontLoadToken = 0; // incremented each rebuild; stale callbacks check against this
 
 	$: textState = $text3DState;
 
@@ -157,8 +158,18 @@
 			loadedBevelThickness = textState.bevelThickness;
 			loadedBevelSize = textState.bevelSize;
 
-			fontLoader.load(fontUrl, (font) => {
-				if (!scene) return;
+			const token = ++fontLoadToken;
+		fontLoader.load(fontUrl, (font) => {
+				// Abort if a newer rebuild started while this was loading
+				if (token !== fontLoadToken || !scene) return;
+
+				// Remove any orphaned mesh from a previous in-flight load
+				if (trueTextMesh) {
+					scene.remove(trueTextMesh);
+					if (trueTextMesh.geometry) trueTextMesh.geometry.dispose();
+					trueTextMesh = null;
+				}
+
 				const geo = new TextGeometry(currentText, {
 					font,
 					size: textState.fontSize / 50,
