@@ -7,13 +7,18 @@ import type { Timestamp } from 'firebase/firestore';
 export type PlanTier = 'free' | 'starter' | 'pro';
 
 export interface TierLimits {
-	maxImages: number;       // -1 = unlimited
-	maxVideos: number;       // -1 = unlimited
+	maxImages: number;           // -1 = unlimited
+	maxVideos: number;           // -1 = unlimited
 	period: 'daily' | 'monthly';
 	enhancerAccess: boolean;
 	libraryAccess: boolean;
-	storageLimit: number;    // bytes
+	storageLimit: number;        // bytes
+	canExtend: boolean;          // video extension (pro only)
+	canUsePremiumQuality: boolean; // veo-3.1-generate-preview (pro only)
+	videoModel: string;          // default model for this tier
 }
+
+const FREE_VIDEO_MODEL = 'veo-3.1-lite-generate-preview';
 
 export const TIER_CONFIG: Record<PlanTier, TierLimits> = {
 	free: {
@@ -22,7 +27,10 @@ export const TIER_CONFIG: Record<PlanTier, TierLimits> = {
 		period: 'daily',
 		enhancerAccess: true,
 		libraryAccess: true,
-		storageLimit: 5368709120 // 5GB
+		storageLimit: 5368709120,
+		canExtend: false,
+		canUsePremiumQuality: false,
+		videoModel: FREE_VIDEO_MODEL
 	},
 	starter: {
 		maxImages: 20,
@@ -30,7 +38,10 @@ export const TIER_CONFIG: Record<PlanTier, TierLimits> = {
 		period: 'monthly',
 		enhancerAccess: true,
 		libraryAccess: true,
-		storageLimit: 5368709120 // 5GB
+		storageLimit: 5368709120,
+		canExtend: false,
+		canUsePremiumQuality: false,
+		videoModel: 'veo-3.1-fast-generate-preview'
 	},
 	pro: {
 		maxImages: 100,
@@ -38,7 +49,10 @@ export const TIER_CONFIG: Record<PlanTier, TierLimits> = {
 		period: 'monthly',
 		enhancerAccess: true,
 		libraryAccess: true,
-		storageLimit: 5368709120 // 5GB
+		storageLimit: 5368709120,
+		canExtend: true,
+		canUsePremiumQuality: true,
+		videoModel: 'veo-3.1-fast-generate-preview' // premium toggle upgrades to veo-3.1-generate-preview
 	}
 };
 
@@ -58,9 +72,11 @@ export interface UsageCheckResult {
 	imagesUsed: number;
 	videosUsed: number;
 	imagesRemaining: number;         // -1 = unlimited
-	videosRemaining: number;         // -1 = usage.service.ts
+	videosRemaining: number;         // -1 = unlimited
 	resetAt: string;                 // human-readable reset time
 	period: 'daily' | 'monthly';
+	canExtend: boolean;
+	canUsePremiumQuality: boolean;
 }
 
 // ==================== STRIPE ====================

@@ -35,7 +35,7 @@ function getUsageDocId(userId: string, dateKey: string): string {
 
 // ==================== CORE FUNCTIONS ====================
 
-async function getUserPlan(userId: string): Promise<PlanTier> {
+export async function getUserPlan(userId: string): Promise<PlanTier> {
 	const userDoc = await adminDb.collection('users').doc(userId).get();
 	if (!userDoc.exists) {
 		return 'free';
@@ -97,7 +97,9 @@ export async function checkUsage(userId: string, type: GenerationType): Promise<
 		imagesRemaining,
 		videosRemaining,
 		resetAt: getResetTime(plan),
-		period: limits.period
+		period: limits.period,
+		canExtend: limits.canExtend,
+		canUsePremiumQuality: limits.canUsePremiumQuality
 	};
 }
 

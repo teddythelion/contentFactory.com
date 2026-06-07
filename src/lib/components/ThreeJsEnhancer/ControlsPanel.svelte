@@ -175,7 +175,9 @@ let musicMaxTime = $derived(videoDuration);
 					]
 				},
 				{ label: 'Camera Distance', type: 'range', min: 2, max: 15, step: 0.1 },
-				{ label: 'Scale', type: 'range', min: 0.5, max: 3, step: 0.1 }
+				{ label: 'Scale', type: 'range', min: 0.5, max: 3, step: 0.1 },
+				{ label: 'Pan X', type: 'range', min: -4, max: 4, step: 0.05 },
+				{ label: 'Pan Y', type: 'range', min: -4, max: 4, step: 0.05 }
 			]
 		},
 		{
@@ -440,6 +442,8 @@ let musicMaxTime = $derived(videoDuration);
 			case 'Shape': return $threeJsState.selectedShape;
 			case 'Camera Distance': return $threeJsState.cameraDistance;
 			case 'Scale': return $threeJsState.scale;
+			case 'Pan X': return $threeJsState.videoPanX;
+			case 'Pan Y': return $threeJsState.videoPanY;
 			case 'X Rotation': return $threeJsState.rotationX;
 			case 'Y Rotation': return $threeJsState.rotationY;
 			case 'Z Rotation': return $threeJsState.rotationZ;
@@ -536,6 +540,8 @@ let musicMaxTime = $derived(videoDuration);
 			case 'Shape': threeJsState.setShape(value); break;
 			case 'Camera Distance': threeJsState.updateProperty('cameraDistance', value); break;
 			case 'Scale': threeJsState.updateProperty('scale', value); break;
+			case 'Pan X': threeJsState.updateProperty('videoPanX', value); break;
+			case 'Pan Y': threeJsState.updateProperty('videoPanY', value); break;
 			case 'X Rotation': threeJsState.updateProperty('rotationX', value); break;
 			case 'Y Rotation': threeJsState.updateProperty('rotationY', value); break;
 			case 'Z Rotation': threeJsState.updateProperty('rotationZ', value); break;

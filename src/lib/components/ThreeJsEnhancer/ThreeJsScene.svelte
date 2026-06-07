@@ -45,6 +45,8 @@
 	$: directionalIntensity = $threeJsState.directionalIntensity;
 	$: videoGlow = $threeJsState.videoGlow;
 	$: shapeGlow = $threeJsState.shapeGlow;
+	$: videoPanX = $threeJsState.videoPanX;
+	$: videoPanY = $threeJsState.videoPanY;
 	$: particlesEnabled = $threeJsState.particlesEnabled;
 	$: particleCount = $threeJsState.particleCount;
 	$: particleSize = $threeJsState.particleSize;
@@ -231,6 +233,8 @@
 				mesh.rotation.y = rotationY;
 				mesh.rotation.z = rotationZ;
 				if (autoRotate) mesh.rotation.y += autoRotateSpeed;
+				mesh.position.x = videoPanX;
+				mesh.position.y = videoPanY;
 				if (mesh.material instanceof THREE.MeshStandardMaterial) {
 					mesh.material.emissiveIntensity = videoGlow + shapeGlow;
 				}
@@ -693,6 +697,8 @@
 			mesh.rotation.y = rotationY;
 			mesh.rotation.z = rotationZ;
 			if (autoRotate) mesh.rotation.y += autoRotateSpeed;
+			mesh.position.x = videoPanX;
+			mesh.position.y = videoPanY;
 			if (mesh.material instanceof THREE.MeshStandardMaterial) {
 				mesh.material.emissiveIntensity = videoGlow + shapeGlow;
 			}

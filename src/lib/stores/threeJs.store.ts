@@ -46,6 +46,10 @@ interface ThreeJsState {
 	particleColorMode: 'solid' | 'gradient' | 'rainbow' | 'video-reactive';
 	particleGradientColor: string;
 
+	// Video pan offset (moves the video plane without changing scale or camera)
+	videoPanX: number;
+	videoPanY: number;
+
 	// Capture state
 	isCapturing: boolean;
 	isSceneReady: boolean;
@@ -84,6 +88,9 @@ const initialState: ThreeJsState = {
 	particleColorMode: 'solid',
 	particleGradientColor: '#00ffff',
 
+	videoPanX: 0,
+	videoPanY: 0,
+
 	isCapturing: false,
 	isSceneReady: false
 };
@@ -113,7 +120,9 @@ function createThreeJsStore() {
 				ambientIntensity: initialState.ambientIntensity,
 				directionalIntensity: initialState.directionalIntensity,
 				videoGlow: initialState.videoGlow,
-				shapeGlow: initialState.shapeGlow
+				shapeGlow: initialState.shapeGlow,
+				videoPanX: initialState.videoPanX,
+				videoPanY: initialState.videoPanY
 			}));
 		},
 		resetParticles: () => {

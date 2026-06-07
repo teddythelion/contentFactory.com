@@ -2,7 +2,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { authStore } from '$lib/stores/auth.store';
-	import { canGenerate } from '$lib/stores/subscription.store';
+	import { canGenerate, subscriptionStore } from '$lib/stores/subscription.store';
 	import PromptCoachRefine from '$lib/components/PromptCoachRefine.svelte';
 	import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
 	import AuthModal from '$lib/components/AuthModal.svelte';
@@ -30,6 +30,7 @@
 	// Video-only
 	let duration = $state<4 | 6 | 8>(8);
 	let aspectRatio = $state<'16:9' | '9:16' | '4:3'>('16:9');
+	let videoQuality = $state<'fast' | 'premium'>('fast');
 	let videoOperation = $state<string | null>(null);
 	let audioSessionId = $state<string | null>(null);
 	let showAdvanced = $state(false);
@@ -57,14 +58,17 @@
 	let canAddRef = $derived(referenceFiles.length < 3);
 	let activeUrl = $derived(generatedContent ?? editSourceUrl);
 	let activeContentType = $derived(contentType ?? (editSourceUrl ? mode : null));
-	// Video available to extend — must be a Veo-generated video from this session
 	let extendSourceUrl = $derived(
 		mode === 'extend' && contentType === 'video' && generatedContent ? generatedContent : null
 	);
 	let canExtend = $derived(!!videoObject && !isExtending && !isGenerating && extensionCount < 20);
 
-	// ── Load from content library ─────────────────────────────────────────────
-	onMount(() => {
+	// Tier-gated features — populated after plan fetch in onMount
+	let planCanExtend = $derived($subscriptionStore.canExtend);
+	let planCanUsePremiumQuality = $derived($subscriptionStore.canUsePremiumQuality);
+
+	// ── Load from content library + pre-fetch plan ────────────────────────────
+	onMount(async () => {
 		const params = new URLSearchParams(window.location.search);
 		const editUrl = params.get('edit');
 		const editType = params.get('type') as 'image' | 'video' | null;
@@ -73,6 +77,8 @@
 			editSourceUrl = editUrl;
 			editSourceFileName = editUrl.split('/').pop()?.split('?')[0] || 'content';
 		}
+		// Pre-fetch plan so tier-gated UI reflects the user's actual plan immediately
+		if ($authStore.user) await canGenerate('video');
 	});
 
 	// ── Mode switch ───────────────────────────────────────────────────────────
@@ -245,12 +251,13 @@
 			fd.append('prompt', prompt);
 			fd.append('duration', duration.toString());
 			fd.append('aspectRatios', aspectRatio);
+			fd.append('quality', videoQuality);
 			response = await fetch('/api/veo2-simple/generateFromImage', { method: 'POST', body: fd });
 		} else {
 			response = await fetch('/api/veo2-simple/generateFromImage', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ prompt, duration, aspectRatios: aspectRatio })
+				body: JSON.stringify({ prompt, duration, aspectRatios: aspectRatio, quality: videoQuality })
 			});
 		}
 		const data = await response.json();
@@ -295,6 +302,10 @@
 	// ── Extend: run extension ─────────────────────────────────────────────────
 	async function startExtend() {
 		if (!requireAuth() || !videoObject || isExtending || extensionCount >= 20) return;
+		if (!planCanExtend) {
+			showToastMsg('Extend is a Pro feature — upgrade to unlock video extension.');
+			return;
+		}
 
 		isExtending = true;
 		error = '';
@@ -552,7 +563,7 @@
 					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4 text-primary">
 						<path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/>
 					</svg>
-					<span class="font-semibold text-sm">Creation Lab</span>
+					<span class="font-semibold text-sm">Create</span>
 				</div>
 
 				<!-- Mode toggle -->
@@ -579,13 +590,13 @@
 					</button>
 					<button
 						class="join-item btn btn-sm gap-1.5 {mode === 'extend' ? 'btn-warning' : 'btn-ghost opacity-60'}"
-						onclick={() => switchMode('extend')}
+						onclick={() => planCanExtend ? switchMode('extend') : showToastMsg('Extend is a Pro feature — upgrade to unlock video extension.')}
 						disabled={isGenerating || isExtending}
 					>
 						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 							<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
 						</svg>
-						Extend
+						Extend {#if !planCanExtend}<span class="text-[9px] opacity-50">PRO</span>{/if}
 					</button>
 				</div>
 
@@ -719,11 +730,16 @@
 								Edit content
 							</button>
 							{#if videoObject}
-								<button onclick={() => switchMode('extend')} class="btn btn-sm btn-warning gap-1.5 shadow-lg">
+								<button
+									onclick={() => planCanExtend
+										? switchMode('extend')
+										: showToastMsg('Extend is a Pro feature — upgrade to unlock video extension.')}
+									class="btn btn-sm gap-1.5 shadow-lg {planCanExtend ? 'btn-warning' : 'btn-ghost opacity-60'}"
+								>
 									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 										<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
 									</svg>
-									Extend
+									Extend {#if !planCanExtend}<span class="text-[9px]">PRO</span>{/if}
 								</button>
 							{/if}
 						</div>
@@ -946,30 +962,57 @@
 									Advanced options
 								</button>
 								{#if showAdvanced}
-									<div class="mt-3 grid grid-cols-2 gap-4">
-										<div>
-											<p class="text-xs text-base-content/40 mb-1">Duration</p>
-											<select
-												bind:value={duration}
-												class="select select-bordered select-sm w-full text-sm"
-												disabled={isGenerating}
-											>
-												<option value={4}>4 seconds</option>
-												<option value={6}>6 seconds</option>
-												<option value={8}>8 seconds</option>
-											</select>
+									<div class="mt-3 space-y-4">
+										<div class="grid grid-cols-2 gap-4">
+											<div>
+												<p class="text-xs text-base-content/40 mb-1">Duration</p>
+												<select
+													bind:value={duration}
+													class="select select-bordered select-sm w-full text-sm"
+													disabled={isGenerating}
+												>
+													<option value={4}>4 seconds</option>
+													<option value={6}>6 seconds</option>
+													<option value={8}>8 seconds</option>
+												</select>
+											</div>
+											<div>
+												<p class="text-xs text-base-content/40 mb-1">Aspect ratio</p>
+												<select
+													bind:value={aspectRatio}
+													class="select select-bordered select-sm w-full text-sm"
+													disabled={isGenerating}
+												>
+													<option value="16:9">16:9 — landscape</option>
+													<option value="9:16">9:16 — portrait</option>
+													<option value="4:3">4:3</option>
+												</select>
+											</div>
 										</div>
 										<div>
-											<p class="text-xs text-base-content/40 mb-1">Aspect ratio</p>
-											<select
-												bind:value={aspectRatio}
-												class="select select-bordered select-sm w-full text-sm"
-												disabled={isGenerating}
-											>
-												<option value="16:9">16:9 — landscape</option>
-												<option value="9:16">9:16 — portrait</option>
-												<option value="4:3">4:3</option>
-											</select>
+											<p class="text-xs text-base-content/40 mb-1">Quality</p>
+											<div class="join w-full">
+												<button
+													onclick={() => (videoQuality = 'fast')}
+													class="join-item btn btn-sm flex-1 {videoQuality === 'fast' ? 'btn-primary' : 'btn-ghost border border-base-300'}"
+													disabled={isGenerating}
+												>
+													⚡ Fast
+												</button>
+												<button
+													onclick={() => planCanUsePremiumQuality
+														? (videoQuality = 'premium')
+														: showToastMsg('Premium quality requires a Pro plan.')}
+													class="join-item btn btn-sm flex-1 {videoQuality === 'premium' && planCanUsePremiumQuality ? 'btn-warning' : 'btn-ghost border border-base-300'} {!planCanUsePremiumQuality ? 'opacity-50' : ''}"
+													disabled={isGenerating}
+													title={planCanUsePremiumQuality ? '' : 'Pro plan required'}
+												>
+													✦ Premium {#if !planCanUsePremiumQuality}<span class="text-[9px]">PRO</span>{/if}
+												</button>
+											</div>
+											{#if videoQuality === 'premium' && planCanUsePremiumQuality}
+												<p class="text-xs text-warning/70 mt-1">Highest detail & resolution — slower generation</p>
+											{/if}
 										</div>
 									</div>
 								{/if}

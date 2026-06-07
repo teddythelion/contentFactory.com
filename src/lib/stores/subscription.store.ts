@@ -11,6 +11,8 @@ interface SubscriptionState {
 	videosRemaining: number;
 	resetAt: string;
 	period: 'daily' | 'monthly';
+	canExtend: boolean;
+	canUsePremiumQuality: boolean;
 	loading: boolean;
 	lastChecked: number | null;
 }
@@ -23,6 +25,8 @@ const initialState: SubscriptionState = {
 	videosRemaining: 2,
 	resetAt: 'midnight Pacific time',
 	period: 'daily',
+	canExtend: false,
+	canUsePremiumQuality: false,
 	loading: false,
 	lastChecked: null
 };
@@ -59,6 +63,8 @@ export async function canGenerate(type: 'image' | 'video'): Promise<UsageCheckRe
 			videosRemaining: result.videosRemaining,
 			resetAt: result.resetAt,
 			period: result.period,
+			canExtend: result.canExtend,
+			canUsePremiumQuality: result.canUsePremiumQuality,
 			loading: false,
 			lastChecked: Date.now()
 		}));
@@ -67,8 +73,7 @@ export async function canGenerate(type: 'image' | 'video'): Promise<UsageCheckRe
 	} catch (error) {
 		console.error('Usage check failed:', error);
 		subscriptionStore.update(s => ({ ...s, loading: false }));
-		// Fail open — allow generation if check fails
-		// Server will still enforce limits
+		// Fail open — allow generation if check fails; server still enforces
 		return {
 			allowed: true,
 			plan: 'free',
@@ -77,7 +82,9 @@ export async function canGenerate(type: 'image' | 'video'): Promise<UsageCheckRe
 			imagesRemaining: 2,
 			videosRemaining: 2,
 			resetAt: 'midnight Pacific time',
-			period: 'daily'
+			period: 'daily',
+			canExtend: false,
+			canUsePremiumQuality: false
 		};
 	}
 }

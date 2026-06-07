@@ -17,9 +17,9 @@
 				return;
 			}
 
-			// Validate file size (max 5MB)
-			if (file.size > 5 * 1024 * 1024) {
-				alert('Logo file is too large. Please use an image under 5MB.');
+			// Validate file size (max 50MB)
+			if (file.size > 50 * 1024 * 1024) {
+				alert('Logo file is too large. Please use an image under 50MB.');
 				return;
 			}
 
@@ -50,7 +50,7 @@
 				class="hidden"
 			/>
 		</label>
-		<p class="text-xs text-gray-400">PNG, JPG, or GIF • Max 5MB</p>
+		<p class="text-xs text-gray-400">PNG, JPG, or GIF • Max 50MB</p>
 	{:else}
 		<!-- Logo Preview & Controls -->
 		<div class="flex flex-col gap-2">

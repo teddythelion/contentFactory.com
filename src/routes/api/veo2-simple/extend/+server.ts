@@ -1,7 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { GOOGLE_API_KEY } from '$env/static/private';
 import type { RequestHandler } from './$types';
-import { checkUsage, incrementUsage } from '$lib/services/usage.service';
+import { checkUsage, incrementUsage, getUserPlan } from '$lib/services/usage.service';
+import { TIER_CONFIG } from '$lib/types/subscription';
 
 const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
 
@@ -9,6 +10,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const userId = locals.user?.uid;
 	if (!userId) {
 		return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+	}
+
+	const plan = await getUserPlan(userId);
+	if (!TIER_CONFIG[plan].canExtend) {
+		return new Response(JSON.stringify({ error: 'upgrade_required', feature: 'extend', plan }), { status: 403 });
 	}
 
 	const usageCheck = await checkUsage(userId, 'video');

@@ -1,7 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { GOOGLE_API_KEY } from '$env/static/private';
 import type { RequestHandler } from './$types';
-import { checkUsage, incrementUsage } from '$lib/services/usage.service';
+import { checkUsage, incrementUsage, getUserPlan } from '$lib/services/usage.service';
+import { TIER_CONFIG } from '$lib/types/subscription';
 
 const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
 
@@ -32,12 +33,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	type ImageRef = { imageBytes: string; mimeType: string };
 	const refImages: ImageRef[] = [];
 
+	let quality = 'fast';
+
 	try {
 		if (contentType.includes('multipart/form-data')) {
 			const formData = await request.formData();
 			prompt = formData.get('prompt') as string;
 			duration = parseInt(formData.get('duration') as string) || 8;
 			aspectRatio = (formData.get('aspectRatios') as string) || '16:9';
+			quality = (formData.get('quality') as string) || 'fast';
 
 			const images = (formData.getAll('images') as File[]).slice(0, 3); // max 3
 			for (const img of images) {
@@ -49,6 +53,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			prompt = body.prompt;
 			duration = body.duration || 8;
 			aspectRatio = body.aspectRatios || '16:9';
+			quality = body.quality || 'fast';
 		}
 
 		if (!prompt?.trim()) {
@@ -58,9 +63,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const validDurations = [4, 6, 8];
 		const clampedDuration = validDurations.includes(duration) ? duration : 8;
 
+		const plan = await getUserPlan(userId);
+		const tierLimits = TIER_CONFIG[plan];
+		// Server enforces model — client quality preference only applies if the plan allows it
+		const model = (quality === 'premium' && tierLimits.canUsePremiumQuality)
+			? 'veo-3.1-generate-preview'
+			: tierLimits.videoModel;
+
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const generateParams: any = {
-			model: 'veo-3.1-generate-preview',
+			model,
 			prompt,
 			config: {
 				numberOfVideos: 1,
@@ -87,7 +99,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		const modeMap = ['text-to-video', 'first-frame animation', 'interpolation (start→end)', 'interpolation (start→mid→end)'];
 		const mode = modeMap[refImages.length] ?? modeMap[0];
-		console.log(`🎬 veo-3.1-generate-preview | ${mode} | "${prompt.substring(0, 60)}..." | ${clampedDuration}s | ${aspectRatio} | ${refImages.length} image(s)`);
+		console.log(`🎬 ${model} | ${mode} | "${prompt.substring(0, 60)}..." | ${clampedDuration}s | ${aspectRatio} | ${refImages.length} image(s)`);
 
 		const operation = await ai.models.generateVideos(generateParams);
 
