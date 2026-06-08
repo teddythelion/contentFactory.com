@@ -170,7 +170,7 @@
 {/if}
 
 <!-- Main Card -->
-<div class="mx-auto flex w-full max-w-2xl flex-col rounded-xl border border-base-300 bg-base-200 shadow-xl" style="height: calc(100vh - 120px);">
+<div class="mx-auto flex w-full max-w-4xl flex-col rounded-xl border border-base-300 bg-base-200 shadow-xl" style="height: calc(100vh - 120px);">
 
 	<!-- Header -->
 	<div class="flex shrink-0 items-center gap-3 border-b border-base-300 px-4 py-3">
