@@ -7,10 +7,12 @@ export interface WorkflowContext {
 	contentType: 'avatar' | 'logo' | 'content' | 'social-post' | 'banner' | 'flyer' | 'product' | 'other' | null;
 	
 	// User preferences extracted from conversation
-	userIntent: string; // "professional", "artistic", "fun", "commercial", etc.
-	style: string; // "photorealistic", "impressionist", "minimalist", etc.
-	purpose: string; // What they're using it for
-	targetAudience: string; // Who it's for
+	userIntent: string;
+	style: string;
+	purpose: string;
+	targetAudience: string;
+	niche: string;        // e.g. "women's hair salon", "dog walking", "protein shop"
+	geography: string;   // e.g. "Westminster CA", "Atlanta GA", "Miami"
 	
 	// Workflow progress tracking
 	workflowPath: Array<{
@@ -43,6 +45,8 @@ const initialState: WorkflowContext = {
 	style: '',
 	purpose: '',
 	targetAudience: '',
+	niche: '',
+	geography: '',
 	workflowPath: [
 		{ tool: 'create', status: 'pending' },
 		{ tool: 'refine', status: 'pending' },

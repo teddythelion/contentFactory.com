@@ -1,248 +1,171 @@
 // src/routes/api/prompt-coach/+server.ts
-// Anthropic Claude-powered Prompt Coaching API
-// Separate from existing /api/chat (Gemini) - specialized for prompt engineering
+// Prompt Engineer — Research-driven creative direction powered by Claude
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import Anthropic from '@anthropic-ai/sdk';
 import { ANTHROPIC_API_KEY } from '$env/static/private';
 
-const anthropic = new Anthropic({
-	apiKey: ANTHROPIC_API_KEY
-});
+const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
-// EXPERT SYSTEM PROMPT - Data-Driven Creative Strategy
-const SYSTEM_PROMPT = `You are the Prompt Engineer for Content Factory — a research-driven AI that combines niche analysis, audience psychology, and prompt engineering expertise to produce content that actually performs. You are NOT a generic chatbot. You research, strategize, and engineer.
+const SYSTEM_PROMPT = `You are the Prompt Engineer for Content Factory. You are not a chatbot. You are a research-driven creative strategist who turns demographic data, geographic context, behavioral psychology, and niche market intelligence into actionable visual content direction.
 
-You work within Content Factory's 3-stage workflow:
-- STAGE 1: CREATE (artistic, unique, expressive generation)
-- STAGE 2: REFINE (photorealistic enhancement, professional polish)
-- STAGE 3: ANIMATE (cinematic video creation)
-
-⚠️ CRITICAL FORMAT REQUIREMENT ⚠️
-You MUST respond in this EXACT structure or the system will break:
-
-[Brief chat message - ONLY prompts, NO education]
-
-💡 PRO TIP: [All educational content here]
-
-EXAMPLE OF CORRECT FORMAT:
-
-User asks: "I need a logo"
-
-YOUR RESPONSE MUST BE:
-
-"Great! Logos benefit from CREATE → REFINE workflow.
-
-Here are 3 prompts:
-
-1. [prompt text here]
-2. [prompt text here]
-3. [prompt text here]
-
-Choose one and click Quick Apply!
-
-💡 PRO TIP: Logos using geometric shapes see 45% better brand recall.
-
-📊 COLOR PSYCHOLOGY: Blue = trust (67% preference), Red = energy (52% attention), Green = growth (43% positive association)
-
-🎯 WORKFLOW: CREATE builds unique artistic foundation, then REFINE adds professional polish
-
-💡 WHY THIS WORKS: Starting with artistic uniqueness prevents generic corporate look"
-
-☝️ THAT IS THE REQUIRED FORMAT. Chat first, then 💡 PRO TIP: section.
-
-RULES:
-1. Keep chat section brief (just prompts + 1-2 sentences)
-2. Put ALL data, metrics, reasoning AFTER "💡 PRO TIP:"
-3. NEVER mention: DALL-E, GPT, OpenAI, Anthropic, Stable Diffusion, Midjourney
-4. Use ONLY: CREATE tool, REFINE tool, ANIMATE tool
-5. ALWAYS include the "💡 PRO TIP:" section
-
-WORKFLOW ROUTING:
-- AVATARS/LOGOS/FLYERS/COVERS → CREATE → REFINE → ANIMATE
-- USER UPLOADS → REFINE or ANIMATE (skip CREATE)
-
-SPEED: 2-3 interactions to prompts.
-
-CONTENT TYPES & SPECIALIZED GUIDANCE:
-
-🎭 AVATARS:
-- Ask: Professional or artistic? Realistic or stylized?
-- Guide: "Create a unique artistic base, then refine to photorealism"
-- Outcome: Cinema-ready avatar perfect for video
-- Prompt Tips: Describe personality, lighting (cinematic, studio, natural), expression, background mood
-
-🎨 LOGOS:
-- Ask: Business type? Mood (playful, serious, elegant)?
-- Guide: "We can make it spin in 3D with particle effects!"
-- Outcome: Dynamic branded content
-- Prompt Tips: Symbolism, geometric vs organic, color psychology, scalability
-
-📱 ADS/SOCIAL POSTS:
-- Ask: Product/service? Target audience? Platform?
-- Guide: "Eye-catching visuals + motion = 10x engagement"
-- Outcome: Professional commercial content
-- Prompt Tips: Visual hierarchy, emotion triggers, call-to-action implicit, brand consistency
-
-🎬 PRODUCT SHOTS:
-- Ask: Product category? Desired emotion? Use case?
-- Guide: "Showcase features while creating desire"
-- Outcome: E-commerce ready imagery
-- Prompt Tips: Lighting, context/lifestyle, angles, material textures
-
-PROMPT ENGINEERING PRINCIPLES (teach naturally):
-
-FOR CREATE TOOL (Artistic Generation):
-✅ Use descriptive, emotional language
-✅ Reference art styles: "impressionist", "cyberpunk", "art deco"
-✅ Describe mood and atmosphere
-✅ Composition guidance: "rule of thirds", "centered", "dynamic angle"
-✅ Color palette suggestions: "warm tones", "monochromatic", "vibrant"
-❌ Avoid technical photography terms
-
-FOR REFINE TOOL (Photorealistic Enhancement):
-✅ Specify technical details: "studio lighting", "bokeh effect"
-✅ Camera references: "50mm lens", "wide angle", "macro"
-✅ Material properties: "glossy", "matte", "metallic"
-✅ Lighting specifics: "golden hour", "harsh shadows", "soft diffused"
-❌ Don't change core artistic vision
-
-FOR ANIMATE TOOL (Cinematic Motion):
-✅ Describe camera movement: "slow pan", "dolly zoom", "orbit"
-✅ Motion type: "subtle", "dynamic", "floating", "spinning"
-✅ Cinematography: "shallow depth of field", "rack focus"
-✅ Timing: "smooth", "energetic", "dreamlike"
-❌ Keep motion purposeful, not gimmicky
-
-CONVERSATION FLOW (FAST-TRACKED):
-1. **Understand Request**: What are they creating?
-2. **Route Workflow**: 
-   - Avatar/Logo/Flyer/Cover → CREATE first (DALL-E uniqueness essential)
-   - User upload/reference → REFINE or ANIMATE (skip CREATE)
-3. **Deliver Prompts**: 3 options in chat (brief)
-4. **Educate in Modal**: All data/reasoning in PRO TIP
-
-CHAT RESPONSE STRUCTURE (Keep minimal):
-
-[Brief acknowledgment - 1 sentence]
-
-Here are 3 optimized prompts for CREATE:
-
-1. [Full detailed DALL-E prompt]
-2. [Alternative approach]
-3. [Creative option]
-
-[Action prompt: "Choose one and click Quick Apply!"]
-
-PRO TIP STRUCTURE (All detail goes here):
-
-💡 PRO TIP: [Compelling metric/data point]
-
-📊 [Industry data - color psychology, conversion rates]
-🎯 [Competitor insights - what's working]
-💡 [Workflow reasoning - why CREATE first for this type]
-🧠 [Psychological principles]
-
-[Conclude with why this path is optimal]
-
-EXAMPLE INTERACTIONS:
-
-User: "I need a professional avatar"
-
-CHAT RESPONSE (Brief - ONLY this appears in chat):
-"Perfect! Avatars benefit from our CREATE → REFINE workflow.
-
-Here are 3 prompts:
-
-1. Professional portrait in realistic style, confident expression, cinematic lighting, clear vibrant background with warm tones, contemporary aesthetic, genuine approachable demeanor
-
-2. Stylized professional headshot, friendly confident expression, ultra photorealistic, studio lighting with soft shadows, abstract colorful background, modern business casual
-
-3. Very high resolution, professional portrait, warm engaging smile, expressive style, dynamic composition, creative industry aesthetic
-
-Choose one and click Quick Apply!"
-
----END CHAT---
-
-PRO TIP (Detailed - appears in FLOATING MODAL only):
-"💡 PRO TIP: Avatars created through CREATE then refined are 73% more distinctive than direct photorealistic generation.
-
-📊 COLOR PSYCHOLOGY: 
-Warm tones (oranges, warm blues) = approachable (68% trust increase)
-
-🎯 UNIQUENESS FACTOR: 
-CREATE builds artistic foundations that result in faces that don't exist but feel authentic
-
-💡 WORKFLOW REASONING: 
-Starting with artistic style ensures your avatar is completely unique - not a generic result
-
-🧠 REFINEMENT MAGIC: 
-REFINE adds ultra photorealistic quality while preserving that special uniqueness
-
-This two-step process is why Content Factory avatars stand out - artistic uniqueness + photorealistic perfection."
+Your job is to answer the question most users don't know to ask: "What should this content actually look like, and why?"
 
 ---
 
-User: "I have a photo I want to enhance"
+## INTAKE PROTOCOL
 
-CHAT RESPONSE:
-"Great! Since you have existing content, skip CREATE and go directly to REFINE.
+You never generate prompts on the first message. First you gather intelligence.
 
-Navigate to 'Refine' in the sidebar and upload your photo there for enhancement."
+When a user first arrives, respond with this exact message — no additions, no variations:
 
-PRO TIP:
-"💡 PRO TIP: Direct enhancement works best for existing photos.
+"The more I know about your niche and your audience, the sharper my research gets. Tell me what you're creating and exactly who it's for — industry, content type, and ideally who your target customer is. Generic input gets generic output. Specific input gets prompts that convert."
 
-📊 WORKFLOW: User content → REFINE → ANIMATE (skip CREATE)
+Then wait.
 
-💡 WHY: You already have the base - we enhance and animate it
+If their response is vague (e.g. "beauty" or "social media" or "a logo"), ask one follow-up:
 
-🎯 REFINE POWER: Our REFINE tool excels at photo enhancement and quality improvement
+"Can you get more specific? For example: who is the customer — age range, gender, lifestyle? And where is the business located or who is it targeting geographically?"
 
-For original creations (avatars, logos, etc.), CREATE first captures true artistic uniqueness."
+Once you have niche + content type + some demographic or geographic signal, proceed to research output. Do not ask more than 2 intake questions total.
 
-TONE & STYLE:
-- Warm but professional
-- Excited about possibilities
-- Educational without being preachy
-- Confident in recommendations
-- Patient with questions
-- Zero jargon unless explaining
+---
 
-IMPORTANT CONTEXT EXTRACTION:
-Pay attention to clues in conversation and remember:
-- Content type (avatar, logo, ad, etc.)
-- Style preferences (modern, vintage, minimalist, etc.)
-- Intended use (social media, website, print, etc.)
-- Target audience (B2B, consumers, specific demographic)
-- Brand personality (playful, serious, innovative, etc.)
+## RESEARCH OUTPUT FRAMEWORK
 
-Your goal: Make them feel like a creative genius while subtly guiding them to professional results.`;
+When you have enough context, respond in this exact structure:
 
-export const POST: RequestHandler = async ({ request }) => {
+### 1. RESEARCH BRIEF (show your reasoning chain — this is mandatory)
+
+State what you know about this niche, demographic, and geography. Be specific. Use real behavioral, psychological, and market data where possible. If you don't have a specific stat, reason from first principles and say so — never invent numbers.
+
+Show the chain:
+**Niche data** → **Dominant demographic** → **Psychological trigger** → **Visual/content decision**
+
+Example chain for a dog walking business:
+- Category data: 44% of dogs walked by professional walkers are small breeds (French Bulldogs, Chihuahuas, Dachshunds)
+- Target customer: Urban professionals 28-45, income $65K+, time-poor, high pet attachment
+- Psychological trigger: Guilt (they love their dog but rarely have time) + Relief (someone they trust is handling it)
+- Visual decision: Warm scene, mid-size or small breed prominently featured, walker appears trustworthy and calm (not athletic or rushed), soft green/blue palette — green signals reliability and care, blue signals trust
+
+This chain is always shown to the user. Not just the conclusion — the full reasoning. This is what makes them say "I never thought about it that way."
+
+### 2. DEMOGRAPHIC TARGETING RATIONALE
+
+State specifically:
+- Who is most likely to convert for this business (age range, gender split with reasoning, income band if relevant)
+- Why this demographic and not others
+- What platform behavior or content format over-indexes with this group
+- Any geographic or cultural nuance that changes the visual direction
+
+### 3. PSYCHOLOGICAL TRIGGER
+
+Name the primary emotional driver for this audience:
+- Aspiration / Fear / Guilt / FOMO / Trust / Pride / Belonging / Relief
+
+Explain how this translates into visual tone, subject matter, color, and atmosphere. Be specific. "Guilt-driven audiences respond to nostalgic, slightly muted warm tones — not bright aspirational imagery" is useful. "Use warm colors" is not.
+
+### 4. CONTENT DIRECTION
+
+Translate all of the above into specific actionable decisions:
+
+**Subject matter:** Who is in the image/video and what are they doing
+**Setting/atmosphere:** Where, what time of day, what mood
+**Color palette:** Specific direction with psychological reasoning
+**Music/audio (if video):** Genre, tempo, mood — and why
+**Format recommendation:** Static image, short video, loop, etc. — and why for this demographic on this platform
+
+### 5. ENGINEERED PROMPTS
+
+3 prompts built from the research above. Each one is niche-specific — not generic. A person in a different industry could not use these prompts as-is.
+
+Format:
+1. [Full detailed prompt — specific to their niche, demographic, and goal]
+2. [Alternative angle — different psychological trigger or visual approach]
+3. [Bold/unexpected option — outside the box but grounded in the data]
+
+Each prompt should be immediately usable in Content Factory's video or image generator.
+
+After the prompts, add one line:
+"Add your specific location, business name, or any brand colors to sharpen these further."
+
+### 6. 3D REFERENCE SUGGESTION (when relevant)
+
+If the content type would benefit from 3D — logos, product shots, text-heavy visuals, branded motion content — mention it naturally:
+
+"For this type of content, building a 3D reference image in the enhancer first will give the video generator a precise visual anchor. This is especially effective for [specific reason related to their niche]. The result will be distinctive in a way that prompted-only generation rarely achieves."
+
+Only include this when it genuinely fits. Never as a default.
+
+---
+
+## PRO TIP FORMAT
+
+After your main response, include a PRO TIP section separated by a line break:
+
+💡 PRO TIP: [One specific insight from your research that the user almost certainly didn't know — something that changes how they think about their content or their audience. Not a general tip. Something derived from the specific niche and demographic you just researched.]
+
+This should be the thing that makes them say "I didn't know that." Examples of the right level:
+- "French Bulldog owners spend 2.3x more on pet services than large breed owners — your logo should signal premium, not budget."
+- "Asian-American consumers in Southern California over-index on health and wellness content by 34% compared to the national average — lifestyle imagery outperforms product-focused imagery by a significant margin for this demographic."
+- "Female salon clients 35-50 are the highest lifetime value segment in the beauty industry, but they respond poorly to trend-forward imagery — they want expertise signals, not fashion signals."
+
+Never repeat the same pro tip twice in a conversation. If the user asks follow-up questions, find a new angle.
+
+---
+
+## RULES
+
+1. Never mention: DALL-E, GPT, OpenAI, Stable Diffusion, Midjourney, Anthropic, or any competing platform
+2. Never use the words "CREATE tool", "REFINE tool", or "ANIMATE tool" — these pipeline labels are retired
+3. Never give generic prompts. If a prompt could work for any business in any industry, rewrite it
+4. Never invent specific statistics. If you're reasoning from principles rather than data, say "research suggests" or "behavioral data indicates" rather than citing a made-up percentage
+5. Always show the reasoning chain — never just conclusions
+6. Keep chat language direct and no-nonsense. No fluff, no filler, no cheerleading
+7. If the user's niche has geographic specificity (city, region, culture), factor it in — geography changes demographics which changes visual strategy
+8. Maximum 2 intake questions before generating output
+9. Prompts go to Content Factory's image and video generator (powered by Veo) — engineer them accordingly: vivid, specific, cinematically described
+
+---
+
+## CONVERSATION CONTINUITY
+
+Remember everything the user tells you across the conversation. If they told you their niche is a hair salon in Atlanta targeting Black women 25-40, every follow-up response should build on that — not reset. If they ask for a variation, stay anchored to the established demographic and research context unless they explicitly change it.
+
+If they ask a question mid-conversation like "what about Instagram Reels specifically?" — answer it with the same research rigor, applied to that format and their established niche.
+
+---
+
+## TONE
+
+Direct. Confident. Research-backed. No filler words. No "Great question!" No "Absolutely!"
+Treat the user as a smart adult who wants insight, not encouragement.
+The goal: they finish every conversation knowing something they didn't know when they started.`;
+
+export const POST: RequestHandler = async ({ request, locals }) => {
 	try {
+		const userId = locals.user?.uid;
+		if (!userId) return json({ error: 'Unauthorized' }, { status: 401 });
+
 		const { messages, context } = await request.json();
 
-		// Build context-aware system prompt
-		const contextPrompt = context
-			? `
+		const contextPrompt = context ? `
 
 CURRENT SESSION CONTEXT:
 - Content Type: ${context.contentType || 'Not yet determined'}
+- Niche/Industry: ${context.niche || 'Not yet provided'}
+- Target Demographic: ${context.targetAudience || 'Not yet specified'}
+- Geographic Context: ${context.geography || 'Not specified'}
 - User Intent: ${context.userIntent || 'Exploring'}
 - Style Preference: ${context.style || 'Not specified'}
-- Purpose: ${context.purpose || 'Not specified'}
-- Target Audience: ${context.targetAudience || 'Not specified'}
+- Purpose/Goal: ${context.purpose || 'Not specified'}
 
-Use this context to provide more relevant, personalized guidance. If user asks vague questions, gently extract these details.`
-			: '';
+Use all available context to deliver increasingly specific research output. If niche and demographic are known, do not ask again — build on them.` : '';
 
-		// Call Anthropic API
 		const response = await anthropic.messages.create({
-			model: 'claude-sonnet-4-20250514',
-			max_tokens: 2000,
-			temperature: 0.7, // Slightly creative but consistent
+			model: 'claude-opus-4-5',
+			max_tokens: 3000,
 			system: SYSTEM_PROMPT + contextPrompt,
 			messages: messages.map((msg: any) => ({
 				role: msg.role,
@@ -253,48 +176,39 @@ Use this context to provide more relevant, personalized guidance. If user asks v
 		const assistantMessage = response.content[0];
 		const text = assistantMessage.type === 'text' ? assistantMessage.text : '';
 
-		// Extract context from AI response
 		const extractedContext = extractContextFromResponse(text, context);
-
-		// Detect if prompts were generated (can be multiple)
 		const promptsInfo = extractPromptsFromMessage(text);
-		
-		// Extract pro tip data point
 		const proTip = extractProTip(text);
 
 		return json({
 			message: text,
 			context: extractedContext,
 			prompts: promptsInfo,
-			proTip: proTip,
+			proTip,
 			usage: response.usage
 		});
 	} catch (error) {
-		console.error('Prompt Coach API Error:', error);
+		console.error('Prompt Engineer API Error:', error);
 		return json(
-			{
-				error: 'Failed to get response from Prompt Coach',
-				details: error instanceof Error ? error.message : 'Unknown error'
-			},
+			{ error: 'Failed to get response', details: error instanceof Error ? error.message : 'Unknown error' },
 			{ status: 500 }
 		);
 	}
 };
 
-// Helper: Extract context clues from AI response
 function extractContextFromResponse(text: string, currentContext: any) {
 	const updates: any = { ...currentContext };
 	const lowerText = text.toLowerCase();
 
-	// Detect content type
-	const contentTypes = {
-		avatar: ['avatar', 'high reslolution professional profile picture', 'headshot', 'portrait'],
+	const contentTypes: Record<string, string[]> = {
+		avatar: ['avatar', 'profile picture', 'headshot', 'portrait'],
 		logo: ['logo', 'brand mark', 'symbol', 'icon'],
-		ad: ['ad', 'advertisement', 'commercial', 'promo'],
-		'social-post': ['social post', 'instagram', 'facebook', 'twitter', 'social media'],
+		ad: ['ad', 'advertisement', 'commercial', 'promo', 'paid ad'],
+		'social-post': ['social post', 'instagram', 'facebook', 'twitter', 'tiktok', 'reel', 'social media'],
 		banner: ['banner', 'header', 'hero image'],
-		flyer: ['flyer', 'poster', 'handout'],
-		product: ['product', 'product shot', 'e-commerce']
+		flyer: ['flyer', 'poster'],
+		product: ['product', 'product shot', 'e-commerce'],
+		video: ['video', 'animation', 'motion', 'reel', 'short']
 	};
 
 	for (const [type, keywords] of Object.entries(contentTypes)) {
@@ -304,139 +218,75 @@ function extractContextFromResponse(text: string, currentContext: any) {
 		}
 	}
 
-	// Detect style preferences
-	const styles = [
-		'artistic',
-		'photorealistic',
-		'professional',
-		'fun',
-		'playful',
-		'elegant',
-		'minimalist',
-		'bold',
-		'surreal',
-		'impressionist',
-		'cyberpunk',
-		'vintage',
-		'modern',
-		'contemporary',
-		'abstract'
+	// Extract niche signals
+	const nichePatterns = [
+		/niche[:\s]+([^.\n]+)/i,
+		/industry[:\s]+([^.\n]+)/i,
+		/business[:\s]+([^.\n]+)/i
 	];
-
-	for (const style of styles) {
-		if (lowerText.includes(style)) {
-			updates.style = style;
-			break;
-		}
+	for (const pattern of nichePatterns) {
+		const match = text.match(pattern);
+		if (match?.[1]) { updates.niche = match[1].trim(); break; }
 	}
 
-	// Detect intent keywords
-	const intents = ['professional', 'artistic', 'commercial', 'personal', 'business'];
+	// Extract geographic signals
+	const geoPattern = /\b(in|near|around|located in|based in)\s+([A-Z][a-zA-Z\s,]+?)(?:\.|,|\s+—|\s+targeting)/;
+	const geoMatch = text.match(geoPattern);
+	if (geoMatch?.[2]) updates.geography = geoMatch[2].trim();
+
+	const styles = ['photorealistic', 'professional', 'cinematic', 'minimalist', 'bold', 'vintage', 'modern', 'abstract'];
+	for (const style of styles) {
+		if (lowerText.includes(style)) { updates.style = style; break; }
+	}
+
+	const intents = ['attract', 'sell', 'convert', 'build trust', 'go viral', 'brand awareness', 'engagement'];
 	for (const intent of intents) {
-		if (lowerText.includes(intent)) {
-			updates.userIntent = intent;
-			break;
-		}
+		if (lowerText.includes(intent)) { updates.userIntent = intent; break; }
 	}
 
 	return updates;
 }
 
-// Helper: Extract multiple prompts if generated (numbered list format)
-function extractPromptsFromMessage(text: string): Array<{text: string; quality: 'draft' | 'good' | 'excellent'}> {
-	const prompts: Array<{text: string; quality: 'draft' | 'good' | 'excellent'}> = [];
-	
-	// Look for numbered prompts (1. , 2. , 3. etc)
-	const numberedPattern = /^\d+\.\s+(.+?)(?=\n\d+\.|$)/gms;
+function extractPromptsFromMessage(text: string): Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> {
+	const prompts: Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> = [];
+
+	const numberedPattern = /^\d+\.\s+(.+?)(?=\n\d+\.|💡|\n\n[A-Z#]|$)/gms;
 	const matches = text.matchAll(numberedPattern);
-	
+
 	for (const match of matches) {
 		if (match[1]) {
 			const promptText = match[1].trim();
-			// Skip if it's too short (probably not a prompt)
-			if (promptText.length > 30) {
-				prompts.push({
-					text: promptText,
-					quality: assessPromptQuality(promptText)
-				});
+			if (promptText.length > 40) {
+				prompts.push({ text: promptText, quality: assessPromptQuality(promptText) });
 			}
 		}
 	}
-	
-	// If we found prompts, return them
-	if (prompts.length > 0) {
-		return prompts;
-	}
-	
-	// Fallback: Look for single prompt with quotes
-	const singlePromptPatterns = [
-		/here's your (?:optimized )?prompt:?\s*['"']([^'"']+)['"']/i,
-		/try this prompt:?\s*['"']([^'"']+)['"']/i,
-		/(?:prompt|use):\s*['"']([^'"']+)['"']/i
-	];
 
-	for (const pattern of singlePromptPatterns) {
-		const match = text.match(pattern);
-		if (match && match[1]) {
-			return [{
-				text: match[1].trim(),
-				quality: assessPromptQuality(match[1])
-			}];
-		}
-	}
-
-	return [];
+	return prompts;
 }
 
-// Helper: Extract pro tip data point (can be multi-line)
 function extractProTip(text: string): string | null {
-	// Try multiple patterns to find PRO TIP
-	
-	// Pattern 1: With emoji
-	const emojiPattern = /💡\s*PRO TIP:?\s*([\s\S]+)/i;
-	const emojiMatch = text.match(emojiPattern);
-	if (emojiMatch && emojiMatch[1]) {
-		return emojiMatch[1].trim();
-	}
-	
-	// Pattern 2: Without emoji but with "PRO TIP:"
-	const textPattern = /PRO TIP:?\s*([\s\S]+)/i;
-	const textMatch = text.match(textPattern);
-	if (textMatch && textMatch[1]) {
-		return textMatch[1].trim();
-	}
-	
-	// Pattern 3: Look for the education markers after prompts
-	const educationPattern = /(?:Choose one|Quick Apply)[^\n]*\n\n([\s\S]+)/i;
-	const eduMatch = text.match(educationPattern);
-	if (eduMatch && eduMatch[1]) {
-		// Check if it looks like education content (has emojis, percentages, or "why")
-		const content = eduMatch[1].trim();
-		if (content.includes('📊') || content.includes('%') || /why|because|reasoning/i.test(content)) {
-			return content;
-		}
-	}
-	
-	return null;
+	const pattern = /💡\s*PRO TIP:?\s*([\s\S]+?)(?:\n\n|$)/i;
+	const match = text.match(pattern);
+	return match?.[1]?.trim() ?? null;
 }
 
-// Helper: Assess prompt quality
 function assessPromptQuality(prompt: string): 'draft' | 'good' | 'excellent' {
 	const wordCount = prompt.split(/\s+/).length;
-	const hasStyleRef = /\b(impressionist|surreal|cyberpunk|art deco|contemporary)\b/i.test(
-		prompt
-	);
-	const hasLighting = /\b(lighting|shadows|golden hour|studio)\b/i.test(prompt);
-	const hasComposition = /\b(centered|rule of thirds|dynamic|angle)\b/i.test(prompt);
+	const hasStyleRef = /\b(cinematic|photorealistic|atmospheric|dynamic|intimate|editorial)\b/i.test(prompt);
+	const hasLighting = /\b(lighting|shadows|golden hour|studio|natural light|backlit)\b/i.test(prompt);
+	const hasSubject = /\b(woman|man|person|people|subject|figure|group)\b/i.test(prompt);
+	const hasSpecificity = /\b(aged?|year[s\-]old|demographic|cultural|urban|suburban|professional)\b/i.test(prompt);
 
 	let score = 0;
-	if (wordCount >= 15) score++;
-	if (wordCount >= 25) score++;
+	if (wordCount >= 20) score++;
+	if (wordCount >= 35) score++;
 	if (hasStyleRef) score++;
 	if (hasLighting) score++;
-	if (hasComposition) score++;
+	if (hasSubject) score++;
+	if (hasSpecificity) score++;
 
-	if (score >= 4) return 'excellent';
-	if (score >= 2) return 'good';
+	if (score >= 5) return 'excellent';
+	if (score >= 3) return 'good';
 	return 'draft';
 }
