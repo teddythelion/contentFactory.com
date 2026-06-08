@@ -70,6 +70,8 @@
 	// ── Load from content library + pre-fetch plan ────────────────────────────
 	onMount(async () => {
 		const params = new URLSearchParams(window.location.search);
+
+		// Load from content library
 		const editUrl = params.get('edit');
 		const editType = params.get('type') as 'image' | 'video' | null;
 		if (editUrl && editType) {
@@ -77,6 +79,13 @@
 			editSourceUrl = editUrl;
 			editSourceFileName = editUrl.split('/').pop()?.split('?')[0] || 'content';
 		}
+
+		// Load from Prompt Engineer
+		const incomingPrompt = params.get('prompt');
+		const incomingMode = params.get('mode') as 'image' | 'video' | null;
+		if (incomingPrompt) prompt = incomingPrompt;
+		if (incomingMode) mode = incomingMode;
+
 		// Pre-fetch plan so tier-gated UI reflects the user's actual plan immediately
 		if ($authStore.user) await canGenerate('video');
 	});

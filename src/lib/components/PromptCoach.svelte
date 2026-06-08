@@ -135,10 +135,10 @@
 		}
 	}
 
-	function goToCreate(promptText: string) {
+	function goToCreate(promptText: string, mode: 'image' | 'video') {
 		workflowContext.startCurrentStep();
 		workflowContext.setGeneratedPrompt(promptText);
-		const params = new URLSearchParams({ prompt: ` ${promptText} - Add your NICHE/INDUSTRY `, from: 'coach' });
+		const params = new URLSearchParams({ prompt: promptText, mode, from: 'engineer' });
 		goto(resolve('/create') + `?${params.toString()}`);
 	}
 
@@ -259,27 +259,43 @@
 
 		<!-- Suggested Prompts -->
 		{#if suggestedPrompts.length > 0}
-			<div class="space-y-2 pt-1">
-				<p class="flex items-center gap-1 text-xs font-semibold opacity-60">
-					<span>✨</span> Engineered prompts — add your niche before using
+			<div class="space-y-3 pt-1">
+				<p class="flex items-center gap-1 text-xs font-semibold text-success opacity-80">
+					<span>✨</span> Engineered Prompts
 				</p>
 				{#each suggestedPrompts as prompt, index (index)}
-					<div class="rounded-xl border border-secondary/20 bg-base-100 p-3">
+					<div class="rounded-xl border border-success/40 bg-success/5 p-3 ring-1 ring-success/20">
+						<!-- Badge row -->
 						<div class="mb-2 flex items-center gap-2">
-							<span class="badge badge-xs badge-secondary">#{index + 1}</span>
+							<span class="badge badge-xs border-success/40 text-success">#{index + 1}</span>
 							{#if prompt.quality === 'excellent'}
-								<span class="badge badge-xs badge-accent">Excellent</span>
+								<span class="badge badge-xs badge-success">Excellent</span>
 							{:else if prompt.quality === 'good'}
-								<span class="badge badge-xs badge-ghost">Good</span>
+								<span class="badge badge-xs border-success/30 text-success/70">Good</span>
 							{/if}
-							<button onclick={(e) => copyPrompt(prompt.text, e)} class="btn btn-ghost btn-xs ml-auto">
+							<button onclick={(e) => copyPrompt(prompt.text, e)} class="btn btn-ghost btn-xs ml-auto text-success/60 hover:text-success">
 								📋 Copy
 							</button>
 						</div>
-						<p class="mb-3 text-xs leading-relaxed opacity-80">{prompt.text}</p>
-						<button onclick={() => goToCreate(prompt.text)} class="btn btn-secondary btn-xs btn-block">
-							🎨 Use in Studio
-						</button>
+
+						<!-- Prompt text -->
+						<p class="mb-3 text-xs leading-relaxed text-success/90">{prompt.text}</p>
+
+						<!-- Action buttons -->
+						<div class="grid grid-cols-2 gap-2">
+							<button
+								onclick={() => goToCreate(prompt.text, 'image')}
+								class="btn btn-sm border-success/40 bg-success/10 text-success hover:bg-success hover:text-white"
+							>
+								🖼️ Image Gen
+							</button>
+							<button
+								onclick={() => goToCreate(prompt.text, 'video')}
+								class="btn btn-sm border-success/40 bg-success/10 text-success hover:bg-success hover:text-white"
+							>
+								🎬 Video Gen
+							</button>
+						</div>
 					</div>
 				{/each}
 			</div>
