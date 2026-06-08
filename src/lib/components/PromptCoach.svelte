@@ -1,37 +1,36 @@
 <script lang="ts">
 	import { workflowContext } from '$lib/stores/workflow.store';
 	import { authStore } from '$lib/stores/auth.store';
-	import { onMount} from 'svelte';
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import AuthModal from '$lib/components/AuthModal.svelte';
+
 	let userInput = $state('');
 	let isLoading = $state(false);
 	let chatContainer = $state<HTMLDivElement>();
 	let suggestedPrompts = $state<Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }>>([]);
 	let proTipData = $state<string | null>(null);
 	let showProTipModal = $state(false);
-	
 	let showAuthToast = $state(false);
 	let showAuthModal = $state(false);
 	let lastMessageCount = $state(0);
-	// Quick start suggestions - most common use cases
+
 	const quickStarts = [
-		{ emoji: '👤', text: 'Create a professional avatar', type: 'avatar' },
-		{ emoji: '🎨', text: 'Design a unique logo', type: 'logo' },
-		{ emoji: '📱', text: 'Make social media content', type: 'social-post' },
-		{ emoji: '🎬', text: 'Create an ad or promo', type: 'ad' },
+		{ emoji: '👤', text: 'Professional avatar', type: 'avatar' },
+		{ emoji: '🎨', text: 'Logo design', type: 'logo' },
+		{ emoji: '📱', text: 'Social media post', type: 'social-post' },
+		{ emoji: '🎬', text: 'Ad or promo video', type: 'ad' },
 		{ emoji: '💡', text: "Show me what's possible", type: 'inspiration' }
 	];
 
-	// ONLY scroll when NEW message is added, not on every update
 	$effect(() => {
-    if ($workflowContext.chatHistory.length > lastMessageCount && chatContainer) {
-        lastMessageCount = $workflowContext.chatHistory.length;
+		if ($workflowContext.chatHistory.length > lastMessageCount && chatContainer) {
+			lastMessageCount = $workflowContext.chatHistory.length;
 			setTimeout(() => {
 				chatContainer.scrollTop = chatContainer.scrollHeight;
 			}, 100);
-   		 }
+		}
 	});
 
 	async function sendMessage() {
@@ -44,8 +43,6 @@
 
 		const message = userInput.trim();
 		userInput = '';
-
-		// Add user message
 		workflowContext.addMessage('user', message);
 		isLoading = true;
 
@@ -69,36 +66,23 @@
 			});
 
 			const data = await response.json();
+			if (data.error) throw new Error(data.error);
 
-			if (data.error) {
-				throw new Error(data.error);
-			}
-
-			// Add assistant response
 			workflowContext.addMessage('assistant', data.message);
 
-			// Update context if AI extracted info
-			if (data.context) {
-				workflowContext.updateContext(data.context);
-			}
+			if (data.context) workflowContext.updateContext(data.context);
 
-			// Extract and display prompts if generated (can be multiple)
 			if (data.prompts && data.prompts.length > 0) {
 				suggestedPrompts = data.prompts;
 				workflowContext.setGeneratedPrompt(data.prompts[0].text, data.prompts[0].quality);
 			}
 
-			// Extract pro tip and show modal
 			if (data.proTip) {
 				proTipData = data.proTip;
 				showProTipModal = true;
 			}
 		} catch (error) {
-			console.error('Chat error:', error);
-			workflowContext.addMessage(
-				'assistant',
-				"I'm having trouble connecting right now. Please try again in a moment!"
-			);
+			workflowContext.addMessage('assistant', "I'm having trouble connecting right now. Please try again in a moment.");
 		} finally {
 			isLoading = false;
 		}
@@ -120,271 +104,187 @@
 		navigator.clipboard.writeText(promptText);
 		const btn = event?.target as HTMLButtonElement;
 		if (btn) {
-			const originalText = btn.textContent;
+			const orig = btn.textContent;
 			btn.textContent = '✓ Copied!';
-			setTimeout(() => {
-				btn.textContent = originalText;
-			}, 2000);
+			setTimeout(() => { btn.textContent = orig; }, 2000);
 		}
 	}
 
 	function goToCreate(promptText: string) {
 		workflowContext.startCurrentStep();
 		workflowContext.setGeneratedPrompt(promptText);
-		const params = new URLSearchParams({
-			prompt: ` ${promptText} - Add your NICHE/INDUSTRY `,
-			from: 'coach'
-		});
-		goto(resolve('/texttoimage') + `?${params.toString()}`);
+		const params = new URLSearchParams({ prompt: ` ${promptText} - Add your NICHE/INDUSTRY `, from: 'coach' });
+		goto(resolve('/create') + `?${params.toString()}`);
 	}
 
 	onMount(() => {
 		if ($workflowContext.chatHistory.length === 0) {
 			workflowContext.addMessage(
 				'assistant',
-				"👋 Hey! I'm your creative guide at Content Factory.\n\nI help you create world-class content - stunning avatars, professional ads, dynamic logos, and social posts that stop the scroll.\n\nWhat would you like to create today?"
+				"Hi, I'm your Prompt Engineer.\n\nI research your niche, study what's working in your industry, and craft scientifically-optimized prompts that produce content your audience actually stops for.\n\nWhether you're building a brand, launching a product, or just need something that stands out — tell me what you're creating and who it's for. I'll do the rest."
 			);
 		}
 	});
 </script>
+
 <AuthModal bind:isOpen={showAuthModal} />
 
+<!-- Auth toast -->
 {#if showAuthToast}
-    <div class="toast toast-top toast-center z-[9999]">
-        <div class="alert alert-warning flex flex-col gap-2 max-w-sm shadow-2xl">
-            <div class="flex items-center gap-2">
-                <span class="text-2xl">🔒</span>
-                <div>
-                    <p class="font-bold">Sign in required</p>
-                    <p class="text-sm">You need to be signed in to use this tool.</p>
-                </div>
-                <button onclick={() => showAuthToast = false} class="btn btn-ghost btn-xs ml-auto">✕</button>
-            </div>
-            <button onclick={() => { showAuthModal = true; showAuthToast = false; }} class="btn btn-primary btn-sm w-full">
-                Sign In Now
-            </button>
-        </div>
-    </div>
+	<div class="toast toast-top toast-center z-[9999]">
+		<div class="alert alert-warning flex flex-col gap-2 max-w-sm shadow-2xl">
+			<div class="flex items-center gap-2">
+				<span class="text-2xl">🔒</span>
+				<div>
+					<p class="font-bold">Sign in required</p>
+					<p class="text-sm">You need to be signed in to use the Prompt Engineer.</p>
+				</div>
+				<button onclick={() => showAuthToast = false} class="btn btn-ghost btn-xs ml-auto">✕</button>
+			</div>
+			<button onclick={() => { showAuthModal = true; showAuthToast = false; }} class="btn btn-primary btn-sm w-full">
+				Sign In Now
+			</button>
+		</div>
+	</div>
 {/if}
-<!-- Floating Pro Tip Modal - EDUCATION CONTENT -->
+
+<!-- Pro Tip Modal -->
 {#if showProTipModal && proTipData}
-	<div class="animate-fade-in fixed top-20 right-2 z-50 w-[calc(100vw-1rem)] sm:right-4 sm:w-96 sm:max-w-[calc(100vw-2rem)]">
-		<div class="card border-2 border-neutral-content/30 bg-neutral shadow-2xl">
-			<div class="card-body p-3 sm:p-4">
+	<div class="fixed top-20 right-2 z-50 w-[calc(100vw-1rem)] sm:right-4 sm:w-96">
+		<div class="card border border-secondary/30 bg-base-300 shadow-2xl">
+			<div class="card-body p-4">
 				<div class="mb-2 flex items-start justify-between">
 					<div class="flex items-center gap-2">
-						<span class="text-xl sm:text-2xl">📊</span>
+						<span class="text-xl">📊</span>
 						<div>
-							<span class="text-sm font-bold text-neutral-content">Data Insight</span>
-							<p class="text-xs text-neutral-content/60">Why this works</p>
+							<p class="text-sm font-bold text-secondary">Research Insight</p>
+							<p class="text-xs opacity-50">Why this works</p>
 						</div>
 					</div>
-					<button
-						onclick={() => (showProTipModal = false)}
-						class="btn btn-circle btn-ghost btn-xs"
-					>
-						✕
-					</button>
+					<button onclick={() => (showProTipModal = false)} class="btn btn-circle btn-ghost btn-xs">✕</button>
 				</div>
-				<div class="prose prose-sm max-w-none text-neutral-content/90">
-					<p class="text-sm leading-relaxed whitespace-pre-wrap">{proTipData}</p>
-				</div>
+				<p class="text-sm leading-relaxed whitespace-pre-wrap opacity-90">{proTipData}</p>
 			</div>
 		</div>
 	</div>
 {/if}
 
-<!-- Main Container -->
-<div class="flex h-full flex-col rounded-lg bg-base-100 shadow-xl">
-	<!-- Header - Fixed -->
-	<div class="shrink-0 border-b border-base-300 px-3 py-2 sm:px-4 sm:py-3">
-		<div class="flex items-center gap-3">
-			<div class="flex h-8 w-8 items-center justify-center rounded-full bg-neutral sm:h-10 sm:w-10">
-				<span class="text-lg sm:text-xl">🎨</span>
-			</div>
-			<div>
-				<h2 class="text-sm font-semibold sm:text-base">Prompt Coach</h2>
-				<p class="text-xs text-base-content/60">Your AI creative partner</p>
-			</div>
+<!-- Main Card -->
+<div class="mx-auto flex w-full max-w-2xl flex-col rounded-xl border border-base-300 bg-base-200 shadow-xl" style="height: calc(100vh - 120px);">
+
+	<!-- Header -->
+	<div class="flex shrink-0 items-center gap-3 border-b border-base-300 px-4 py-3">
+		<div class="flex h-9 w-9 items-center justify-center rounded-full bg-secondary/20">
+			<span class="text-lg">⚙️</span>
 		</div>
+		<div>
+			<h2 class="text-sm font-bold sm:text-base">Prompt Engineer</h2>
+			<p class="text-xs opacity-50">Niche research · Audience psychology · Optimized prompts</p>
+		</div>
+		{#if suggestedPrompts.length > 0}
+			<button onclick={() => { suggestedPrompts = []; }} class="btn btn-ghost btn-xs ml-auto opacity-50">Clear</button>
+		{/if}
 	</div>
 
-	<!-- Messages Area - SCROLLABLE -->
-	<div
-		bind:this={chatContainer}
-		class="flex-1 space-y-3 overflow-y-auto p-2 sm:p-4"
-		style="max-height: calc(100vh - 250px);"
-	>
-		<!-- Quick Start Buttons (only at start) -->
+	<!-- Chat Area -->
+	<div bind:this={chatContainer} class="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
+
+		<!-- Quick starts (first message only) -->
 		{#if $workflowContext.chatHistory.length === 1}
-			<div class="mb-4 space-y-2">
-				<p class="text-xs text-base-content/60">Quick starts:</p>
-				<div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-					{#each quickStarts as suggestion , i (i)}
-						<button
-							onclick={() => handleQuickStart(suggestion)}
-							class="btn btn-xs sm:btn-sm md:btn-md lg:btn-lg xl:btn-xl btn-neutral "
-						>
-							<span class="text-sm">{suggestion.emoji}</span>
-							<span class="text-xs">{suggestion.text}</span>
-						</button>
-					{/each}
-				</div>
+			<div class="flex flex-wrap gap-2 pb-1">
+				{#each quickStarts as s}
+					<button
+						onclick={() => handleQuickStart(s)}
+						class="btn btn-xs btn-outline border-base-300 hover:btn-secondary"
+					>
+						<span>{s.emoji}</span>
+						<span>{s.text}</span>
+					</button>
+				{/each}
 			</div>
 		{/if}
 
-		<!-- Chat Messages -->
-		{#each $workflowContext.chatHistory as message , i (i)}
+		<!-- Messages -->
+		{#each $workflowContext.chatHistory as message, i (i)}
 			<div class="flex gap-2 {message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}">
 				<!-- Avatar -->
-				<div class="shrink-0">
-					<div class="avatar">
-						<div class="w-6 rounded-full sm:w-7 {message.role === 'user' ? 'bg-neutral' : 'bg-base-300'}">
-							<span class="flex h-full items-center justify-center text-xs sm:text-sm">
-								{message.role === 'user' ? '👤' : 'AI'}
-							</span>
-						</div>
-					</div>
+				<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold
+					{message.role === 'user' ? 'bg-neutral text-neutral-content' : 'bg-secondary/20 text-secondary'}">
+					{message.role === 'user' ? '👤' : '⚙️'}
 				</div>
-
-				<!-- Message Bubble -->
-				<div
-					class="max-w-[85%] rounded-lg px-3 py-2 text-sm sm:max-w-[75%] {message.role === 'user'
-						? 'bg-neutral text-neutral-content'
-						: 'bg-base-200 text-base-content'}"
-				>
-					<p class="leading-relaxed whitespace-pre-wrap">{message.content}</p>
+				<!-- Bubble -->
+				<div class="max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap
+					{message.role === 'user'
+						? 'rounded-tr-sm bg-neutral text-neutral-content'
+						: 'rounded-tl-sm bg-base-100 text-base-content'}">
+					{message.content}
 				</div>
 			</div>
 		{/each}
 
-		<!-- Loading Indicator -->
+		<!-- Loading -->
 		{#if isLoading}
-			<div class="flex justify-start">
-				<div class="rounded-lg bg-base-200 px-3 py-2">
-					<div class="flex items-center gap-2">
-						<span class="loading loading-sm loading-dots"></span>
-						<span class="text-xs text-base-content/60">Thinking...</span>
-					</div>
+			<div class="flex gap-2">
+				<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary/20 text-xs text-secondary">⚙️</div>
+				<div class="rounded-2xl rounded-tl-sm bg-base-100 px-3 py-2">
+					<span class="loading loading-dots loading-xs"></span>
 				</div>
 			</div>
 		{/if}
 
-		<!-- Multiple Suggested Prompts -->
+		<!-- Suggested Prompts -->
 		{#if suggestedPrompts.length > 0}
-			<div class="mt-4 space-y-2">
-				<div class="flex items-center gap-2">
-					<span>✨</span>
-					<span class="text-sm font-semibold">Expert Prompt Options-ADD YOUR NICHE/INDUSTRY</span>
-				</div>
-
+			<div class="space-y-2 pt-1">
+				<p class="flex items-center gap-1 text-xs font-semibold opacity-60">
+					<span>✨</span> Engineered prompts — add your niche before using
+				</p>
 				{#each suggestedPrompts as prompt, index (index)}
-					<div class="w-full rounded-lg border border-success/30 bg-success/10 p-2 sm:max-w-[60%] sm:p-3">
-						<div class="mb-2 flex items-center justify-between">
-							<div class="flex items-center gap-2">
-								<span class="badge badge-xs badge-success">#{index + 1}</span>
-								{#if prompt.quality === 'excellent'}
-									<span class="badge badge-xs badge-info">Excellent</span>
-								{:else if prompt.quality === 'good'}
-									<span class="badge badge-ghost badge-xs">Good</span>
-								{/if}
-							</div>
-							<button onclick={(e) => copyPrompt(prompt.text, e)} class="btn btn-ghost btn-xs">
-								📋 <span class="ml-1 hidden sm:inline">Copy</span>
+					<div class="rounded-xl border border-secondary/20 bg-base-100 p-3">
+						<div class="mb-2 flex items-center gap-2">
+							<span class="badge badge-xs badge-secondary">#{index + 1}</span>
+							{#if prompt.quality === 'excellent'}
+								<span class="badge badge-xs badge-accent">Excellent</span>
+							{:else if prompt.quality === 'good'}
+								<span class="badge badge-xs badge-ghost">Good</span>
+							{/if}
+							<button onclick={(e) => copyPrompt(prompt.text, e)} class="btn btn-ghost btn-xs ml-auto">
+								📋 Copy
 							</button>
 						</div>
-						<p class="mb-2 text-xs leading-relaxed">{prompt.text}</p>
-						<button
-							onclick={() => goToCreate(prompt.text)}
-							class="btn btn-block btn-xs btn-success"
-						>
-							🎨 Quick Apply
+						<p class="mb-3 text-xs leading-relaxed opacity-80">{prompt.text}</p>
+						<button onclick={() => goToCreate(prompt.text)} class="btn btn-secondary btn-xs btn-block">
+							🎨 Use in Studio
 						</button>
 					</div>
 				{/each}
 			</div>
 		{/if}
-
-		<!-- Workflow Hint -->
-		{#if $workflowContext.contentType && suggestedPrompts.length === 0}
-			<div class="w-full rounded-lg border border-info/30 bg-info/10 p-2 sm:max-w-[60%]">
-				<p class="text-xs text-info">
-					💡 Once we create your {$workflowContext.contentType}, we'll refine it to perfection, then
-					bring it to life!
-				</p>
-			</div>
-		{/if}
 	</div>
 
-	<!-- Input Area - Fixed at Bottom -->
-	<div class="shrink-0 border-t border-base-300 p-2 sm:p-3">
-		<form onsubmit={(e) => { e.preventDefault(); sendMessage(); }} class="w-full">
-			<div class="flex items-end gap-2">
-				<textarea
-					bind:value={userInput}
-					onkeydown={handleKeyPress}
-					placeholder="What do you want to create?"
-					disabled={isLoading}
-					class="textarea-bordered textarea w-full flex-1 resize-y bg-base-200 text-sm textarea-sm focus:outline-neutral disabled:opacity-50"
-					rows="1"
-					style="min-height: 50px; max-height: 200px;"
-				></textarea>
-				<button
-					type="submit"
-					disabled={isLoading || !userInput.trim()}
-					class="btn shrink-0 px-3 btn-sm btn-neutral sm:px-4"
-				>
-					{#if isLoading}
-						<span class="loading loading-xs loading-spinner"></span>
-					{:else}
-						<span>Send</span>
-					{/if}
-				</button>
-			</div>
-			<p class="mt-1 hidden text-xs text-base-content/40 sm:block">
-				💡 Describe what you want to create (Shift+Enter for new line)
-			</p>
+	<!-- Input -->
+	<div class="shrink-0 border-t border-base-300 p-3">
+		<form onsubmit={(e) => { e.preventDefault(); sendMessage(); }} class="flex items-end gap-2">
+			<textarea
+				bind:value={userInput}
+				onkeydown={handleKeyPress}
+				placeholder="e.g. Create a promo video for my coffee shop targeting millennials..."
+				disabled={isLoading}
+				rows="2"
+				class="textarea textarea-bordered w-full flex-1 resize-none bg-base-100 text-sm focus:outline-secondary disabled:opacity-50"
+				style="max-height: 120px;"
+			></textarea>
+			<button
+				type="submit"
+				disabled={isLoading || !userInput.trim()}
+				class="btn btn-secondary btn-sm shrink-0"
+			>
+				{#if isLoading}
+					<span class="loading loading-spinner loading-xs"></span>
+				{:else}
+					Send
+				{/if}
+			</button>
 		</form>
+		<p class="mt-1 text-xs opacity-30">Shift+Enter for new line</p>
 	</div>
 </div>
-
-<style>
-	/* Smooth scroll behavior */
-	.overflow-y-auto {
-		scroll-behavior: smooth;
-	}
-
-	/* Custom scrollbar */
-	:global(.overflow-y-auto::-webkit-scrollbar) {
-		width: 6px;
-	}
-
-	:global(.overflow-y-auto::-webkit-scrollbar-track) {
-		background: transparent;
-	}
-
-	:global(.overflow-y-auto::-webkit-scrollbar-thumb) {
-		background: hsl(var(--bc) / 0.2);
-		border-radius: 3px;
-	}
-
-	:global(.overflow-y-auto::-webkit-scrollbar-thumb:hover) {
-		background: hsl(var(--bc) / 0.3);
-	}
-
-	/* Fade in animation for modal */
-	@keyframes fade-in {
-		from {
-			opacity: 0;
-			transform: translateY(-10px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-
-	.animate-fade-in {
-		animation: fade-in 0.3s ease-out;
-	}
-</style>
