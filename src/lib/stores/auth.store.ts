@@ -5,6 +5,10 @@ import {
 	signOut as firebaseSignOut,
 	GoogleAuthProvider,
 	onAuthStateChanged,
+	createUserWithEmailAndPassword,
+	signInWithEmailAndPassword,
+	sendPasswordResetEmail,
+	updateProfile,
 	type User as FirebaseUser
 } from 'firebase/auth';
 import type { User, AuthState } from '$lib/types/user';
@@ -21,6 +25,19 @@ function mapFirebaseUser(firebaseUser: FirebaseUser | null): User | null {
 		photoURL: firebaseUser.photoURL,
 		emailVerified: firebaseUser.emailVerified
 	};
+}
+
+function friendlyAuthError(code: string): string {
+	const map: Record<string, string> = {
+		'auth/email-already-in-use': 'An account with this email already exists.',
+		'auth/invalid-email': 'Please enter a valid email address.',
+		'auth/weak-password': 'Password must be at least 6 characters.',
+		'auth/user-not-found': 'No account found with this email.',
+		'auth/wrong-password': 'Incorrect password.',
+		'auth/invalid-credential': 'Incorrect email or password.',
+		'auth/too-many-requests': 'Too many attempts. Please try again later.'
+	};
+	return map[code] || '';
 }
 
 // Create the store
@@ -122,6 +139,82 @@ function createAuthStore() {
 					error: errorMessage
 				}));
 				return { success: false, error: errorMessage };
+			}
+		},
+
+		// Sign up with email/password
+		signUpWithEmail: async (email: string, password: string, displayName: string) => {
+			try {
+				update((state) => ({ ...state, loading: true, error: null }));
+				const result = await createUserWithEmailAndPassword(auth, email, password);
+
+				if (displayName) {
+					await updateProfile(result.user, { displayName });
+				}
+
+				const idToken = await result.user.getIdToken();
+				const sessionResponse = await fetch('/api/auth/session', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ idToken })
+				});
+				if (!sessionResponse.ok) throw new Error('Failed to create session');
+
+				await createUserProfile(result.user.uid, email, displayName, null);
+
+				update((state) => ({
+					...state,
+					user: mapFirebaseUser(result.user),
+					loading: false,
+					error: null,
+					initialized: true
+				}));
+
+				return { success: true, user: result.user };
+			} catch (error: any) {
+				const errorMessage = friendlyAuthError(error.code) || error.message;
+				update((state) => ({ ...state, loading: false, error: errorMessage }));
+				return { success: false, error: errorMessage };
+			}
+		},
+
+		// Sign in with email/password
+		signInWithEmail: async (email: string, password: string) => {
+			try {
+				update((state) => ({ ...state, loading: true, error: null }));
+				const result = await signInWithEmailAndPassword(auth, email, password);
+
+				const idToken = await result.user.getIdToken();
+				const sessionResponse = await fetch('/api/auth/session', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ idToken })
+				});
+				if (!sessionResponse.ok) throw new Error('Failed to create session');
+
+				update((state) => ({
+					...state,
+					user: mapFirebaseUser(result.user),
+					loading: false,
+					error: null,
+					initialized: true
+				}));
+
+				return { success: true, user: result.user };
+			} catch (error: any) {
+				const errorMessage = friendlyAuthError(error.code) || error.message;
+				update((state) => ({ ...state, loading: false, error: errorMessage }));
+				return { success: false, error: errorMessage };
+			}
+		},
+
+		// Password reset
+		resetPassword: async (email: string) => {
+			try {
+				await sendPasswordResetEmail(auth, email);
+				return { success: true };
+			} catch (error: any) {
+				return { success: false, error: friendlyAuthError(error.code) || error.message };
 			}
 		},
 

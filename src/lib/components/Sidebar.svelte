@@ -72,7 +72,7 @@
 			{/if}
 		</nav>
 		<!-- Page content here -->
-		<div class="p-4">
+		<div class={$page.url.pathname === '/' ? '' : 'p-4'}>
 			{@render children()}
 		</div>
 	</div>
@@ -82,6 +82,41 @@
 		<div
 			class="flex min-h-full flex-col items-start bg-base-200 is-drawer-close:w-14 is-drawer-open:w-64"
 		>
+			<!-- Desktop expand/collapse toggle -->
+			<label
+				for="my-drawer-4"
+				class="btn btn-ghost btn-sm mt-2 w-full justify-start gap-2 rounded-none px-3 opacity-50 hover:opacity-100"
+				title="Toggle sidebar"
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					class="is-drawer-close:hidden size-4 shrink-0"
+				>
+					<polyline points="15 18 9 12 15 6" />
+					<polyline points="20 18 14 12 20 6" />
+				</svg>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					class="is-drawer-open:hidden size-4 shrink-0"
+				>
+					<polyline points="9 18 15 12 9 6" />
+					<polyline points="4 18 10 12 4 6" />
+				</svg>
+				<span class="is-drawer-close:hidden text-xs">Collapse</span>
+			</label>
+
 			<!-- Sidebar content here -->
 			<ul class="menu w-full grow">
 				<!-- Homepage -->
@@ -139,6 +174,30 @@
 							<path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/>
 						</svg>
 						<span class="is-drawer-close:hidden">Create</span>
+					</a>
+				</li>
+
+				<!-- Prompt Coach -->
+				<li>
+					<a
+						href={resolve("/prompt-coach")}
+						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname === '/prompt-coach' ? 'active' : ''}"
+						data-tip="Prompt Coach"
+						onclick={closeSidebar}
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							stroke-linejoin="round"
+							stroke-linecap="round"
+							stroke-width="2"
+							fill="none"
+							stroke="currentColor"
+							class="my-1.5 inline-block size-4"
+						>
+							<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm-1-5h2v2h-2zm0-8h2v5h-2z"/>
+						</svg>
+						<span class="is-drawer-close:hidden">Prompt Coach</span>
 					</a>
 				</li>
 
