@@ -15,6 +15,29 @@
 	let showAuthToast = $state(false);
 	let showAuthModal = $state(false);
 	let lastMessageCount = $state(0);
+	let thinkingWord = $state('Analyzing');
+	let thinkingInterval: ReturnType<typeof setInterval> | null = null;
+
+	const thinkingWords = [
+		'Analyzing', 'Reasoning', 'Processing', 'Evaluating', 'Computing',
+		'Researching', 'Investigating', 'Cross-referencing', 'Sourcing', 'Mining data',
+		'Interpreting', 'Parsing', 'Contextualizing', 'Mapping', 'Profiling',
+		'Engineering', 'Crafting', 'Formulating', 'Calibrating', 'Structuring'
+	];
+
+	function startThinking() {
+		thinkingWord = thinkingWords[Math.floor(Math.random() * thinkingWords.length)];
+		thinkingInterval = setInterval(() => {
+			thinkingWord = thinkingWords[Math.floor(Math.random() * thinkingWords.length)];
+		}, 1500);
+	}
+
+	function stopThinking() {
+		if (thinkingInterval) {
+			clearInterval(thinkingInterval);
+			thinkingInterval = null;
+		}
+	}
 
 	const quickStarts = [
 		{ emoji: '👤', text: 'Professional avatar', type: 'avatar' },
@@ -45,6 +68,7 @@
 		userInput = '';
 		workflowContext.addMessage('user', message);
 		isLoading = true;
+		startThinking();
 
 		try {
 			const response = await fetch('/api/prompt-coach', {
@@ -85,6 +109,7 @@
 			workflowContext.addMessage('assistant', "I'm having trouble connecting right now. Please try again in a moment.");
 		} finally {
 			isLoading = false;
+			stopThinking();
 		}
 	}
 
@@ -227,7 +252,7 @@
 			<div class="flex gap-2">
 				<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary/20 text-xs text-secondary">⚙️</div>
 				<div class="rounded-2xl rounded-tl-sm bg-base-100 px-3 py-2">
-					<span class="loading loading-dots loading-xs"></span>
+					<span class="text-xs font-medium text-secondary opacity-80">{thinkingWord}<span class="animate-pulse">…</span></span>
 				</div>
 			</div>
 		{/if}
