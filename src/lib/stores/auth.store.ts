@@ -243,6 +243,14 @@ function createAuthStore() {
 			}
 		},
 
+		// Update photo URL after profile image upload
+		updatePhotoURL: (photoURL: string) => {
+			update((state) => ({
+				...state,
+				user: state.user ? { ...state.user, photoURL } : state.user
+			}));
+		},
+
 		// Clear error
 		clearError: () => {
 			update((state) => ({ ...state, error: null }));

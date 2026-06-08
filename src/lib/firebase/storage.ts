@@ -25,7 +25,7 @@ export async function uploadToGCS(
 	file: Buffer,
 	fileName: string,
 	contentType: string,
-	folder: 'images' | 'videos' | 'thumbnails'
+	folder: 'images' | 'videos' | 'thumbnails' | 'profile'
 ): Promise<UploadResult> {
 	const filePath = `users/${userId}/${folder}/${fileName}`;
 	const fileRef = bucket.file(filePath);

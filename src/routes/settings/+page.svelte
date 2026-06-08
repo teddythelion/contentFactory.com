@@ -9,6 +9,37 @@
 	let saving = $state(false);
 	let successMessage = $state('');
 
+	// Profile image upload
+	let uploadingPhoto = $state(false);
+	let photoError = $state('');
+	let photoPreview = $state<string | null>(null);
+
+	async function handlePhotoUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		photoError = '';
+		photoPreview = URL.createObjectURL(file);
+
+		uploadingPhoto = true;
+		const fd = new FormData();
+		fd.append('image', file);
+
+		try {
+			const res = await fetch('/api/uploadProfileImage', { method: 'POST', body: fd });
+			const data = await res.json();
+			if (!res.ok) { photoError = data.error || 'Upload failed'; photoPreview = null; return; }
+			// Update local auth store user
+			authStore.updatePhotoURL(data.photoURL);
+		} catch {
+			photoError = 'Upload failed. Please try again.';
+			photoPreview = null;
+		} finally {
+			uploadingPhoto = false;
+		}
+	}
+
 	// Form state
 	let autoDelete = $state(false);
 	let deletionPeriod = $state<30 | 60 | 90>(30);
@@ -86,10 +117,42 @@
 		<div class="card mb-6 bg-base-200 shadow-xl">
 			<div class="card-body">
 				<h2 class="card-title">Account Information</h2>
-				<div class="mt-4 flex items-center gap-4">
-					{#if $authStore.user.photoURL}
-						<img src={$authStore.user.photoURL} alt="Profile" class="h-16 w-16 rounded-full" />
-					{/if}
+				<div class="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+					<!-- Avatar with upload overlay -->
+					<label class="group relative cursor-pointer">
+						<div class="h-20 w-20 overflow-hidden rounded-full border-2 border-base-300">
+							{#if photoPreview || $authStore.user.photoURL}
+								<img
+									src={photoPreview ?? $authStore.user.photoURL ?? ''}
+									alt="Profile"
+									class="h-full w-full object-cover"
+								/>
+							{:else}
+								<div class="flex h-full w-full items-center justify-center bg-base-300 text-2xl font-bold">
+									{($authStore.user.displayName || $authStore.user.email || 'U')[0].toUpperCase()}
+								</div>
+							{/if}
+							<!-- Hover overlay -->
+							<div class="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+								{#if uploadingPhoto}
+									<span class="loading loading-spinner loading-sm text-white"></span>
+								{:else}
+									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-6">
+										<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+										<circle cx="12" cy="13" r="4"/>
+									</svg>
+								{/if}
+							</div>
+						</div>
+						<input
+							type="file"
+							accept="image/jpeg,image/png,image/webp,image/gif"
+							class="hidden"
+							onchange={handlePhotoUpload}
+							disabled={uploadingPhoto}
+						/>
+					</label>
+
 					<div>
 						<p class="text-lg font-bold">{$authStore.user.displayName || 'User'}</p>
 						<p class="opacity-70">{$authStore.user.email}</p>
@@ -98,6 +161,10 @@
 								Plan: <span class="badge badge-primary">{userProfile.plan}</span>
 							</p>
 						{/if}
+						{#if photoError}
+							<p class="mt-1 text-xs text-error">{photoError}</p>
+						{/if}
+						<p class="mt-1 text-xs opacity-40">Click avatar to change photo</p>
 					</div>
 				</div>
 
