@@ -379,7 +379,8 @@ let showAuthModal = $state(false);
 			status = 'Preparing editor...';
 			try {
 				const fd = new FormData();
-				if (activeUrl.startsWith('data:video') || activeUrl.startsWith('blob:')) {
+				const isLocal = activeUrl.startsWith('data:video') || activeUrl.startsWith('blob:') || activeUrl.startsWith('/');
+				if (isLocal) {
 					const blob = await (await fetch(activeUrl)).blob();
 					fd.append('videoFile', blob, 'video.mp4');
 				} else {

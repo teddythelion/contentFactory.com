@@ -83,11 +83,17 @@
         <div class="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-info/10 text-3xl">
           🖼️
         </div>
-        <h3 class="mb-3 text-xl font-bold text-white">AI Image Generation</h3>
+        <h3 class="mb-3 text-xl font-bold text-white">Intentional Image Generation</h3>
         <p class="mb-6 text-sm leading-relaxed text-white/60">
-          Generate production-ready images from a single prompt. 
-          From product mockups to brand visuals to social content — 
-          get scroll-stopping imagery without a photographer or designer.
+          Why Your Videos Never Look Exactly Right.
+
+Text prompts are guesses. You describe what you see in your head, the model interprets it, and what comes back is close — but not quite. The lighting's off. The mood isn't there. The subject doesn't feel right. So you generate again. And again.
+
+The problem isn't the model. It's the medium. Text is an approximation of a visual idea. And approximations produce approximate results.
+
+A picture is worth a thousand words — and a thousand tokens.
+
+
         </p>
         <ul class="space-y-2">
           {#each ['Photorealistic output', 'Multiple style options', 'High resolution export', 'Prompt engineering assistant'] as feature}
@@ -105,9 +111,13 @@
         </div>
         <h3 class="mb-3 text-xl font-bold text-white">Image Editing & Refinement</h3>
         <p class="mb-6 text-sm leading-relaxed text-white/60">
-          Upload any image and refine it with AI-powered editing. 
-          Adjust, enhance, and transform existing visuals without 
-          touching Photoshop. Ultra-refinement mode takes your image further than ever.
+          At Content Factory, we flipped the workflow. Instead of describing your vision, you build it. Use our image tools to craft reference images — the exact atmosphere, subject, composition, and mood you want. Refine them until they're right. Images are fast and cheap to iterate. Video is not.
+
+      When your reference image captures exactly what you're after, then you generate the video. The model now has a precise visual anchor — not a paragraph of adjectives, but an actual image of your intent. The result is a video that looks like your idea, not a model's interpretation of it.
+
+      Closer on the first generation. Less waste. More control.
+
+      That's the edge. Not just AI video — AI video guided by imagery you engineered. Reference images are the difference between a video that's almost right and one that's exactly right.
         </p>
         <ul class="space-y-2">
           {#each ['Upload & edit any image', 'AI ultra refinement', 'Identity-preserving face lock', 'Multi-reference compositing'] as feature}
