@@ -1,10 +1,10 @@
 <!-- src/routes/create/+page.svelte -->
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { authStore } from '$lib/stores/auth.store';
 	import { canGenerate, subscriptionStore } from '$lib/stores/subscription.store';
-	import PromptCoachRefine from '$lib/components/PromptCoachRefine.svelte';
-	import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
+import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
 	import AuthModal from '$lib/components/AuthModal.svelte';
 	import ThreeJsEnhancer from '$lib/components/ThreeJsEnhancer/ThreeJsEnhancer.svelte';
 	import ThreeJSEnhancer from '$lib/components/ThreeJSEnhancer.svelte';
@@ -43,8 +43,7 @@
 	let extendOperation = $state<string | null>(null);
 
 	// UI toggles
-	let showPromptCoach = $state(false);
-	let showAuthModal = $state(false);
+let showAuthModal = $state(false);
 	let showAuthToast = $state(false);
 	let showUsageLimitModal = $state(false);
 	let usageLimitData = $state<UsageCheckResult | null>(null);
@@ -372,13 +371,7 @@
 		}
 	}
 
-	// ── Prompt coach ──────────────────────────────────────────────────────────
-	function handlePromptSelected(p: string) {
-		prompt = p;
-		showPromptCoach = false;
-	}
-
-	// ── Edit content ──────────────────────────────────────────────────────────
+// ── Edit content ──────────────────────────────────────────────────────────
 	async function editContent() {
 		if (!requireAuth() || !activeUrl) return;
 
@@ -486,22 +479,6 @@
 	generationType={mode === 'extend' ? 'video' : mode}
 />
 
-{#if showPromptCoach}
-	<div class="modal modal-open z-50">
-		<div class="modal-box h-[70vh] max-w-3xl p-0">
-			<div class="flex h-full flex-col">
-				<div class="flex items-center justify-between border-b border-base-300 p-4">
-					<h3 class="text-lg font-bold">Prompt Engineer</h3>
-					<button onclick={() => (showPromptCoach = false)} class="btn btn-circle btn-ghost btn-sm">✕</button>
-				</div>
-				<div class="flex-1 overflow-hidden">
-					<PromptCoachRefine onPromptSelected={handlePromptSelected} />
-				</div>
-			</div>
-		</div>
-		<div class="modal-backdrop" onclick={() => (showPromptCoach = false)} onkeydown={() => {}}></div>
-	</div>
-{/if}
 
 {#if showVideoEnhancer && activeUrl}
 	<ThreeJsEnhancer
@@ -840,16 +817,15 @@
 								disabled={isGenerating}
 							></textarea>
 							<div class="flex flex-col gap-2 shrink-0">
-								<button
-									onclick={() => (showPromptCoach = true)}
+								<a
+									href={resolve("/prompt-coach")}
 									class="btn btn-sm btn-neutral gap-1.5 whitespace-nowrap"
-									disabled={isGenerating}
 								>
 									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 										<path d="M15 4V2m0 2v16m0-16H9m6 0h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
 									</svg>
-									Prompt engineer
-								</button>
+									Prompt Engineer
+								</a>
 								<button
 									onclick={generate}
 									disabled={isGenerating || !prompt.trim()}
