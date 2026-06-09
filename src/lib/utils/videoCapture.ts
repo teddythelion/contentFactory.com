@@ -11,7 +11,7 @@ import { authStore } from '$lib/stores/auth.store';
 import { audioSessionStore } from '$lib/stores/audioSession.store'; // NEW
 import { audioStudioStore } from '$lib/stores/audioStudio.store';
 
-const BATCH_SIZE = 10;
+const BATCH_SIZE = 30;
 
 export async function captureThreeJsVideo(
 	progressCallback?: (progress: number, message: string) => void
@@ -75,9 +75,16 @@ export async function captureThreeJsVideo(
 		const sessionId = Date.now().toString();
 		let batchNumber = 0;
 
+		// Single reusable 2D canvas for JPEG conversion — created once, reused per frame.
+		// This avoids raw RGBA uploads (~88MB/batch) by compressing to JPEG (~3-5MB/batch).
+		const jpegCanvas = document.createElement('canvas');
+		jpegCanvas.width = width;
+		jpegCanvas.height = height;
+		const jpegCtx = jpegCanvas.getContext('2d')!;
+
 		for (let startFrame = 0; startFrame < totalFrames; startFrame += BATCH_SIZE) {
 			const endFrame = Math.min(startFrame + BATCH_SIZE, totalFrames);
-			const batchFrames: Uint8Array[] = [];
+			const batchFrames: Blob[] = [];
 
 			for (let i = startFrame; i < endFrame; i++) {
 				const targetTime = i / fps;
@@ -112,29 +119,27 @@ export async function captureThreeJsVideo(
 				const pixels = new Uint8Array(width * height * 4);
 				gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-				const flipped = new Uint8Array(width * height * 4);
+				// Y-flip (WebGL origin is bottom-left) then compress to JPEG.
+				// JPEG at 92% quality is visually lossless for video frames and
+				// reduces ~2.9MB raw RGBA to ~100-200KB per frame.
+				const flipped = new Uint8ClampedArray(width * height * 4);
 				for (let y = 0; y < height; y++) {
 					const sourceRow = (height - 1 - y) * width * 4;
 					const destRow = y * width * 4;
 					flipped.set(pixels.subarray(sourceRow, sourceRow + width * 4), destRow);
 				}
-
-				batchFrames.push(flipped);
+				jpegCtx.putImageData(new ImageData(flipped, width, height), 0, 0);
+				const jpegBlob = await new Promise<Blob>((resolve) =>
+					jpegCanvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
+				);
+				batchFrames.push(jpegBlob);
 
 				const progress = (i / totalFrames) * 70;
 				progressCallback?.(progress, `Capturing frame ${i + 1}/${totalFrames}`);
 			}
 
-			// Pack batch into single buffer
-			const batchData = new Uint8Array(batchFrames.length * width * height * 4);
-			let offset = 0;
-			for (const frame of batchFrames) {
-				batchData.set(frame, offset);
-				offset += frame.length;
-			}
-
-			const batchSizeMB = (batchData.length / 1024 / 1024).toFixed(2);
-			console.log(`📤 Uploading batch ${batchNumber} of ${totalBatches - 1} — ${batchSizeMB}MB`);
+			const batchSizeKB = batchFrames.reduce((sum, b) => sum + b.size, 0) / 1024;
+			console.log(`📤 Uploading batch ${batchNumber} of ${totalBatches - 1} — ${(batchSizeKB / 1024).toFixed(2)}MB (JPEG)`);
 
 			progressCallback?.(
 				70 + (batchNumber / totalBatches) * 25,
@@ -146,9 +151,10 @@ export async function captureThreeJsVideo(
 			formData.append('batchNumber', String(batchNumber));
 			formData.append('startFrame', String(startFrame));
 			formData.append('frameCount', String(batchFrames.length));
-			formData.append('width', String(width));
-			formData.append('height', String(height));
-			formData.append('frameData', new Blob([batchData]), 'batch.raw');
+			// Each frame is a named JPEG entry — server writes them as frame-XXXXXX.jpg
+			batchFrames.forEach((blob, idx) => {
+				formData.append(`frame_${idx}`, blob, 'f.jpg');
+			});
 
 			const response = await fetch('/api/uploadFrameBatch', {
 				method: 'POST',

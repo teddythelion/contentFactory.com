@@ -10,9 +10,6 @@ export const POST: RequestHandler = async ({ request }) => {
 		const batchNumber = formData.get('batchNumber') as string;
 		const startFrame = formData.get('startFrame') as string;
 		const frameCount = parseInt(formData.get('frameCount') as string);
-		const width = parseInt(formData.get('width') as string);
-		const height = parseInt(formData.get('height') as string);
-		const frameData = formData.get('frameData') as File;
 
 		console.log(`📦 Batch ${batchNumber}: ${frameCount} frames starting at ${startFrame}`);
 
@@ -26,22 +23,17 @@ export const POST: RequestHandler = async ({ request }) => {
 			await mkdir(tempDir, { recursive: true });
 		}
 
-		// Read batch data
-		const arrayBuffer = await frameData.arrayBuffer();
-		const uint8Array = new Uint8Array(arrayBuffer);
-		const bytesPerFrame = width * height * 4;
-
-		// Write all frames in the batch in parallel — no reason to serialize disk writes
+		// Write JPEG frames in parallel — each frame arrives as frame_0, frame_1, ...
 		const writes: Promise<void>[] = [];
 		for (let i = 0; i < frameCount; i++) {
+			const frameFile = formData.get(`frame_${i}`) as File | null;
+			if (!frameFile) throw new Error(`Missing frame_${i} in batch ${batchNumber}`);
 			const globalFrameNumber = parseInt(startFrame) + i;
-			const frameStart = i * bytesPerFrame;
-			const frameBuffer = uint8Array.subarray(frameStart, frameStart + bytesPerFrame);
 			const framePath = path.join(
 				tempDir,
-				`frame-${globalFrameNumber.toString().padStart(6, '0')}.raw`
+				`frame-${globalFrameNumber.toString().padStart(6, '0')}.jpg`
 			);
-			writes.push(writeFile(framePath, Buffer.from(frameBuffer)));
+			writes.push(frameFile.arrayBuffer().then((buf) => writeFile(framePath, Buffer.from(buf))));
 		}
 		await Promise.all(writes);
 

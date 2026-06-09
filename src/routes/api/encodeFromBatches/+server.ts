@@ -7,11 +7,10 @@
 import type { RequestHandler } from './$types';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { readFile, unlink, readdir, rmdir, rename } from 'fs/promises';
+import { unlink, readdir, rmdir, rename } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
-import sharp from 'sharp';
 import { encodeJobs, pruneOldJobs } from '$lib/server/jobStore';
 import { uploadToGCS, updateUserStorage, incrementContentStats } from '$lib/firebase/storage';
 import { adminDb } from '$lib/firebase/admin';
@@ -32,7 +31,6 @@ function getFFmpegPath(): string {
 }
 
 const FFMPEG_PATH = getFFmpegPath();
-const PARALLEL_BATCH_SIZE = 8;
 
 function getTempBase(): string {
 	const isLinux = process.platform === 'linux';
@@ -73,48 +71,18 @@ async function runEncode(
 		: null;
 
 	try {
-		console.log(`🎬 Encoding ${totalFrames} frames from session ${sessionId}`);
+		console.log(`🎬 Encoding ${totalFrames} JPEG frames from session ${sessionId}`);
 		if (audioSessionId) {
 			console.log(`🎵 Audio session found — will mux audio-${audioSessionId}.aac after encode`);
 		}
-		console.log(`🖼️ Converting raw frames to PNG (${PARALLEL_BATCH_SIZE} at a time)...`);
 
-		for (let i = 0; i < totalFrames; i += PARALLEL_BATCH_SIZE) {
-			const batchEnd = Math.min(i + PARALLEL_BATCH_SIZE, totalFrames);
-			const batchPromises = [];
-
-			for (let j = i; j < batchEnd; j++) {
-				const rawPath = path.join(sessionDir, `frame-${j.toString().padStart(6, '0')}.raw`);
-				const pngPath = path.join(sessionDir, `frame-${j.toString().padStart(6, '0')}.png`);
-
-				batchPromises.push(
-					readFile(rawPath).then((rawBuffer) => {
-						let img = sharp(rawBuffer, { raw: { width, height, channels: 4 } });
-						if (outWidth !== width || outHeight !== height) {
-							img = img.resize(outWidth, outHeight);
-						}
-						return img.png().toFile(pngPath).then(() => unlink(rawPath));
-					})
-				);
-			}
-
-			await Promise.all(batchPromises);
-
-			if (i % 30 === 0) {
-				console.log(
-					`  Converted ${Math.min(i + PARALLEL_BATCH_SIZE, totalFrames)}/${totalFrames} frames`
-				);
-			}
-		}
-
-		console.log('✅ Frame conversion complete');
 		const audioDir = path.join(getTempBase(), 'audio');
 		// ── PASS 1: Encode frames to silent MP4 ──────────────────────────────
 		const encodeCommand = [
 			`"${FFMPEG_PATH}"`,
 			`-framerate ${fps}`,
-			`-i "${path.join(sessionDir, 'frame-%06d.png')}"`,
-			`-vf "scale=trunc(iw/2)*2:trunc(ih/2)*2"`,
+			`-i "${path.join(sessionDir, 'frame-%06d.jpg')}"`,
+			`-vf "scale=trunc(${outWidth}/2)*2:trunc(${outHeight}/2)*2"`,
 			`-c:v libx264`,
 			`-preset veryfast`,
 			`-crf 23`,
