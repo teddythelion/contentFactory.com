@@ -164,7 +164,7 @@ CURRENT SESSION CONTEXT:
 Use all available context to deliver increasingly specific research output. If niche and demographic are known, do not ask again — build on them.` : '';
 
 		const response = await anthropic.messages.create({
-			model: 'claude-opus-4-5',
+			model: 'claude-opus-4-7',
 			max_tokens: 3000,
 			system: SYSTEM_PROMPT + contextPrompt,
 			messages: messages.map((msg: any) => ({
@@ -250,12 +250,18 @@ function extractContextFromResponse(text: string, currentContext: any) {
 function extractPromptsFromMessage(text: string): Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> {
 	const prompts: Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> = [];
 
-	const numberedPattern = /^\d+\.\s+(.+?)(?=\n\d+\.|💡|\n\n[A-Z#]|$)/gms;
-	const matches = text.matchAll(numberedPattern);
+	// First try: extract from ENGINEERED PROMPTS section specifically
+	const sectionPattern = /ENGINEERED PROMPTS[\s\S]*?\n([\s\S]+?)(?:\n#{1,3}\s|\n💡|$)/i;
+	const sectionMatch = text.match(sectionPattern);
+	const searchText = sectionMatch?.[1] ?? text;
+
+	// Match numbered items: "1.", "2.", "3." — handles bold (**1.**) and plain (1.)
+	const numberedPattern = /(?:^|\n)\*{0,2}\d+\.\*{0,2}\s+(.+?)(?=\n\*{0,2}\d+\.\*{0,2}\s|\n#{1,3}\s|💡|$)/gms;
+	const matches = searchText.matchAll(numberedPattern);
 
 	for (const match of matches) {
 		if (match[1]) {
-			const promptText = match[1].trim();
+			const promptText = match[1].replace(/\*+/g, '').trim();
 			if (promptText.length > 40) {
 				prompts.push({ text: promptText, quality: assessPromptQuality(promptText) });
 			}
