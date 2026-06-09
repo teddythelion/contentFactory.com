@@ -11,7 +11,7 @@ import { authStore } from '$lib/stores/auth.store';
 import { audioSessionStore } from '$lib/stores/audioSession.store'; // NEW
 import { audioStudioStore } from '$lib/stores/audioStudio.store';
 
-const BATCH_SIZE = 30;
+const BATCH_SIZE = 10;
 
 export async function captureThreeJsVideo(
 	progressCallback?: (progress: number, message: string) => void

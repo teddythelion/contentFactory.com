@@ -379,10 +379,15 @@ let showAuthModal = $state(false);
 			status = 'Preparing editor...';
 			try {
 				const fd = new FormData();
-				const isLocal = activeUrl.startsWith('data:video') || activeUrl.startsWith('blob:') || activeUrl.startsWith('/');
-				if (isLocal) {
+				if (activeUrl.startsWith('data:video') || activeUrl.startsWith('blob:')) {
 					const blob = await (await fetch(activeUrl)).blob();
 					fd.append('videoFile', blob, 'video.mp4');
+				} else if (activeUrl.startsWith('/api/proxyVideo')) {
+					// Proxy URL — extract the underlying Gemini/GCS URL.
+					// extractAudio server adds the API key itself (same as proxyVideo).
+					const params = new URLSearchParams(activeUrl.split('?')[1] ?? '');
+					const underlyingUrl = params.get('url');
+					fd.append('videoUrl', underlyingUrl ?? activeUrl);
 				} else {
 					fd.append('videoUrl', activeUrl);
 				}

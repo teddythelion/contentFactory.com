@@ -11,6 +11,7 @@ import { writeFile, mkdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
+import { GOOGLE_API_KEY } from '$env/static/private';
 
 const require = createRequire(import.meta.url);
 const execAsync = promisify(exec);
@@ -59,8 +60,15 @@ export const POST: RequestHandler = async ({ request }) => {
 			await writeFile(tempVideoPath, buffer);
 			inputPath = tempVideoPath;
 		} else if (videoUrl && videoUrl.startsWith('http')) {
-			// GCS or remote URL — FFmpeg can fetch it directly
-			inputPath = videoUrl;
+			// Remote URL — FFmpeg fetches directly.
+			// Gemini Files API URLs need the API key and download path added server-side.
+			if (videoUrl.includes('generativelanguage.googleapis.com')) {
+				inputPath = videoUrl.includes('?')
+					? `${videoUrl}&key=${GOOGLE_API_KEY}`
+					: `${videoUrl}:download?alt=media&key=${GOOGLE_API_KEY}`;
+			} else {
+				inputPath = videoUrl;
+			}
 		} else {
 			return new Response(JSON.stringify({ error: 'No valid video source provided' }), {
 				status: 400,
