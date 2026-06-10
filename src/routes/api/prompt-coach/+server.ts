@@ -250,10 +250,13 @@ function extractContextFromResponse(text: string, currentContext: any) {
 function extractPromptsFromMessage(text: string): Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> {
 	const prompts: Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> = [];
 
-	// First try: extract from ENGINEERED PROMPTS section specifically
+	// Only extract from within the ENGINEERED PROMPTS section.
+	// If that section isn't present the AI is still in intake mode — return nothing.
 	const sectionPattern = /ENGINEERED PROMPTS[\s\S]*?\n([\s\S]+?)(?:\n#{1,3}\s|\n💡|$)/i;
 	const sectionMatch = text.match(sectionPattern);
-	const searchText = sectionMatch?.[1] ?? text;
+	if (!sectionMatch?.[1]) return prompts;
+
+	const searchText = sectionMatch[1];
 
 	// Match numbered items: "1.", "2.", "3." — handles bold (**1.**) and plain (1.)
 	const numberedPattern = /(?:^|\n)\*{0,2}\d+\.\*{0,2}\s+(.+?)(?=\n\*{0,2}\d+\.\*{0,2}\s|\n#{1,3}\s|💡|$)/gms;
@@ -262,7 +265,8 @@ function extractPromptsFromMessage(text: string): Array<{ text: string; quality:
 	for (const match of matches) {
 		if (match[1]) {
 			const promptText = match[1].replace(/\*+/g, '').trim();
-			if (promptText.length > 40) {
+			// Skip intake questions and anything too short to be a real generation prompt
+			if (promptText.length > 40 && !promptText.endsWith('?')) {
 				prompts.push({ text: promptText, quality: assessPromptQuality(promptText) });
 			}
 		}
