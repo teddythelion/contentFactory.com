@@ -178,13 +178,13 @@ Use all available context to deliver increasingly specific research output. If n
 
 		const extractedContext = extractContextFromResponse(text, context);
 		const promptsInfo = extractPromptsFromMessage(text);
-		const proTip = extractProTip(text);
+		const researchInsights = extractResearchInsights(text);
 
 		return json({
 			message: text,
 			context: extractedContext,
 			prompts: promptsInfo,
-			proTip,
+			researchInsights,
 			usage: response.usage
 		});
 	} catch (error) {
@@ -275,10 +275,14 @@ function extractPromptsFromMessage(text: string): Array<{ text: string; quality:
 	return prompts;
 }
 
-function extractProTip(text: string): string | null {
-	const pattern = /💡\s*PRO TIP:?\s*([\s\S]+?)(?:\n\n|$)/i;
-	const match = text.match(pattern);
-	return match?.[1]?.trim() ?? null;
+function extractResearchInsights(text: string): { proTip: string | null; reference: string | null } {
+	const proTipMatch = text.match(/💡\s*PRO TIP:?\s*([\s\S]+?)(?:\n\n|$)/i);
+	const proTip = proTipMatch?.[1]?.trim() ?? null;
+
+	const refMatch = text.match(/3D REFERENCE SUGGESTION[\s\S]*?\n([\s\S]+?)(?:\n#{1,3}\s|\n💡|$)/i);
+	const reference = refMatch?.[1]?.trim() ?? null;
+
+	return { proTip, reference };
 }
 
 function assessPromptQuality(prompt: string): 'draft' | 'good' | 'excellent' {

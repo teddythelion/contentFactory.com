@@ -10,8 +10,8 @@
 	let isLoading = $state(false);
 	let chatContainer = $state<HTMLDivElement>();
 	let suggestedPrompts = $state<Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }>>([]);
-	let proTipData = $state<string | null>(null);
-	let showProTipModal = $state(false);
+	let researchInsights = $state<{ proTip: string | null; reference: string | null } | null>(null);
+	let showInsightsModal = $state(false);
 	let showAuthToast = $state(false);
 	let showAuthModal = $state(false);
 	let lastMessageCount = $state(0);
@@ -101,9 +101,9 @@
 				workflowContext.setGeneratedPrompt(data.prompts[0].text, data.prompts[0].quality);
 			}
 
-			if (data.proTip) {
-				proTipData = data.proTip;
-				showProTipModal = true;
+			if (data.researchInsights?.proTip || data.researchInsights?.reference) {
+				researchInsights = data.researchInsights;
+				showInsightsModal = true;
 			}
 		} catch (error) {
 			workflowContext.addMessage('assistant', "I'm having trouble connecting right now. Please try again in a moment.");
@@ -173,22 +173,33 @@
 	</div>
 {/if}
 
-<!-- Pro Tip Modal -->
-{#if showProTipModal && proTipData}
+<!-- Research Insights Modal -->
+{#if showInsightsModal && researchInsights}
 	<div class="fixed top-20 right-2 z-50 w-[calc(100vw-1rem)] sm:right-4 sm:w-96">
 		<div class="card border border-secondary/30 bg-base-300 shadow-2xl">
 			<div class="card-body p-4">
-				<div class="mb-2 flex items-start justify-between">
+				<div class="mb-3 flex items-start justify-between">
 					<div class="flex items-center gap-2">
 						<span class="text-xl">📊</span>
 						<div>
-							<p class="text-sm font-bold text-secondary">Research Insight</p>
-							<p class="text-xs opacity-50">Why this works</p>
+							<p class="text-sm font-bold text-secondary">Research Insights</p>
+							<p class="text-xs opacity-50">Data-driven context for your content</p>
 						</div>
 					</div>
-					<button onclick={() => (showProTipModal = false)} class="btn btn-circle btn-ghost btn-xs">✕</button>
+					<button onclick={() => (showInsightsModal = false)} class="btn btn-circle btn-ghost btn-xs">✕</button>
 				</div>
-				<p class="text-sm leading-relaxed whitespace-pre-wrap opacity-90">{proTipData}</p>
+				{#if researchInsights.proTip}
+					<div class="mb-3">
+						<p class="mb-1 text-xs font-semibold uppercase tracking-wide opacity-40">Key Insight</p>
+						<p class="text-sm leading-relaxed whitespace-pre-wrap opacity-90">{researchInsights.proTip}</p>
+					</div>
+				{/if}
+				{#if researchInsights.reference}
+					<div class={researchInsights.proTip ? 'border-t border-base-content/10 pt-3' : ''}>
+						<p class="mb-1 text-xs font-semibold uppercase tracking-wide opacity-40">3D Reference</p>
+						<p class="text-sm leading-relaxed whitespace-pre-wrap opacity-90">{researchInsights.reference}</p>
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
