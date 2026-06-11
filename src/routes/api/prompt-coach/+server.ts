@@ -179,6 +179,7 @@ Use all available context to deliver increasingly specific research output. If n
 		const extractedContext = extractContextFromResponse(text, context);
 		const promptsInfo = extractPromptsFromMessage(text);
 		const researchInsights = extractResearchInsights(text);
+		console.log(`🎯 Prompts extracted: ${promptsInfo.length} | Has ENGINEERED PROMPTS section: ${/ENGINEERED PROMPTS/i.test(text)}`);
 
 		return json({
 			message: text,
@@ -259,7 +260,9 @@ function extractPromptsFromMessage(text: string): Array<{ text: string; quality:
 	const searchText = sectionMatch[1];
 
 	// Match numbered items: "1.", "2.", "3." — handles bold (**1.**) and plain (1.)
-	const numberedPattern = /(?:^|\n)\*{0,2}\d+\.\*{0,2}\s+(.+?)(?=\n\*{0,2}\d+\.\*{0,2}\s|\n#{1,3}\s|💡|$)/gms;
+	// gs flags only — no m flag, so $ means end-of-string not end-of-line.
+	// With m flag, $ would truncate multi-line prompts to just the first line.
+	const numberedPattern = /(?:^|\n)\*{0,2}\d+\.\*{0,2}\s+(.+?)(?=\n\*{0,2}\d+\.\*{0,2}\s|\n#{1,3}\s|💡|$)/gs;
 	const matches = searchText.matchAll(numberedPattern);
 
 	for (const match of matches) {
