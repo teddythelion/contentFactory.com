@@ -56,6 +56,14 @@
 		}
 	});
 
+	$effect(() => {
+		if (suggestedPrompts.length > 0 && chatContainer) {
+			setTimeout(() => {
+				chatContainer.scrollTop = chatContainer.scrollHeight;
+			}, 50);
+		}
+	});
+
 	async function sendMessage() {
 		if (!$authStore.user) {
 			showAuthToast = true;
