@@ -283,25 +283,23 @@
 					<span>✨</span> Engineered Prompts
 				</p>
 				{#each suggestedPrompts as prompt, index (index)}
-					<div class="rounded-xl border border-success/40 bg-success/5 p-3 ring-1 ring-success/20">
+					<div class="w-full rounded-lg border border-success/30 bg-success/10 p-2 sm:max-w-[70%] sm:p-3">
 						<!-- Badge row -->
 						<div class="mb-2 flex items-center gap-2">
-							<span class="badge badge-xs border-success/40 text-success">#{index + 1}</span>
+							<span class="badge badge-xs border-success/40 text-success badge-success">#{index + 1}</span>
 							{#if prompt.quality === 'excellent'}
-								<span class="badge badge-xs badge-success">Excellent</span>
+								<span class="badge badge-xs badge-info">Excellent</span>
 							{:else if prompt.quality === 'good'}
-								<span class="badge badge-xs border-success/30 text-success/70">Good</span>
+								<span class="badge badge-xs border-success/30 text-success/70 badge-ghost">Good</span>
 							{/if}
 							<button onclick={(e) => copyPrompt(prompt.text, e)} class="btn btn-ghost btn-xs ml-auto text-success/60 hover:text-success">
-								📋 Copy
+								📋 <span class="ml-1 hidden sm:inline">Copy</span>
 							</button>
 						</div>
 
 						<!-- Prompt text -->
-						<p class="mb-3 text-xs leading-relaxed text-success/90">{prompt.text}</p>
-
-						<!-- Action buttons -->
-						<div class="grid grid-cols-2 gap-2">
+						<p class="mb-3 text-xs leading-relaxed text-success/90">{prompt.text}</p>						
+						
 							<button
 								onclick={() => goToCreate(prompt.text, 'image')}
 								class="btn btn-sm border-success/40 bg-success/10 text-success hover:bg-success hover:text-white"
@@ -314,7 +312,7 @@
 							>
 								🎬 Video Gen
 							</button>
-						</div>
+						
 					</div>
 				{/each}
 			</div>
