@@ -298,20 +298,23 @@
 						</div>
 
 						<!-- Prompt text -->
-						<p class="mb-3 text-xs leading-relaxed text-success/90">{prompt.text}</p>						
-						
+						<p class="mb-3 text-xs leading-relaxed text-success/90">{prompt.text}</p>
+
+						<!-- Action buttons -->
+						<div class="flex gap-2">
 							<button
 								onclick={() => goToCreate(prompt.text, 'image')}
-								class="btn btn-sm border-success/40 bg-success/10 text-success hover:bg-success hover:text-white"
+								class="btn btn-sm flex-1 border border-success/40 bg-success/15 text-success hover:bg-success hover:text-black"
 							>
-								🖼️ Image Gen
+								🖼️ Image
 							</button>
 							<button
 								onclick={() => goToCreate(prompt.text, 'video')}
-								class="btn btn-sm border-success/40 bg-success/10 text-success hover:bg-success hover:text-white"
+								class="btn btn-sm flex-1 border border-success/40 bg-success/15 text-success hover:bg-success hover:text-black"
 							>
-								🎬 Video Gen
+								🎬 Video
 							</button>
+						</div>
 						
 					</div>
 				{/each}
