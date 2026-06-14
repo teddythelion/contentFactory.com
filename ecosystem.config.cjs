@@ -8,7 +8,7 @@ module.exports = {
 			env: {
 				NODE_ENV: 'production',
 				PORT: 3000,
-				BODY_SIZE_LIMIT: '500mb'
+				BODY_SIZE_LIMIT: 524288000
 			}
 		}
 	]
