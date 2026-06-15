@@ -264,16 +264,9 @@ class AudioMixer {
 		const s = this.state;
 		const ctx = Tone.getContext().rawContext as AudioContext;
 
-		// Raw GainNode for fade control — sits between Tone.Volume and destination
 		this.musicRawGain = ctx.createGain();
 		this.musicRawGain.gain.value = s.musicVolume;
 		this.musicRawGain.connect(ctx.destination);
-
-		// Tone.Volume at unity (0 dB) just for connecting the Player into the graph
-		this.musicGain = new Tone.Volume(0);
-		// Disconnect Tone's default routing, reconnect output to our raw gain node
-		(this.musicGain as any).output.disconnect();
-		(this.musicGain as any).output.connect(this.musicRawGain);
 
 		this.musicPlayer = new Tone.Player({
 			url: previewUrl,
@@ -283,7 +276,10 @@ class AudioMixer {
 				console.log(`🎵 AudioMixer: Music loaded (${dur.toFixed(2)}s) — awaiting playhead sync`);
 				onLoaded?.(dur);
 			}
-		}).connect(this.musicGain);
+		});
+
+		// Connect player directly to raw GainNode — avoids Tone.Volume internal routing issues
+		(this.musicPlayer as any).connect(this.musicRawGain);
 	}
 
 	// ── Playhead-driven music sync ────────────────────────────────────────────
@@ -318,7 +314,7 @@ class AudioMixer {
 	}
 
 	private _startMusicFrom(bufferOffset: number, duration: number) {
-		if (!this.musicPlayer?.loaded || !this.musicGain) return;
+		if (!this.musicPlayer?.loaded || !this.musicRawGain) return;
 		this.clearMusicTimer();
 
 		const bufferDuration = this.musicPlayer.buffer.duration;

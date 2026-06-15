@@ -54,21 +54,24 @@ export const POST: RequestHandler = async ({ request }) => {
 		let inputPath: string;
 
 		if (videoFile) {
-			// Local upload — came in as a File (base64 was decoded client side into a Blob)
 			tempVideoPath = path.join(audioDir, `input-${sessionId}.mp4`);
 			const buffer = Buffer.from(await videoFile.arrayBuffer());
 			await writeFile(tempVideoPath, buffer);
 			inputPath = tempVideoPath;
 		} else if (videoUrl && videoUrl.startsWith('http')) {
-			// Remote URL — FFmpeg fetches directly.
-			// Gemini Files API URLs need the API key and download path added server-side.
+			// Always download to a temp file — passing URLs with & directly to exec()
+			// causes the shell to split the command at the & character.
+			let fetchUrl = videoUrl;
 			if (videoUrl.includes('generativelanguage.googleapis.com')) {
-				inputPath = videoUrl.includes('?')
+				fetchUrl = videoUrl.includes('?')
 					? `${videoUrl}&key=${GOOGLE_API_KEY}`
 					: `${videoUrl}:download?alt=media&key=${GOOGLE_API_KEY}`;
-			} else {
-				inputPath = videoUrl;
 			}
+			const res = await fetch(fetchUrl);
+			if (!res.ok) throw new Error(`Failed to download video: ${res.status} ${res.statusText}`);
+			tempVideoPath = path.join(audioDir, `input-${sessionId}.mp4`);
+			await writeFile(tempVideoPath, Buffer.from(await res.arrayBuffer()));
+			inputPath = tempVideoPath;
 		} else {
 			return new Response(JSON.stringify({ error: 'No valid video source provided' }), {
 				status: 400,

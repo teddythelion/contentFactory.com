@@ -50,16 +50,22 @@
 	$effect(() => {
 		if ($workflowContext.chatHistory.length > lastMessageCount && chatContainer) {
 			lastMessageCount = $workflowContext.chatHistory.length;
+			const container = chatContainer;
 			setTimeout(() => {
-				chatContainer.scrollTop = chatContainer.scrollHeight;
+				if (container) {
+					container.scrollTop = container.scrollHeight;
+				}
 			}, 100);
 		}
 	});
 
 	$effect(() => {
 		if (suggestedPrompts.length > 0 && chatContainer) {
+			const container = chatContainer;
 			setTimeout(() => {
-				chatContainer.scrollTop = chatContainer.scrollHeight;
+				if (container) {
+					container.scrollTop = container.scrollHeight;
+				}
 			}, 50);
 		}
 	});
@@ -114,6 +120,7 @@
 				showInsightsModal = true;
 			}
 		} catch (error) {
+			console.error('Error communicating with Prompt Coach API:', error);
 			workflowContext.addMessage('assistant', "I'm having trouble connecting right now. Please try again in a moment.");
 		} finally {
 			isLoading = false;
@@ -223,7 +230,7 @@
 		</div>
 		<div>
 			<h2 class="text-sm font-bold sm:text-base">Prompt Engineer</h2>
-			<p class="text-xs opacity-50">Niche research · Audience psychology · Optimized prompts</p>
+			<p class="text-sm text-secondary ">Niche research · Audience psychology · Optimized prompts</p>
 		</div>
 		{#if suggestedPrompts.length > 0}
 			<button onclick={() => { suggestedPrompts = []; }} class="btn btn-ghost btn-xs ml-auto opacity-50">Clear</button>
@@ -236,7 +243,7 @@
 		<!-- Quick starts (first message only) -->
 		{#if $workflowContext.chatHistory.length === 1}
 			<div class="flex flex-wrap gap-2 pb-1">
-				{#each quickStarts as s}
+				{#each quickStarts as s (s.type)}
 					<button
 						onclick={() => handleQuickStart(s)}
 						class="btn btn-xs btn-outline border-base-300 hover:btn-secondary"
@@ -286,7 +293,7 @@
 					<div class="w-full rounded-lg border border-success/30 bg-success/10 p-2 sm:max-w-[70%] sm:p-3">
 						<!-- Badge row -->
 						<div class="mb-2 flex items-center gap-2">
-							<span class="badge badge-xs border-success/40 text-success badge-success">#{index + 1}</span>
+							<span class="badge badge-xs border-success/40 text-default badge-success">#{index + 1}</span>
 							{#if prompt.quality === 'excellent'}
 								<span class="badge badge-xs badge-info">Excellent</span>
 							{:else if prompt.quality === 'good'}

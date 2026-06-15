@@ -376,15 +376,18 @@ let showAuthModal = $state(false);
 		if (!requireAuth() || !activeUrl) return;
 
 		if (activeContentType === 'video') {
-			status = 'Preparing editor...';
+			// Open the enhancer immediately — don't block on audio extraction.
+			// Audio extracts in the background and will be ready long before the user finishes
+			// setting up their Three.js scene and starts capturing.
+			audioSessionId = null;
+			showVideoEnhancer = true;
+
 			try {
 				const fd = new FormData();
 				if (activeUrl.startsWith('data:video') || activeUrl.startsWith('blob:')) {
 					const blob = await (await fetch(activeUrl)).blob();
 					fd.append('videoFile', blob, 'video.mp4');
 				} else if (activeUrl.startsWith('/api/proxyVideo')) {
-					// Proxy URL — extract the underlying Gemini/GCS URL.
-					// extractAudio server adds the API key itself (same as proxyVideo).
 					const params = new URLSearchParams(activeUrl.split('?')[1] ?? '');
 					const underlyingUrl = params.get('url');
 					fd.append('videoUrl', underlyingUrl ?? activeUrl);
@@ -394,8 +397,6 @@ let showAuthModal = $state(false);
 				const res = await fetch('/api/extractAudio', { method: 'POST', body: fd });
 				audioSessionId = res.ok ? ((await res.json()).audioSessionId ?? null) : null;
 			} catch { audioSessionId = null; }
-			status = '';
-			showVideoEnhancer = true;
 		} else {
 			showImageEnhancer = true;
 		}

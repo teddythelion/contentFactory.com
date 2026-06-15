@@ -167,7 +167,7 @@ Use all available context to deliver increasingly specific research output. If n
 			model: 'claude-opus-4-7',
 			max_tokens: 3000,
 			system: SYSTEM_PROMPT + contextPrompt,
-			messages: messages.map((msg: any) => ({
+			messages: messages.map((msg: { role: string; content: string }) => ({
 				role: msg.role,
 				content: msg.content
 			}))
@@ -197,8 +197,8 @@ Use all available context to deliver increasingly specific research output. If n
 	}
 };
 
-function extractContextFromResponse(text: string, currentContext: any) {
-	const updates: any = { ...currentContext };
+function extractContextFromResponse(text: string, currentContext: Record<string, string>) {
+	const updates: Record<string, string> = { ...currentContext };
 	const lowerText = text.toLowerCase();
 
 	const contentTypes: Record<string, string[]> = {
@@ -251,24 +251,34 @@ function extractContextFromResponse(text: string, currentContext: any) {
 function extractPromptsFromMessage(text: string): Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> {
 	const prompts: Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }> = [];
 
-	// Only extract from within the ENGINEERED PROMPTS section.
-	// If that section isn't present the AI is still in intake mode — return nothing.
 	const sectionPattern = /ENGINEERED PROMPTS[\s\S]*?\n([\s\S]+?)(?:\n#{1,3}\s|\n💡|$)/i;
 	const sectionMatch = text.match(sectionPattern);
 	if (!sectionMatch?.[1]) return prompts;
 
 	const searchText = sectionMatch[1];
 
-	// Match numbered items: "1.", "2.", "3." — handles bold (**1.**) and plain (1.)
-	// gs flags only — no m flag, so $ means end-of-string not end-of-line.
-	// With m flag, $ would truncate multi-line prompts to just the first line.
-	const numberedPattern = /(?:^|\n)\*{0,2}\d+\.\*{0,2}\s+(.+?)(?=\n\*{0,2}\d+\.\*{0,2}\s|\n#{1,3}\s|💡|$)/gs;
-	const matches = searchText.matchAll(numberedPattern);
+	// Model often outputs **Prompt 1 — Title:**\n[prompt text] instead of 1. [text]
+	const boldPromptPattern = /\*\*Prompt\s+\d+[^*\n]*\*\*:?\s*\n+([\s\S]+?)(?=\n\n\*\*Prompt\s+\d+|\n#{1,3}\s|💡|$)/gi;
+	const boldMatches = [...searchText.matchAll(boldPromptPattern)];
 
-	for (const match of matches) {
+	if (boldMatches.length > 0) {
+		for (const match of boldMatches) {
+			if (match[1]) {
+				const promptText = match[1].replace(/\*+/g, '').trim();
+				if (promptText.length > 40 && !promptText.endsWith('?')) {
+					prompts.push({ text: promptText, quality: assessPromptQuality(promptText) });
+				}
+			}
+		}
+		return prompts;
+	}
+
+	// Fallback: plain numbered list 1. 2. 3.
+	// gs flags only — no m flag, so $ means end-of-string not end-of-line.
+	const numberedPattern = /(?:^|\n)\*{0,2}\d+\.\*{0,2}\s+(.+?)(?=\n\*{0,2}\d+\.\*{0,2}\s|\n#{1,3}\s|💡|$)/gs;
+	for (const match of searchText.matchAll(numberedPattern)) {
 		if (match[1]) {
 			const promptText = match[1].replace(/\*+/g, '').trim();
-			// Skip intake questions and anything too short to be a real generation prompt
 			if (promptText.length > 40 && !promptText.endsWith('?')) {
 				prompts.push({ text: promptText, quality: assessPromptQuality(promptText) });
 			}
@@ -293,7 +303,7 @@ function assessPromptQuality(prompt: string): 'draft' | 'good' | 'excellent' {
 	const hasStyleRef = /\b(cinematic|photorealistic|atmospheric|dynamic|intimate|editorial)\b/i.test(prompt);
 	const hasLighting = /\b(lighting|shadows|golden hour|studio|natural light|backlit)\b/i.test(prompt);
 	const hasSubject = /\b(woman|man|person|people|subject|figure|group)\b/i.test(prompt);
-	const hasSpecificity = /\b(aged?|year[s\-]old|demographic|cultural|urban|suburban|professional)\b/i.test(prompt);
+	const hasSpecificity = /\b(aged?|year[s-]old|demographic|cultural|urban|suburban|professional)\b/i.test(prompt);
 
 	let score = 0;
 	if (wordCount >= 20) score++;

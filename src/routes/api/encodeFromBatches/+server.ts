@@ -7,7 +7,7 @@
 import type { RequestHandler } from './$types';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { unlink, readdir, rmdir, rename } from 'fs/promises';
+import { unlink, readdir, rmdir, rename, stat, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
@@ -102,9 +102,14 @@ async function runEncode(
 		const sfxFile = path.join(audioDir, `sfx-${sfxSessionId}.mp3`);
 		const musicFile = path.join(audioDir, `music-${musicSessionId}.mp3`);
 
-		const hasAudio = audioSessionId && existsSync(audioFile);
-		const hasSfx = sfxSessionId && existsSync(sfxFile);
-		const hasMusic = musicSessionId && existsSync(musicFile);
+		const validFile = async (p: string) => {
+			if (!existsSync(p)) return false;
+			const s = await stat(p).catch(() => null);
+			return s ? s.size > 1024 : false;
+		};
+		const hasAudio = audioSessionId && await validFile(audioFile);
+		const hasSfx = sfxSessionId && await validFile(sfxFile);
+		const hasMusic = musicSessionId && await validFile(musicFile);
 
 		const hasAnyAudioOutput = (hasAudio && !suppressOriginalAudio) || hasSfx || hasMusic;
 

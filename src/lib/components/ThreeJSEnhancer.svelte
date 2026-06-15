@@ -4,6 +4,8 @@
 	import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 	import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 
+	type ShaderUniformRecord = Record<string, { value: unknown }>;
+
 	export let imageUrl: string = '';
 	export let onClose: () => void;
 	export let onSendToVideoRefs: ((dataUrl: string) => void) | null = null;
@@ -59,7 +61,7 @@
 	let bevelEnabled = true;
 	let bevelThickness = 0.05;
 	let bevelSize = 0.02;
-	let loadedFont: any = null;
+	let loadedFont: THREE.Font | null = null;
 
 	// ===== CROP & STRAIGHTEN =====
 	let cropLeft = 0;
@@ -140,7 +142,7 @@
 	let isRegenerating = false;
 
 	// Shader uniform reference for real-time updates
-	let meshShaderRef: { uniforms: Record<string, { value: any }> } | null = null;
+	let meshShaderRef: { uniforms: ShaderUniformRecord } | null = null;
 
 	// ===== PROCESSING PIPELINE (for 3D shapes) =====
 	// Renders the image through our adjustment shader into a RenderTarget,
@@ -148,7 +150,7 @@
 	let processScene: THREE.Scene | null = null;
 	let processCamera: THREE.OrthographicCamera | null = null;
 	let processTarget: THREE.WebGLRenderTarget | null = null;
-	let processShaderRef: { uniforms: Record<string, { value: any }> } | null = null;
+	let processShaderRef: { uniforms: ShaderUniformRecord } | null = null;
 
 	// ===== FILTER PRESETS =====
 	const filterPresets: Record<
@@ -577,7 +579,7 @@
 				side: THREE.DoubleSide,
 				depthWrite: false
 			});
-			meshShaderRef = mat as any;
+			meshShaderRef = mat as unknown as { uniforms: ShaderUniformRecord };
 			material = mat;
 		} else {
 			// 3D shapes — use plain MeshStandardMaterial; adjustments are pre-processed
