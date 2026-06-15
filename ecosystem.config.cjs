@@ -8,7 +8,8 @@ module.exports = {
 			env: {
 				NODE_ENV: 'production',
 				PORT: 3000,
-				BODY_SIZE_LIMIT: 524288000
+				BODY_SIZE_LIMIT: 524288000,
+				SERVICE_ACCOUNT_PATH: './service-account.json'
 			}
 		}
 	]

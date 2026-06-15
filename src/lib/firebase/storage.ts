@@ -5,7 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 // Initialize Google Cloud Storage using service account path from env
 const storage = new Storage({
-	keyFilename: env.SERVICE_ACCOUNT_PATH
+	keyFilename: env.SERVICE_ACCOUNT_PATH || './service-account.json'
 });
 
 const BUCKET_NAME = env.GOOGLE_STORAGE_BUCKET || 'project_app_bucket';
