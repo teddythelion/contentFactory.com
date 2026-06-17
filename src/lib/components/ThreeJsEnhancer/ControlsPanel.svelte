@@ -336,6 +336,11 @@ let musicMaxTime = $derived(videoDuration);
 				{ label: 'Video Texture Scale', type: 'range', min: 0.1, max: 5, step: 0.1 },
 				{ label: 'Video Texture Position X', type: 'range', min: -2, max: 2, step: 0.1 },
 				{ label: 'Video Texture Position Y', type: 'range', min: -2, max: 2, step: 0.1 },
+				{ label: '⏱️ Timing', type: 'section' },
+				{ label: 'Appear At (s)', type: 'range', min: 0, max: 600, step: 0.5 },
+				{ label: 'Disappear At (s)', type: 'range', min: 0.5, max: 600, step: 0.5 },
+				{ label: 'Text Fade In', type: 'range', min: 0, max: 10, step: 0.1 },
+				{ label: 'Text Fade Out', type: 'range', min: 0, max: 10, step: 0.1 },
 				{ label: '💡 Bold Title Preset', type: 'button', action: () => text3DState.presets.title() },
 				{ label: '✨ Subtle Subtitle Preset', type: 'button', action: () => text3DState.presets.subtitle() },
 				{ label: '🌟 Neon Glow Preset', type: 'button', action: () => text3DState.presets.neon() },
@@ -417,6 +422,10 @@ let musicMaxTime = $derived(videoDuration);
 				case 'Video Texture Position X': return $text3DState.videoTextureOffset.x;
 				case 'Video Texture Position Y': return $text3DState.videoTextureOffset.y;
 				case 'True 3D Font': return $text3DState.true3dFontFile;
+				case 'Appear At (s)': return $text3DState.textStartTime;
+				case 'Disappear At (s)': return $text3DState.textEndTime === 9999 ? 600 : $text3DState.textEndTime;
+				case 'Text Fade In': return $text3DState.textFadeIn;
+				case 'Text Fade Out': return $text3DState.textFadeOut;
 			}
 		}
 		if (groupId === 'logo') {
@@ -537,6 +546,10 @@ let musicMaxTime = $derived(videoDuration);
 				case 'Video Texture Position X': text3DState.updateProperty('videoTextureOffset', { ...$text3DState.videoTextureOffset, x: value }); break;
 				case 'Video Texture Position Y': text3DState.updateProperty('videoTextureOffset', { ...$text3DState.videoTextureOffset, y: value }); break;
 				case 'True 3D Font': text3DState.setTrue3dFont(value as string); break;
+				case 'Appear At (s)': text3DState.setTextStartTime(value); break;
+				case 'Disappear At (s)': text3DState.setTextEndTime(value); break;
+				case 'Text Fade In': text3DState.setTextFadeIn(value); break;
+				case 'Text Fade Out': text3DState.setTextFadeOut(value); break;
 			}
 			return;
 		}

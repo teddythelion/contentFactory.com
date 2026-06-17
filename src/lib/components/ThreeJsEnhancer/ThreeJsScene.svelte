@@ -242,7 +242,8 @@
 					mesh.material.emissiveIntensity = videoGlow + shapeGlow;
 				}
 			}
-			if (threeJsTextComponent) threeJsTextComponent.updateAnimation(time);
+			// During capture, time IS video time — pass as both args
+			if (threeJsTextComponent) threeJsTextComponent.updateAnimation(time, time);
 			if (threeJsLogoComponent) threeJsLogoComponent.updateAnimation(time);
 			updateParticles(time);
 			camera.position.z = cameraDistance;
@@ -707,7 +708,8 @@
 			}
 		}
 
-		if (threeJsTextComponent) threeJsTextComponent.updateAnimation(animationTime);
+		const videoTime = videoElement?.currentTime ?? 0;
+		if (threeJsTextComponent) threeJsTextComponent.updateAnimation(animationTime, videoTime);
 		if (threeJsLogoComponent) threeJsLogoComponent.updateAnimation(animationTime);
 		updateParticles(animationTime);
 

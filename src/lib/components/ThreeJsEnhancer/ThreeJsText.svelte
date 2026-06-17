@@ -378,15 +378,40 @@
 			textMesh.sync();
 		}
 	}
-	export function updateAnimation(animationTime: number) {
-		// Route to whichever mesh is active
+	export function updateAnimation(animationTime: number, videoTime?: number) {
+		const vt = videoTime ?? animationTime;
+		const opacity = computeTextOpacity(vt);
+
 		if (textState.textMode === 'true3d') {
 			if (!trueTextMesh || !textState.enabled || !trueTextMesh.visible) return;
-			animateMesh(trueTextMesh, animationTime, false);
+			applyTrueTextOpacity(trueTextMesh, opacity);
+			if (opacity > 0) animateMesh(trueTextMesh, animationTime, false);
 			return;
 		}
 		if (!textMesh || !textState.enabled || !textMesh.visible) return;
-		animateMesh(textMesh, animationTime, true);
+		textMesh.fillOpacity = opacity;
+		if (textMesh.outlineOpacity !== undefined) textMesh.outlineOpacity = opacity;
+		textMesh.sync?.();
+		if (opacity > 0) animateMesh(textMesh, animationTime, true);
+	}
+
+	function computeTextOpacity(videoTime: number): number {
+		const { textStartTime, textEndTime, textFadeIn, textFadeOut } = textState;
+		if (videoTime < textStartTime || videoTime >= textEndTime) return 0;
+		let opacity = 1;
+		const sinceStart = videoTime - textStartTime;
+		if (textFadeIn > 0 && sinceStart < textFadeIn) opacity = Math.min(opacity, sinceStart / textFadeIn);
+		const untilEnd = textEndTime - videoTime;
+		if (textFadeOut > 0 && untilEnd < textFadeOut) opacity = Math.min(opacity, untilEnd / textFadeOut);
+		return Math.max(0, Math.min(1, opacity));
+	}
+
+	function applyTrueTextOpacity(mesh: THREE.Mesh, opacity: number) {
+		const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+		for (const mat of mats) {
+			(mat as THREE.MeshStandardMaterial).transparent = true;
+			(mat as THREE.MeshStandardMaterial).opacity = opacity;
+		}
 	}
 
 	function animateMesh(mesh: any, animationTime: number, isTroika: boolean) {

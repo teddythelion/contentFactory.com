@@ -66,6 +66,12 @@ export interface Text3DState {
 	bevelSegments: number; // Not used in Troika
 	curveSegments: number; // Not used in Troika
 
+	// Timing & Fade
+	textStartTime: number;  // video time (seconds) when text appears
+	textEndTime: number;    // video time (seconds) when text disappears (9999 = until end)
+	textFadeIn: number;     // fade-in duration (seconds)
+	textFadeOut: number;    // fade-out duration (seconds)
+
 	// Animation
 	autoRotate: boolean;
 	autoRotateSpeed: number;
@@ -113,6 +119,12 @@ const initialState: Text3DState = {
 		y: 0,
 		z: 0
 	},
+	// Timing & Fade
+	textStartTime: 0,
+	textEndTime: 9999,
+	textFadeIn: 0,
+	textFadeOut: 0,
+
 	// Animation
 	autoRotate: false,
 	autoRotateSpeed: 0.01,
@@ -155,6 +167,11 @@ function createText3DStore() {
 		updateProperty: <K extends keyof Text3DState>(key: K, value: Text3DState[K]) => {
 			update((state) => ({ ...state, [key]: value }));
 		},
+
+		setTextStartTime: (v: number) => update((s) => ({ ...s, textStartTime: v })),
+		setTextEndTime: (v: number) => update((s) => ({ ...s, textEndTime: v })),
+		setTextFadeIn: (v: number) => update((s) => ({ ...s, textFadeIn: v })),
+		setTextFadeOut: (v: number) => update((s) => ({ ...s, textFadeOut: v })),
 
 		// Toggle 3D text on/off
 		toggle: () => {
