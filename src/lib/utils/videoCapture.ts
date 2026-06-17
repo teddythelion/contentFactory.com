@@ -204,7 +204,11 @@ export async function captureThreeJsVideo(
 				musicStartTime: audioStudio.musicStartTime,
 				musicEndTime: audioStudio.musicEndTime,
 				musicFadeIn: audioStudio.musicFadeIn,
-				musicFadeOut: audioStudio.musicFadeOut
+				musicFadeOut: audioStudio.musicFadeOut,
+				originalFadeIn: audioStudio.originalFadeIn,
+				originalFadeOut: audioStudio.originalFadeOut,
+				videoFadeIn: audioStudio.videoFadeIn,
+				videoFadeOut: audioStudio.videoFadeOut
 			})
 		});
 

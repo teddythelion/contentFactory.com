@@ -14,6 +14,10 @@ export interface SfxInstance {
 interface AudioStudioState {
 	originalVolume: number;
 	originalMuted: boolean;
+	originalFadeIn: number;
+	originalFadeOut: number;
+	videoFadeIn: number;
+	videoFadeOut: number;
 	musicDuration: number;
 	sfxPrompt: string;
 	sfxSessionId: string | null;
@@ -47,7 +51,11 @@ interface AudioStudioState {
 const initialState: AudioStudioState = {
 	originalVolume: 1,
 	originalMuted: false,
-	musicDuration: 30,
+	originalFadeIn: 0,
+	originalFadeOut: 0,
+	videoFadeIn: 0,
+	videoFadeOut: 0,
+	musicDuration: 10,
 	sfxPrompt: '',
 	sfxSessionId: null,
 	sfxPreviewUrl: null,
@@ -116,6 +124,17 @@ function createAudioStudioStore() {
 		},
 
 		setMusicDuration: (v: number) => update((s) => ({ ...s, musicDuration: v })),
+
+		setOriginalFadeIn: (v: number) => {
+			update((s) => ({ ...s, originalFadeIn: v }));
+			audioMixer.setOriginalFadeIn(v);
+		},
+		setOriginalFadeOut: (v: number) => {
+			update((s) => ({ ...s, originalFadeOut: v }));
+			audioMixer.setOriginalFadeOut(v);
+		},
+		setVideoFadeIn: (v: number) => update((s) => ({ ...s, videoFadeIn: v })),
+		setVideoFadeOut: (v: number) => update((s) => ({ ...s, videoFadeOut: v })),
 
 		setOriginalMuted: (muted: boolean) => {
 			update((s) => ({ ...s, originalMuted: muted }));
@@ -350,6 +369,10 @@ function createAudioStudioStore() {
 			audioMixer.stopMusic();
 			update((s) => ({ ...s, musicSessionId: null, musicPreviewUrl: null }));
 			generateFn();
+		},
+
+		syncOriginalFadeToVideo: (videoTime: number, duration: number) => {
+			audioMixer.syncOriginalFadeToVideo(videoTime, duration);
 		},
 
 		syncMusicToVideo: (videoTime: number, isPlaying: boolean) => {

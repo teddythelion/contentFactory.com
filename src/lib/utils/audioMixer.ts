@@ -44,6 +44,9 @@ class AudioMixer {
 	private lastMusicEndTime: number = -1;
 	private lastMusicTrimStart: number = -1;
 
+	private originalFadeIn: number = 0;
+	private originalFadeOut: number = 0;
+
 	private state: MixerState = {
 		originalVolume: 1,
 		originalMuted: false,
@@ -143,6 +146,26 @@ class AudioMixer {
 		const ctx = Tone.getContext().rawContext as AudioContext;
 		const targetGain = this.state.originalMuted ? 0 : this.state.originalVolume;
 		gainNode.gain.setTargetAtTime(targetGain, ctx.currentTime, 0.05);
+	}
+
+	setOriginalFadeIn(v: number) { this.originalFadeIn = v; }
+	setOriginalFadeOut(v: number) { this.originalFadeOut = v; }
+
+	// Called each animation frame — smoothly tracks gain based on fade progress
+	syncOriginalFadeToVideo(videoTime: number, duration: number) {
+		const gainNode = (this as any)._rawVideoGain as GainNode | null;
+		if (!gainNode || this.state.originalMuted) return;
+		const ctx = Tone.getContext().rawContext as AudioContext;
+		const baseGain = this.state.originalVolume;
+		let targetGain = baseGain;
+		if (this.originalFadeIn > 0 && videoTime < this.originalFadeIn) {
+			targetGain = baseGain * (videoTime / this.originalFadeIn);
+		}
+		if (this.originalFadeOut > 0 && duration > 0 && videoTime > duration - this.originalFadeOut) {
+			const remaining = duration - videoTime;
+			targetGain = Math.min(targetGain, baseGain * (remaining / this.originalFadeOut));
+		}
+		gainNode.gain.setTargetAtTime(Math.max(0, targetGain), ctx.currentTime, 0.02);
 	}
 
 	// ── SFX ──────────────────────────────────────────────────────────────────

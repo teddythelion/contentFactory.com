@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { authStore } from '$lib/stores/auth.store';
 	import { canGenerate, subscriptionStore } from '$lib/stores/subscription.store';
+	import { audioSessionStore } from '$lib/stores/audioSession.store';
 import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
 	import AuthModal from '$lib/components/AuthModal.svelte';
 	import ThreeJsEnhancer from '$lib/components/ThreeJsEnhancer/ThreeJsEnhancer.svelte';
@@ -395,8 +396,10 @@ let showAuthModal = $state(false);
 					fd.append('videoUrl', activeUrl);
 				}
 				const res = await fetch('/api/extractAudio', { method: 'POST', body: fd });
-				audioSessionId = res.ok ? ((await res.json()).audioSessionId ?? null) : null;
-			} catch { audioSessionId = null; }
+				const extractedId = res.ok ? ((await res.json()).audioSessionId ?? null) : null;
+				audioSessionId = extractedId;
+				audioSessionStore.set(extractedId);
+			} catch { audioSessionId = null; audioSessionStore.set(null); }
 		} else {
 			showImageEnhancer = true;
 		}

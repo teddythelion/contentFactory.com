@@ -67,6 +67,9 @@
 	$: particleRotation = $threeJsState.particleRotation;
 	$: particleColorMode = $threeJsState.particleColorMode;
 	$: particleGradientColor = $threeJsState.particleGradientColor;
+	$: videoFadeIn = $audioStudioStore.videoFadeIn;
+	$: videoFadeOut = $audioStudioStore.videoFadeOut;
+	let fadeOverlayOpacity = 0;
 
 	let isDragging = false;
 	let previousMousePosition = { x: 0, y: 0 };
@@ -712,6 +715,17 @@
 		if (ambientLight) ambientLight.intensity = ambientIntensity;
 		if (directionalLight) directionalLight.intensity = directionalIntensity;
 		if (renderer) renderer.render(scene, camera);
+
+		// Live fade-to-black preview + original audio fade — mirrors FFmpeg filters at export time
+		if (videoElement) {
+			const t = videoElement.currentTime;
+			const d = videoElement.duration || 0;
+			let op = 0;
+			if (videoFadeIn > 0 && t < videoFadeIn) op = Math.max(op, 1 - t / videoFadeIn);
+			if (videoFadeOut > 0 && d > 0 && t > d - videoFadeOut) op = Math.max(op, 1 - (d - t) / videoFadeOut);
+			fadeOverlayOpacity = Math.min(1, Math.max(0, op));
+			audioStudioStore.syncOriginalFadeToVideo(t, d);
+		}
 	}
 
 	function handleResize() {
@@ -759,6 +773,10 @@
 
 <div class="relative h-full w-full">
 	<canvas bind:this={canvas} class="h-full w-full"></canvas>
+
+	{#if fadeOverlayOpacity > 0 && !(window as any).__threeJsCapturing}
+		<div class="pointer-events-none absolute inset-0 bg-black" style="opacity: {fadeOverlayOpacity};"></div>
+	{/if}
 
 	{#if videoElement && !(window as any).__threeJsCapturing}
 		<div class="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-sm">

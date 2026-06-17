@@ -205,7 +205,9 @@ let musicMaxTime = $derived(videoDuration);
 			title: 'Video Effects',
 			items: [
 				{ label: 'Video Glow', type: 'range', min: 0, max: 1, step: 0.01 },
-				{ label: 'Shape Glow', type: 'range', min: 0, max: 1, step: 0.01 }
+				{ label: 'Shape Glow', type: 'range', min: 0, max: 1, step: 0.01 },
+				{ label: 'Video Fade In', type: 'range', min: 0, max: 4, step: 0.1 },
+				{ label: 'Video Fade Out', type: 'range', min: 0, max: 4, step: 0.1 }
 			]
 		},
 		{
@@ -383,7 +385,7 @@ let musicMaxTime = $derived(videoDuration);
 		},
 		// ── AUDIO STUDIO groups — custom template rendering below ──
 		{ id: 'sfx',   title: '🔊 Sound FX & Original Audio', items: [] },
-		{ id: 'music', title: '🎵 Music',          items: [] }	
+		{ id: 'music', title: '🎵 Music / Voice Over', items: [] }
 	]);
 
 	function getControlValue(groupId: string, label: string): number | string | boolean {
@@ -453,6 +455,8 @@ let musicMaxTime = $derived(videoDuration);
 			case 'Directional': return $threeJsState.directionalIntensity;
 			case 'Video Glow': return $threeJsState.videoGlow;
 			case 'Shape Glow': return $threeJsState.shapeGlow;
+			case 'Video Fade In': return audioStudio.videoFadeIn;
+			case 'Video Fade Out': return audioStudio.videoFadeOut;
 			case 'Enable Particles': return $threeJsState.particlesEnabled;
 			case 'Particle Count': return $threeJsState.particleCount;
 			case 'Particle Size': return $threeJsState.particleSize;
@@ -551,6 +555,8 @@ let musicMaxTime = $derived(videoDuration);
 			case 'Directional': threeJsState.updateProperty('directionalIntensity', value); break;
 			case 'Video Glow': threeJsState.updateProperty('videoGlow', value); break;
 			case 'Shape Glow': threeJsState.updateProperty('shapeGlow', value); break;
+			case 'Video Fade In': audioStudioStore.setVideoFadeIn(value); break;
+			case 'Video Fade Out': audioStudioStore.setVideoFadeOut(value); break;
 			case 'Enable Particles': threeJsState.updateProperty('particlesEnabled', value); break;
 			case 'Particle Count': threeJsState.updateProperty('particleCount', value); break;
 			case 'Particle Size': threeJsState.updateProperty('particleSize', value); break;
@@ -606,7 +612,7 @@ let musicMaxTime = $derived(videoDuration);
 		text3d:    '3D Text',
 		logo:      'Image',
 		sfx:       'SFX',
-		music:     'Music'
+		music:     'Audio'
 	};
 </script>
 
@@ -662,6 +668,22 @@ let musicMaxTime = $derived(videoDuration);
 								value={audioStudio.originalVolume}
 								oninput={(e) => audioStudioStore.setOriginalVolume(parseFloat(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Fade In</span>
+								<span class="text-xs text-gray-400">{audioStudio.originalFadeIn.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max="4" step="0.1"
+								value={audioStudio.originalFadeIn}
+								oninput={(e) => audioStudioStore.setOriginalFadeIn(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+							<div class="mt-3 mb-1 flex items-center justify-between">
+								<span class="text-sm text-white">Fade Out</span>
+								<span class="text-xs text-gray-400">{audioStudio.originalFadeOut.toFixed(1)}s</span>
+							</div>
+							<input type="range" min="0" max="4" step="0.1"
+								value={audioStudio.originalFadeOut}
+								oninput={(e) => audioStudioStore.setOriginalFadeOut(parseFloat(e.currentTarget.value))}
+								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 						</div>
 						<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
 							<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Generate SFX</p>
@@ -683,10 +705,10 @@ let musicMaxTime = $derived(videoDuration);
 							<p class="mt-2 text-xs text-gray-500">Position SFX blocks on the timeline below ↓</p>
 								<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Duration</span>
-								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 10}s</span>
 							</div>
 							<input type="range" min="5" max="300" step="5"
-								value={audioStudio.musicDuration ?? 30}
+								value={audioStudio.musicDuration ?? 10}
 								oninput={(e) => audioStudioStore.setMusicDuration(parseInt(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 							<div class="mt-3 mb-1 flex items-center justify-between">
@@ -788,10 +810,10 @@ let musicMaxTime = $derived(videoDuration);
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 								<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Duration</span>
-								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 10}s</span>
 							</div>
 							<input type="range" min="5" max="300" step="5"
-								value={audioStudio.musicDuration ?? 30}
+								value={audioStudio.musicDuration ?? 10}
 								oninput={(e) => audioStudioStore.setMusicDuration(parseInt(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 							<div class="mt-3 mb-1 flex items-center justify-between">
@@ -1033,6 +1055,22 @@ let musicMaxTime = $derived(videoDuration);
 									value={audioStudio.originalVolume}
 									oninput={(e) => audioStudioStore.setOriginalVolume(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+								<div class="mt-3 flex items-center justify-between mb-1">
+									<span class="text-sm text-white">Fade In</span>
+									<span class="text-xs text-gray-400">{audioStudio.originalFadeIn.toFixed(1)}s</span>
+								</div>
+								<input type="range" min="0" max="4" step="0.1"
+									value={audioStudio.originalFadeIn}
+									oninput={(e) => audioStudioStore.setOriginalFadeIn(parseFloat(e.currentTarget.value))}
+									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+								<div class="mt-3 flex items-center justify-between mb-1">
+									<span class="text-sm text-white">Fade Out</span>
+									<span class="text-xs text-gray-400">{audioStudio.originalFadeOut.toFixed(1)}s</span>
+								</div>
+								<input type="range" min="0" max="4" step="0.1"
+									value={audioStudio.originalFadeOut}
+									oninput={(e) => audioStudioStore.setOriginalFadeOut(parseFloat(e.currentTarget.value))}
+									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
 							</div>
 
 							<!-- SFX prompt + controls -->
@@ -1059,10 +1097,10 @@ let musicMaxTime = $derived(videoDuration);
 								<p class="mt-2 text-xs text-gray-500">Position SFX blocks on the timeline below ↓</p>
 								<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Duration</span>
-								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 10}s</span>
 							</div>
 							<input type="range" min="5" max="300" step="5"
-								value={audioStudio.musicDuration ?? 30}
+								value={audioStudio.musicDuration ?? 10}
 								oninput={(e) => audioStudioStore.setMusicDuration(parseInt(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 								<!-- Fade In -->
@@ -1189,10 +1227,10 @@ let musicMaxTime = $derived(videoDuration);
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 								<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Duration</span>
-								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 30}s</span>
+								<span class="text-xs text-gray-400">{audioStudio.musicDuration ?? 10}s</span>
 							</div>
 							<input type="range" min="5" max="300" step="5"
-								value={audioStudio.musicDuration ?? 30}
+								value={audioStudio.musicDuration ?? 10}
 								oninput={(e) => audioStudioStore.setMusicDuration(parseInt(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 								<!-- Fade In -->

@@ -60,7 +60,11 @@ async function runEncode(
 	musicEndTime: number,
 	musicFadeIn: number,
 	musicFadeOut: number,
-	suppressOriginalAudio: boolean
+	suppressOriginalAudio: boolean,
+	originalFadeIn: number,
+	originalFadeOut: number,
+	videoFadeIn: number,
+	videoFadeOut: number
 ) {
 	const baseTemp = getTempBase();
 	const sessionDir = path.join(baseTemp, `session-${sessionId}`);
@@ -78,11 +82,18 @@ async function runEncode(
 
 		const audioDir = path.join(getTempBase(), 'audio');
 		// ── PASS 1: Encode frames to silent MP4 ──────────────────────────────
+		const outDuration = totalFrames / fps;
+		const vfFilters: string[] = [`scale=trunc(${outWidth}/2)*2:trunc(${outHeight}/2)*2`];
+		if (videoFadeIn > 0) vfFilters.push(`fade=t=in:st=0:d=${videoFadeIn}`);
+		if (videoFadeOut > 0) {
+			const fadeOutStart = Math.max(0, outDuration - videoFadeOut);
+			vfFilters.push(`fade=t=out:st=${fadeOutStart.toFixed(3)}:d=${videoFadeOut}`);
+		}
 		const encodeCommand = [
 			`"${FFMPEG_PATH}"`,
 			`-framerate ${fps}`,
 			`-i "${path.join(sessionDir, 'frame-%06d.jpg')}"`,
-			`-vf "scale=trunc(${outWidth}/2)*2:trunc(${outHeight}/2)*2"`,
+			`-vf "${vfFilters.join(',')}"`,
 			`-c:v libx264`,
 			`-preset veryfast`,
 			`-crf 23`,
@@ -140,8 +151,8 @@ async function runEncode(
 					volume: 1.0,
 					startTime: 0,
 					endTime: 999,
-					fadeIn: 0,
-					fadeOut: 0
+					fadeIn: originalFadeIn,
+					fadeOut: originalFadeOut
 				});
 				inputIndex++;
 			}
@@ -228,8 +239,8 @@ async function runEncode(
 
 			let audioArg: string;
 
-			if (mixLabels.length === 1 && hasAudio && !hasSfx && !hasMusic) {
-				// Only original audio, no effects — simple copy
+			if (mixLabels.length === 1 && hasAudio && !hasSfx && !hasMusic && originalFadeIn === 0 && originalFadeOut === 0) {
+				// Only original audio, no fades — simple copy
 				audioArg = `-map 0:v -map 1:a -c:v copy -c:a aac -b:a 192k`;
 			} else {
 				// Mix all streams
@@ -368,8 +379,12 @@ export const POST: RequestHandler = async ({ request }) => {
 		musicEndTime = 16,
 		musicFadeIn = 0,
 		musicFadeOut = 0,
-		suppressOriginalAudio = false
-	} = body; // UPDATED
+		suppressOriginalAudio = false,
+		originalFadeIn = 0,
+		originalFadeOut = 0,
+		videoFadeIn = 0,
+		videoFadeOut = 0
+	} = body;
 
 	if (!userId) {
 		return new Response(JSON.stringify({ error: 'Missing userId' }), { status: 400 });
@@ -400,7 +415,11 @@ export const POST: RequestHandler = async ({ request }) => {
 		musicEndTime,
 		musicFadeIn,
 		musicFadeOut,
-		suppressOriginalAudio
+		suppressOriginalAudio,
+		originalFadeIn,
+		originalFadeOut,
+		videoFadeIn,
+		videoFadeOut
 	);
 
 	return new Response(JSON.stringify({ success: true, jobId: sessionId }), {
