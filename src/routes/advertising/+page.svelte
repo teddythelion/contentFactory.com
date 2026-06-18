@@ -21,7 +21,7 @@
   const videoSteps = [
     { icon: '🎬', title: 'Generate Base Video', desc: 'Text-to-video or image-to-video — create the raw footage for your ad in seconds. Choose duration and aspect ratio.' },
     { icon: '✨', title: 'Add 3D & Branding', desc: 'Open the 3D Enhancer. Add your logo, particle effects, and 3D geometry. This is what makes your ad look like a production budget was spent on it.' },
-    { icon: '🎵', title: 'Score With Music', desc: 'Generate custom background music that fits your ad energy. Add sound effects for impact. Set fades. Export a fully produced video ad.' }
+    { icon: '🎵', title: 'Score With Audio', desc: 'Generate custom background music or add voice over narration. Add sound effects for impact. Set fades. Export a fully produced video ad with all audio baked in.' }
   ];
 
   const videoFormats = [
@@ -178,7 +178,7 @@
               {/each}
             </div>
             <div class="mt-6">
-              <a href="/texttoimage" class="btn btn-info btn-sm">🖼️ Start Creating Ad Assets →</a>
+              <a href="/create" class="btn btn-info btn-sm">🖼️ Start Creating Ad Assets →</a>
             </div>
           </div>
         </div>
@@ -224,7 +224,7 @@
           </div>
         </div>
         <div class="mt-6">
-          <a href="/texttovideo" class="btn btn-info btn-sm">🎬 Start Producing Video Ads →</a>
+          <a href="/create" class="btn btn-info btn-sm">🎬 Start Producing Video Ads →</a>
         </div>
       </div>
     </div>
@@ -265,7 +265,7 @@
               </p>
             </div>
             <div class="mt-6">
-              <a href="/texttoimage" class="btn btn-info btn-sm">🖼️ Create Display Assets →</a>
+              <a href="/create" class="btn btn-info btn-sm">🖼️ Create Display Assets →</a>
             </div>
           </div>
         </div>
@@ -311,7 +311,7 @@
               </div>
             </div>
             <div class="mt-6">
-              <a href="/texttoimage" class="btn btn-info btn-sm">🖼️ Create Email Visuals →</a>
+              <a href="/create" class="btn btn-info btn-sm">🖼️ Create Email Visuals →</a>
             </div>
           </div>
         </div>
@@ -324,8 +324,8 @@
       <h2 class="mb-4 text-3xl font-black text-white">Ready to Outproduce Your Competition?</h2>
       <p class="mb-8 text-white/50">Start generating ad creative today — free, no credit card required.</p>
       <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
-        <a href="/texttoimage" class="btn btn-info btn-lg">🖼️ Create Ad Images</a>
-        <a href="/texttovideo" class="btn btn-outline btn-lg text-white hover:btn-info">🎬 Create Ad Videos</a>
+        <a href="/create" class="btn btn-info btn-lg">🖼️ Create Ad Images</a>
+        <a href="/create" class="btn btn-outline btn-lg text-white hover:btn-info">🎬 Create Ad Videos</a>
       </div>
     </div>
 

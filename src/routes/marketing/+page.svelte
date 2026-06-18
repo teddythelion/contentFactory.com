@@ -65,7 +65,7 @@
 
 		<!-- Use Cases Grid -->
 		<div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-			{#each [{ id: 'social', icon: '📱', title: 'Social Media Content', body: "Generate a week's worth of on-brand posts, stories, and reels in one session. Consistent visual style, custom music, unique imagery — every post looks intentional.", items: ['Instagram Reels & Stories', 'TikTok videos', 'LinkedIn thought leadership images', 'Twitter/X visual content'] }, { id: 'ads', icon: '🎯', title: 'Paid Ad Creative', body: 'The biggest lever in paid advertising is creative. Generate multiple ad variants, test different visuals and hooks, iterate fast without burning budget on reshoots.', items: ['Facebook & Instagram ads', 'YouTube pre-roll video ads', 'Display ad imagery', 'Multiple variants for A/B testing'] }, { id: 'web', icon: '🌐', title: 'Website & Landing Pages', body: 'Hero images, background videos, product mockups, testimonial visuals — all the visual assets your website needs, generated to match your brand exactly.', items: ['Hero section videos & images', 'Feature illustration assets', 'Background textures & atmospheres', 'Product-in-context imagery'] }, { id: 'email', icon: '📧', title: 'Email Marketing', body: 'Visually rich emails perform better. Generate header images, product showcases, and campaign visuals that make your emails stand out in a crowded inbox.', items: ['Campaign header images', 'Product feature visuals', 'Promotional announcement graphics', 'Seasonal campaign imagery'] }, { id: 'video', icon: '🎬', title: 'Video Marketing', body: 'Full video marketing assets with custom music, 3D effects, and your branding baked in. Brand intros, product reveals, announcement videos — produced in minutes not weeks.', items: ['Brand intro videos', 'Product reveal clips', 'Event announcement videos', 'Testimonial backdrop videos'] }, { id: 'pitch', icon: '🤝', title: 'Pitch Decks & Presentations', body: 'Investor decks, client proposals, sales presentations — all need visuals. Generate on-brand imagery for every slide, making your pitch as visually compelling as your idea.', items: ['Investor pitch deck visuals', 'Client proposal imagery', 'Sales presentation assets', 'Conference & event graphics'] }] as useCase (useCase.id)}
+			{#each [{ id: 'social', icon: '📱', title: 'Social Media Content', body: "Generate a week's worth of on-brand posts, stories, and reels in one session. Consistent visual style, custom music, unique imagery — every post looks intentional.", items: ['Instagram Reels & Stories', 'TikTok videos', 'LinkedIn thought leadership images', 'Twitter/X visual content'] }, { id: 'ads', icon: '🎯', title: 'Paid Ad Creative', body: 'The biggest lever in paid advertising is creative. Generate multiple ad variants, test different visuals and hooks, iterate fast without burning budget on reshoots.', items: ['Facebook & Instagram ads', 'YouTube pre-roll video ads', 'Display ad imagery', 'Multiple variants for A/B testing'] }, { id: 'web', icon: '🌐', title: 'Website & Landing Pages', body: 'Hero images, background videos, product mockups, testimonial visuals — all the visual assets your website needs, generated to match your brand exactly.', items: ['Hero section videos & images', 'Feature illustration assets', 'Background textures & atmospheres', 'Product-in-context imagery'] }, { id: 'email', icon: '📧', title: 'Email Marketing', body: 'Visually rich emails perform better. Generate header images, product showcases, and campaign visuals that make your emails stand out in a crowded inbox.', items: ['Campaign header images', 'Product feature visuals', 'Promotional announcement graphics', 'Seasonal campaign imagery'] }, { id: 'video', icon: '🎬', title: 'Video Marketing', body: 'Full video marketing assets with custom music, 3D effects, and your branding baked in. Brand intros, product reveals, announcement videos — produced in minutes not weeks.', items: ['Brand intro videos', 'Product reveal clips', 'Timed text overlays with fade in/out', 'Video fade in & fade out', 'Event announcement videos', 'Testimonial backdrop videos'] }, { id: 'pitch', icon: '🤝', title: 'Pitch Decks & Presentations', body: 'Investor decks, client proposals, sales presentations — all need visuals. Generate on-brand imagery for every slide, making your pitch as visually compelling as your idea.', items: ['Investor pitch deck visuals', 'Client proposal imagery', 'Sales presentation assets', 'Conference & event graphics'] }] as useCase (useCase.id)}
 				<div
 					class="group rounded-2xl border border-white/10 bg-base-200 p-8 transition-all hover:border-info/30 hover:bg-base-300"
 				>
@@ -91,7 +91,7 @@
 		</div>
 
 		<div class="grid gap-4 md:grid-cols-5">
-			{#each [{ step: '01', icon: '💡', label: 'Concept', desc: 'Write your prompt — describe the visual you need' }, { step: '02', icon: '🖼️', label: 'Generate', desc: 'AI produces your image or video in seconds' }, { step: '03', icon: '✨', label: 'Enhance', desc: 'Refine, add 3D, logo, particles, music' }, { step: '04', icon: '💾', label: 'Save', desc: 'Everything goes to your Content Library' }, { step: '05', icon: '🚀', label: 'Deploy', desc: 'Download and publish across all your channels' }] as item (item.step)}
+			{#each [{ step: '01', icon: '💡', label: 'Concept', desc: 'Write your prompt — describe the visual you need' }, { step: '02', icon: '🖼️', label: 'Generate', desc: 'AI produces your image or video in seconds' }, { step: '03', icon: '✨', label: 'Enhance', desc: 'Refine, add 3D effects, logo, particles, timed text, and audio' }, { step: '04', icon: '💾', label: 'Save', desc: 'Everything goes to your Content Library' }, { step: '05', icon: '🚀', label: 'Deploy', desc: 'Download and publish across all your channels' }] as item (item.step)}
 				<div class="rounded-xl border border-white/10 bg-base-200 p-6 text-center">
 					<div class="mb-3 text-3xl">{item.icon}</div>
 					<div class="mb-1 text-xs font-bold text-info">{item.step}</div>
@@ -103,7 +103,7 @@
 
 		<!-- Stats -->
 		<div class="my-20 grid gap-6 md:grid-cols-4">
-			{#each [{ stat: '10 min', label: 'Average time to produce a full social content set' }, { stat: '100%', label: 'Original content — no stock, no licensing issues' }, { stat: '6+', label: 'Output formats — images, videos, enhanced 3D videos' }, { stat: '$0', label: 'Cost to generate on the free plan' }] as item (item.stat)}
+			{#each [{ stat: '10 min', label: 'Average time to produce a full social content set' }, { stat: '100%', label: 'Original content — no stock, no licensing issues' }, { stat: '8+', label: 'Output types — images, 3D videos, enhanced audio, voice over' }, { stat: '$0', label: 'Cost to generate on the free plan' }] as item (item.stat)}
 				<div class="rounded-xl border border-info/20 bg-info/5 p-6 text-center">
 					<div class="mb-2 text-3xl font-black text-info">{item.stat}</div>
 					<div class="text-xs text-white/50">{item.label}</div>
@@ -118,8 +118,8 @@
 			</h2>
 			<p class="mb-8 text-white/50">Start free — no credit card, no agency, no waiting.</p>
 			<div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
-				<a href="/texttoimage" class="btn btn-lg btn-info">🖼️ Generate Marketing Images</a>
-				<a href="/texttovideo" class="btn text-white btn-outline btn-lg hover:btn-info"
+				<a href="/create" class="btn btn-lg btn-info">🖼️ Generate Marketing Images</a>
+				<a href="/create" class="btn text-white btn-outline btn-lg hover:btn-info"
 					>🎬 Create Marketing Videos</a
 				>
 			</div>

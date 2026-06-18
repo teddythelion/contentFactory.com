@@ -65,12 +65,12 @@
         </div>
         <h3 class="mb-3 text-xl font-bold text-white">3D Video Enhancement</h3>
         <p class="mb-6 text-sm leading-relaxed text-white/60">
-          Wrap your video onto 3D geometry — spheres, cubes, planes, and more. 
-          Add particle systems, glow effects, animated text, and your logo. 
-          Export a fully rendered MP4 ready for posting anywhere.
+          Wrap your video onto 3D geometry — spheres, cubes, planes, and more. Add particle
+          systems, timed text overlay with fade, logo animation, and video fade in/out.
+          Full audio mixing studio built in. Export a fully rendered MP4 ready for posting anywhere.
         </p>
         <ul class="space-y-2">
-          {#each ['14+ 3D shape options', 'Custom particle systems', 'Logo & text overlay', 'Glow & lighting effects'] as feature}
+          {#each ['14+ 3D shape options', 'Custom particle systems', 'Timed text overlay with fade', 'Logo overlay with animation', 'Video fade in & fade out', 'Full audio mixing studio'] as feature}
             <li class="flex items-center gap-2 text-sm text-white/50">
               <span class="text-info">✓</span> {feature}
             </li>
@@ -148,19 +148,19 @@ A picture is worth a thousand words — and a thousand tokens.
         </ul>
       </div>
 
-      <!-- Service 6: AI Music Generation -->
+      <!-- Service 6: AI Audio & Voice Over -->
       <div class="group rounded-2xl border border-white/10 bg-base-200 p-8 transition-all hover:border-info/30 hover:bg-base-300">
         <div class="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-info/10 text-3xl">
           🎵
         </div>
-        <h3 class="mb-3 text-xl font-bold text-white">AI Music Generation</h3>
+        <h3 class="mb-3 text-xl font-bold text-white">AI Audio & Voice Over</h3>
         <p class="mb-6 text-sm leading-relaxed text-white/60">
-          Generate original background music from a text prompt — from cinematic 
-          orchestral scores to lo-fi beats to high-energy tracks. Control duration 
-          up to 5 minutes, placement, and fades. Music gets mixed into your final video.
+          Generate original background music or a voice over narration from a text prompt.
+          Control duration up to 5 minutes, set start and end placement, and add fades.
+          Audio gets mixed into your final video alongside SFX and original audio.
         </p>
         <ul class="space-y-2">
-          {#each ['Prompt-based music generation', 'Up to 5 minutes of original music', 'Start & end time placement', 'Fade in & fade out controls', 'Mixed into final video export'] as feature}
+          {#each ['Prompt-based music generation', 'Voice over & narration support', 'Up to 5 minutes of audio', 'Start & end time placement', 'Fade in & fade out controls', 'Mixed into final video export'] as feature}
             <li class="flex items-center gap-2 text-sm text-white/50">
               <span class="text-info">✓</span> {feature}
             </li>
@@ -189,7 +189,7 @@ A picture is worth a thousand words — and a thousand tokens.
       <div class="rounded-xl border border-white/10 bg-base-200 p-6">
         <div class="mb-4 text-2xl">🤖</div>
         <h4 class="mb-2 font-bold text-white">Prompt Engineer</h4>
-        <p class="text-sm text-white/50">Not sure what to write? Our built-in prompt coach helps you craft the perfect generation prompt every time.</p>
+        <p class="text-sm text-white/50">Not sure what to write? Our built-in prompt engineer helps you craft the perfect generation prompt every time.</p>
       </div>
 
       <div class="rounded-xl border border-white/10 bg-base-200 p-6">
@@ -201,7 +201,7 @@ A picture is worth a thousand words — and a thousand tokens.
       <div class="rounded-xl border border-white/10 bg-base-200 p-6">
         <div class="mb-4 text-2xl">🎛️</div>
         <h4 class="mb-2 font-bold text-white">Audio Studio</h4>
-        <p class="text-sm text-white/50">Full audio mixing inside the 3D enhancer — control original audio, SFX, and music volume independently with live preview.</p>
+        <p class="text-sm text-white/50">Full audio mixing inside the 3D enhancer — original audio, SFX, and music/voice over each controlled independently with volume, fade in/out, and live preview.</p>
       </div>
 
       <div class="rounded-xl border border-white/10 bg-base-200 p-6">
@@ -218,15 +218,63 @@ A picture is worth a thousand words — and a thousand tokens.
 
     </div>
 
+    <!-- What's Coming Divider -->
+    <div class="my-20 flex items-center gap-4">
+      <div class="h-px flex-1 bg-white/10"></div>
+      <span class="text-xs font-semibold uppercase tracking-widest text-white/40">What's Coming</span>
+      <div class="h-px flex-1 bg-white/10"></div>
+    </div>
+
+    <!-- Roadmap Grid -->
+    <div class="grid gap-6 md:grid-cols-3">
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">🎞️</div>
+        <h4 class="mb-2 font-bold text-white">Higher Resolution Export</h4>
+        <p class="text-sm text-white/50">Export at full resolution instead of CSS pixel size. Your 4K source stays 4K.</p>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">📐</div>
+        <h4 class="mb-2 font-bold text-white">Custom Export Ratios</h4>
+        <p class="text-sm text-white/50">Choose your output aspect ratio — 16:9, 9:16, 1:1, and more — at export time, not just at generation.</p>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">🎙️</div>
+        <h4 class="mb-2 font-bold text-white">Voice Cloning</h4>
+        <p class="text-sm text-white/50">Record or upload your voice and use it as a voice over across any video — same voice, every time.</p>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">🔗</div>
+        <h4 class="mb-2 font-bold text-white">Multi-Scene Sequences</h4>
+        <p class="text-sm text-white/50">Chain multiple AI video clips into a single timeline and export as one continuous video.</p>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">🌐</div>
+        <h4 class="mb-2 font-bold text-white">Direct Publishing</h4>
+        <p class="text-sm text-white/50">Publish straight to Instagram, TikTok, and YouTube from your Content Library — no downloading required.</p>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-base-200 p-6">
+        <div class="mb-4 text-2xl">👥</div>
+        <h4 class="mb-2 font-bold text-white">Team Workspaces</h4>
+        <p class="text-sm text-white/50">Shared brand libraries, prompt templates, and content approval flows for teams and agencies.</p>
+      </div>
+
+    </div>
+
     <!-- CTA -->
     <div class="mt-20 rounded-2xl border border-info/20 bg-info/5 p-12 text-center">
       <h2 class="mb-4 text-3xl font-black text-white">Ready to Create?</h2>
       <p class="mb-8 text-white/50">Start free — 2 images and 2 videos every day, no credit card required.</p>
       <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
-        <a href="/texttoimage" class="btn btn-info btn-lg">
+        <a href="/create" class="btn btn-info btn-lg">
           🖼️ Generate an Image
         </a>
-        <a href="/texttovideo" class="btn btn-outline btn-lg text-white hover:btn-info">
+        <a href="/create" class="btn btn-outline btn-lg text-white hover:btn-info">
           🎬 Generate a Video
         </a>
       </div>

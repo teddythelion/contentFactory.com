@@ -37,7 +37,7 @@
       body: "Every brand needs a defining visual. Use the image generator to create a hero image that captures your brand's mood, industry, and personality. Think: what does your brand feel like?",
       example: '"A sleek, minimalist workspace for a modern creative agency, dark aesthetic, soft blue ambient lighting, ultra-realistic, 4K"',
       tip: null,
-      cta: { label: '🖼️ Open Image Generator', href: '/texttoimage' }
+      cta: { label: '🖼️ Open Image Generator', href: '/create' }
     },
     {
       step: 2,
@@ -46,7 +46,7 @@
       body: "Upload the image you generated into Image Edit and use Ultra Refinement to push the details further. Sharpen the mood, adjust the tone, refine the textures. This is your brand foundation — it needs to be perfect.",
       example: null,
       tip: null,
-      cta: { label: '✏️ Open Image Edit', href: '/imageedit' }
+      cta: { label: '✏️ Open Image Edit', href: '/create' }
     },
     {
       step: 3,
@@ -55,7 +55,7 @@
       body: "Generate 4–6 variations of your hero image using the same core prompt with small tweaks. Vary the angle, composition, or lighting. This gives you a visual family — a set of images that feel cohesive but aren't identical.",
       example: null,
       tip: "Save every variation to your Content Library. You'll use these across Instagram, your website, pitch decks, and more.",
-      cta: { label: '🖼️ Generate Variations', href: '/texttoimage' }
+      cta: { label: '🖼️ Generate Variations', href: '/create' }
     },
     {
       step: 4,
@@ -85,7 +85,7 @@
       body: "Use the Prompt Engineer to craft one strong prompt per pillar, then generate 2–3 variations of each. That's your week of content — 6 to 9 unique visuals, all on-brand, generated in under 10 minutes.",
       example: null,
       tip: 'Use 9:16 aspect ratio for Stories and Reels. Use 1:1 or 4:3 for feed posts.',
-      cta: { label: '🖼️ Start Generating', href: '/texttoimage' }
+      cta: { label: '🖼️ Start Generating', href: '/create' }
     },
     {
       step: 3,
@@ -94,16 +94,16 @@
       body: "Take your strongest image from each pillar and drop it into Text to Video. Write an animation prompt and generate a 6–8 second clip. Reels and TikToks get 3–5x more reach than static posts — this is how you compete.",
       example: '"[Camera move] the scene, [describe motion], [mood/atmosphere], cinematic"',
       tip: null,
-      cta: { label: '🎬 Open Video Generator', href: '/texttovideo' }
+      cta: { label: '🎬 Open Video Generator', href: '/create' }
     },
     {
       step: 4,
       phase: 'Audio',
       title: 'Add a Signature Sound',
-      body: "Open the 3D Enhancer on your video and go to the Music tab. Generate a short background track that matches your brand's energy — cinematic, lo-fi, upbeat, whatever fits. Set it to fade in and out cleanly. Bake it into the export. A consistent audio signature makes your content instantly recognizable.",
+      body: "Open the 3D Enhancer on your video and go to the Audio tab. Go to the Music / Voice Over section and generate a short background track that matches your brand's energy — cinematic, lo-fi, upbeat, whatever fits. Set it to fade in and out cleanly. Bake it into the export. A consistent audio signature makes your content instantly recognizable.",
       example: null,
       tip: "Write down the music prompt that works for your brand. Reuse it every session to keep your sound consistent.",
-      cta: { label: '🎵 Open Audio Studio', href: '/texttovideo' }
+      cta: { label: '🎵 Open Audio Studio', href: '/create' }
     },
     {
       step: 5,
@@ -123,7 +123,7 @@
       title: 'Generate Your Base Video',
       body: "Start with a strong text-to-video prompt. This is the raw footage your brand video will be built from. Aim for something atmospheric — motion, light, energy. It doesn't need to be perfect yet, it just needs to feel right.",
       tip: 'Use 16:9 for YouTube/desktop, 9:16 for Reels/TikTok. Pick your format before you generate.',
-      cta: { label: '🎬 Open Video Generator', href: '/texttovideo' }
+      cta: { label: '🎬 Open Video Generator', href: '/create' }
     },
     {
       step: 2,
@@ -131,7 +131,7 @@
       title: 'Wrap It in 3D',
       body: 'Open the 3D Enhancer from the Tools dropdown on your video. Choose a shape that fits your brand — a spinning sphere for something cosmic and tech-forward, a plane for a clean editorial look, a torus for something bold and geometric.',
       tip: 'The sphere and plane are the most versatile for branding. Start with one of these.',
-      cta: { label: '✨ Open 3D Enhancer', href: '/texttovideo' }
+      cta: { label: '✨ Open 3D Enhancer', href: '/create' }
     },
     {
       step: 3,
@@ -139,7 +139,7 @@
       title: 'Add Your Logo',
       body: "In the 3D Enhancer, upload your logo PNG and position it over the video. Use the XYZ controls to place it exactly where you want. Choose an animation — fade in, pulse, or rotate — so it feels dynamic, not pasted on.",
       tip: 'Use a white or transparent PNG logo for best results against dark video backgrounds.',
-      cta: { label: '✨ Open 3D Enhancer', href: '/texttovideo' }
+      cta: { label: '✨ Open 3D Enhancer', href: '/create' }
     },
     {
       step: 4,
@@ -147,21 +147,21 @@
       title: 'Add Particles for Atmosphere',
       body: "Turn on the particle system and choose a style that matches your brand energy. Orbit particles feel premium and tech-forward. Fountain feels dynamic and energetic. Spiral feels elegant and creative. Adjust size, opacity, and color to complement — not overpower — your video.",
       tip: 'Keep particle opacity between 0.3–0.6 for a subtle, premium look. Max opacity feels cheap.',
-      cta: { label: '✨ Open 3D Enhancer', href: '/texttovideo' }
+      cta: { label: '✨ Open 3D Enhancer', href: '/create' }
     },
     {
       step: 5,
       phase: 'Audio',
-      title: 'Score It With Custom Music',
-      body: "Go to the Music tab in the 3D Enhancer and generate a custom background track that fits your brand. Set a fade in at the start and fade out at the end. Adjust the volume so the music lifts the video without overpowering it. This is what separates amateur content from professional.",
+      title: 'Score It With Custom Audio',
+      body: "Go to the Audio tab in the 3D Enhancer and generate a custom background track or add a voice over that fits your brand. Set a fade in at the start and fade out at the end. Adjust the volume so the audio lifts the video without overpowering it. This is what separates amateur content from professional.",
       tip: "For a 6–8 second brand video, generate 30 seconds of music and set the end time to match your video length.",
-      cta: { label: '🎵 Open Audio Studio', href: '/texttovideo' }
+      cta: { label: '🎵 Open Audio Studio', href: '/create' }
     },
     {
       step: 6,
       phase: 'Export',
       title: 'Export Your Signature Video',
-      body: "Hit Capture Video. The encoder runs in the background — your video, 3D effects, logo, particles, and music all get baked together into a single MP4. Head to your Content Library to download it.",
+      body: "Hit Capture Video. The encoder runs in the background — your video, 3D effects, logo, particles, audio fades, and music or voice over all get baked together into a single MP4. Head to your Content Library to download it.",
       tip: 'Save this exact configuration — shape, particle style, logo position, music style. This becomes your branded video template.',
       cta: { label: '📚 Go to Content Library', href: '/content-library' }
     }
@@ -184,16 +184,16 @@
       body: "Use the Image Edit ultra-refinement feature to establish your exact visual style on one anchor image. Save it to your library. This becomes your style reference — every new image you generate should feel like it belongs in the same family as this one.",
       example: null,
       tip: "When in doubt, compare new content to your style reference. If it doesn't match, refine it or regenerate.",
-      cta: { label: '✏️ Open Image Edit', href: '/imageedit' }
+      cta: { label: '✏️ Open Image Edit', href: '/create' }
     },
     {
       step: 3,
       phase: 'Audio Identity',
       title: 'Establish Your Brand Sound',
-      body: "Just like your visual style, your brand needs an audio signature. Generate a music track that perfectly captures your brand energy and save it. Use this same style of music — same tempo, same mood, same genre — across every video you produce.",
+      body: "Just like your visual style, your brand needs an audio signature. Generate a Music / Voice Over track that perfectly captures your brand energy and save it. Use this same style — same tempo, same mood, same genre — across every video you produce.",
       example: null,
       tip: 'Write down the exact music prompt that generated your signature track. Reuse it every session with minor tweaks to keep the sound consistent without being identical.',
-      cta: { label: '🎵 Open Audio Studio', href: '/texttovideo' }
+      cta: { label: '🎵 Open Audio Studio', href: '/create' }
     },
     {
       step: 4,
@@ -211,7 +211,7 @@
       body: "Once you've built your signature branded video (Playbook 03), document the exact settings: shape, particle style, rotation speed, glow settings, logo position, music style. Recreate this exact setup for every video you produce.",
       example: null,
       tip: 'Audiences recognize format before they recognize content. A consistent video style makes your brand instantly identifiable in a feed.',
-      cta: { label: '🎬 Build Your Video Template', href: '/texttovideo' }
+      cta: { label: '🎬 Build Your Video Template', href: '/create' }
     }
   ];
 
@@ -494,8 +494,8 @@
       <h2 class="mb-4 text-3xl font-black text-white">Your Brand Starts Now.</h2>
       <p class="mb-8 text-white/50">Pick a playbook above and work through it. Most take under 30 minutes.</p>
       <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
-        <a href="/texttoimage" class="btn btn-info btn-lg">🖼️ Start with an Image</a>
-        <a href="/texttovideo" class="btn btn-outline btn-lg text-white hover:btn-info">🎬 Start with a Video</a>
+        <a href="/create" class="btn btn-info btn-lg">🖼️ Start with an Image</a>
+        <a href="/create" class="btn btn-outline btn-lg text-white hover:btn-info">🎬 Start with a Video</a>
       </div>
     </div>
 

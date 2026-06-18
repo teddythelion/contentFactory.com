@@ -23,8 +23,8 @@
 			colorText: 'text-primary',
 			colorBorder: 'border-primary',
 			colorBg: 'bg-primary/10',
-			title: 'Built-In Prompt Coach',
-			desc: "Not a blank prompt box. The Prompt Coach guides you to craft precise, effective prompts so your first generation is your best generation."
+			title: 'Built-In Prompt Engineer',
+			desc: "Not a blank prompt box. The Prompt Engineer guides you to craft precise, effective prompts so your first generation is your best generation."
 		},
 		{
 			icon: '🎬',
@@ -73,7 +73,7 @@
 	</h1>
 
 	<p class="mb-8 max-w-xl text-base text-base-content/70 sm:text-lg">
-		Content Factory combines 3D image enhancement, AI video generation, and a built-in Prompt Coach
+		Content Factory combines 3D image enhancement, AI video generation, and a built-in Prompt Engineer 
 		into one frictionless pipeline. From idea to ready-to-ship content in minutes.
 	</p>
 
@@ -82,7 +82,7 @@
 			Start Creating — It's Free
 		</a>
 		<a href="/prompt-coach" class="btn btn-outline btn-lg w-full sm:w-auto">
-			Try Prompt Coach
+			Try Prompt Engineer 
 		</a>
 	</div>
 
@@ -170,7 +170,7 @@
 						<td class="text-center text-base-content/30">✗</td>
 					</tr>
 					<tr>
-						<td>Built-in Prompt Coach</td>
+						<td>Built-in Prompt Engineer </td>
 						<td class="text-center text-secondary font-bold">✓</td>
 						<td class="text-center text-base-content/30">✗</td>
 					</tr>
