@@ -388,11 +388,18 @@
 			if (opacity > 0) animateMesh(trueTextMesh, animationTime, false);
 			return;
 		}
-		if (!textMesh || !textState.enabled || !textMesh.visible) return;
+		if (!textMesh || !textState.enabled) return;
+		if (opacity === 0) {
+			textMesh.visible = false;
+			textMesh.sync?.();
+			return;
+		}
+		textMesh.visible = true;
 		textMesh.fillOpacity = opacity;
-		if (textMesh.outlineOpacity !== undefined) textMesh.outlineOpacity = opacity;
+		textMesh.outlineOpacity = opacity;
+		if ('strokeOpacity' in textMesh) (textMesh as Record<string, unknown>).strokeOpacity = opacity;
 		textMesh.sync?.();
-		if (opacity > 0) animateMesh(textMesh, animationTime, true);
+		animateMesh(textMesh, animationTime, true);
 	}
 
 	function computeTextOpacity(videoTime: number): number {
