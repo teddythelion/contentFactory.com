@@ -13,12 +13,29 @@ interface MixerState {
 	sfxFadeIn: number;
 	sfxFadeOut: number;
 	sfxLoop: boolean;
-	musicVolume: number;
-	musicStartTime: number;
-	musicEndTime: number;
-	musicTrimStart: number;  // seconds into the audio buffer to skip (silence clip)
-	musicFadeIn: number;
-	musicFadeOut: number;
+}
+
+// Per-music-track state passed in from the store on each sync
+export interface MusicTrackState {
+	sessionId: string;
+	volume: number;
+	startTime: number;
+	endTime: number;
+	trimStart: number;
+	fadeIn: number;
+	fadeOut: number;
+}
+
+// Internal per-player object
+interface MusicTrackEntry {
+	player: Tone.Player;
+	rawGain: GainNode;
+	stopTimeout: ReturnType<typeof setTimeout> | null;
+	isPlaying: boolean;
+	lastVideoTime: number;
+	lastStartTime: number;
+	lastEndTime: number;
+	lastTrimStart: number;
 }
 
 class AudioMixer {
@@ -31,18 +48,8 @@ class AudioMixer {
 	private sfxGain: Tone.Volume | null = null;
 	private sfxLoopTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	// Music
-	private musicPlayer: Tone.Player | null = null;
-	private musicGain: Tone.Volume | null = null;
-	private musicRawGain: GainNode | null = null;
-	private musicStopTimeout: ReturnType<typeof setTimeout> | null = null;
-
-	// Music playhead sync tracking
-	private musicIsPlaying: boolean = false;
-	private lastMusicVideoTime: number = -1;
-	private lastMusicStartTime: number = -1;
-	private lastMusicEndTime: number = -1;
-	private lastMusicTrimStart: number = -1;
+	// Music — one player per session, all play simultaneously
+	private musicTracks: Map<string, MusicTrackEntry> = new Map();
 
 	private originalFadeIn: number = 0;
 	private originalFadeOut: number = 0;
@@ -55,13 +62,7 @@ class AudioMixer {
 		sfxEndTime: 8,
 		sfxFadeIn: 0,
 		sfxFadeOut: 0,
-		sfxLoop: false,
-		musicVolume: 0.3,
-		musicStartTime: 0,
-		musicEndTime: 16,
-		musicTrimStart: 0,
-		musicFadeIn: 0,
-		musicFadeOut: 0
+		sfxLoop: false
 	};
 
 	// ── Helpers ─────────────────────────────────────────────────────────────
@@ -84,12 +85,7 @@ class AudioMixer {
 		}
 	}
 
-	private clearMusicTimer() {
-		if (this.musicStopTimeout) {
-			clearTimeout(this.musicStopTimeout);
-			this.musicStopTimeout = null;
-		}
-	}
+	// (music timers are now per-entry in MusicTrackEntry.stopTimeout)
 
 	// ── Video connection ─────────────────────────────────────────────────────
 	connectVideo(videoElement: HTMLVideoElement) {
@@ -279,178 +275,152 @@ class AudioMixer {
 	}
 
 
-	// ── MUSIC ────────────────────────────────────────────────────────────────
-	async loadMusic(previewUrl: string, onLoaded?: (durationSeconds: number) => void) {
+	// ── MUSIC (multi-track) ──────────────────────────────────────────────────
+	async loadMusic(sessionId: string, previewUrl: string, onLoaded?: (durationSeconds: number) => void) {
 		await this.ensureStarted();
-		this.stopMusic();
+		this.stopMusic(sessionId);
 
-		const s = this.state;
 		const ctx = Tone.getContext().rawContext as AudioContext;
+		const rawGain = ctx.createGain();
+		rawGain.gain.value = 0.3;
+		rawGain.connect(ctx.destination);
 
-		this.musicRawGain = ctx.createGain();
-		this.musicRawGain.gain.value = s.musicVolume;
-		this.musicRawGain.connect(ctx.destination);
+		const player = new Tone.Player({ url: previewUrl, loop: false });
+		(player as any).connect(rawGain);
 
-		this.musicPlayer = new Tone.Player({
-			url: previewUrl,
-			loop: false,
-			onload: () => {
-				const dur = this.musicPlayer!.buffer.duration;
-				console.log(`🎵 AudioMixer: Music loaded (${dur.toFixed(2)}s) — awaiting playhead sync`);
-				onLoaded?.(dur);
-			}
+		const entry: MusicTrackEntry = {
+			player, rawGain,
+			stopTimeout: null,
+			isPlaying: false,
+			lastVideoTime: -1,
+			lastStartTime: -1,
+			lastEndTime: -1,
+			lastTrimStart: -1
+		};
+
+		player.load(previewUrl).then(() => {
+			const dur = player.buffer.duration;
+			console.log(`🎵 Music [${sessionId.slice(0,6)}] loaded (${dur.toFixed(2)}s)`);
+			onLoaded?.(dur);
+		}).catch(() => {
+			const dur = player.buffer?.duration ?? 0;
+			if (dur > 0) onLoaded?.(dur);
 		});
 
-		// Connect player directly to raw GainNode — avoids Tone.Volume internal routing issues
-		(this.musicPlayer as any).connect(this.musicRawGain);
+		this.musicTracks.set(sessionId, entry);
 	}
 
-	// ── Playhead-driven music sync ────────────────────────────────────────────
-	syncMusicToVideo(videoTime: number, isVideoPlaying: boolean) {
-		if (!this.musicPlayer?.loaded) return;
+	syncMusicToVideo(videoTime: number, isVideoPlaying: boolean, trackStates: MusicTrackState[]) {
+		for (const ts of trackStates) {
+			const entry = this.musicTracks.get(ts.sessionId);
+			if (!entry?.player.loaded) continue;
+			this._syncOneTrack(entry, ts, videoTime, isVideoPlaying);
+		}
+	}
 
-		const s = this.state;
-		const inRange = videoTime >= s.musicStartTime && videoTime < s.musicEndTime;
+	private _syncOneTrack(entry: MusicTrackEntry, ts: MusicTrackState, videoTime: number, isVideoPlaying: boolean) {
+		const inRange    = videoTime >= ts.startTime && videoTime < ts.endTime;
 		const shouldPlay = isVideoPlaying && inRange;
 
-		const timeDelta = Math.abs(videoTime - this.lastMusicVideoTime);
-		const isSeeked = this.lastMusicVideoTime >= 0 && timeDelta > 0.35;
-		this.lastMusicVideoTime = videoTime;
+		const isSeeked  = entry.lastVideoTime >= 0 && Math.abs(videoTime - entry.lastVideoTime) > 0.35;
+		entry.lastVideoTime = videoTime;
 
 		const barMoved =
-			s.musicStartTime !== this.lastMusicStartTime ||
-			s.musicEndTime   !== this.lastMusicEndTime   ||
-			s.musicTrimStart !== this.lastMusicTrimStart;
-		this.lastMusicStartTime = s.musicStartTime;
-		this.lastMusicEndTime   = s.musicEndTime;
-		this.lastMusicTrimStart = s.musicTrimStart;
+			ts.startTime !== entry.lastStartTime ||
+			ts.endTime   !== entry.lastEndTime   ||
+			ts.trimStart !== entry.lastTrimStart;
+		entry.lastStartTime = ts.startTime;
+		entry.lastEndTime   = ts.endTime;
+		entry.lastTrimStart = ts.trimStart;
 
 		if (shouldPlay) {
-			if (!this.musicIsPlaying || isSeeked || barMoved) {
-				const bufferOffset = s.musicTrimStart + Math.max(0, videoTime - s.musicStartTime);
-				const remaining    = s.musicEndTime - videoTime;
-				this._startMusicFrom(bufferOffset, remaining);
+			if (!entry.isPlaying || isSeeked || barMoved) {
+				const bufferOffset = ts.trimStart + Math.max(0, videoTime - ts.startTime);
+				this._startTrackFrom(entry, ts, bufferOffset, ts.endTime - videoTime);
+			} else {
+				const ctx = Tone.getContext().rawContext as AudioContext;
+				entry.rawGain.gain.setTargetAtTime(ts.volume, ctx.currentTime, 0.05);
 			}
-		} else {
-			if (this.musicIsPlaying) this._haltMusic();
+		} else if (entry.isPlaying) {
+			this._haltTrack(entry);
 		}
 	}
 
-	private _startMusicFrom(bufferOffset: number, duration: number) {
-		if (!this.musicPlayer?.loaded || !this.musicRawGain) return;
-		this.clearMusicTimer();
+	private _startTrackFrom(entry: MusicTrackEntry, ts: MusicTrackState, bufferOffset: number, duration: number) {
+		if (!entry.player.loaded) return;
+		if (entry.stopTimeout) { clearTimeout(entry.stopTimeout); entry.stopTimeout = null; }
 
-		const bufferDuration = this.musicPlayer.buffer.duration;
-		const clampedOffset  = Math.min(bufferOffset, bufferDuration);
-		const playDuration   = Math.min(duration, bufferDuration - clampedOffset);
+		const bufDur        = entry.player.buffer.duration;
+		const clampedOffset = Math.min(bufferOffset, bufDur);
+		const playDuration  = Math.min(duration, bufDur - clampedOffset);
 		if (playDuration <= 0) return;
 
-		try { this.musicPlayer.stop(); } catch { /* already stopped */ }
+		try { entry.player.stop(); } catch { /* already stopped */ }
 
-		const s   = this.state;
-		const now = Tone.now(); // single reference for player + param scheduling
+		const now = Tone.now();
+		entry.player.fadeIn  = 0;
+		entry.player.fadeOut = 0;
+		entry.player.start(now, clampedOffset, playDuration);
+		entry.isPlaying = true;
 
-		// Player: Tone handles the buffer read — disable its own fades
-		this.musicPlayer.fadeIn  = 0;
-		this.musicPlayer.fadeOut = 0;
-		this.musicPlayer.start(now, clampedOffset, playDuration);
-		this.musicIsPlaying = true;
+		const gp  = entry.rawGain.gain;
+		const vol = ts.volume;
+		gp.cancelScheduledValues(now);
 
-		if (!this.musicRawGain) return;
-		const gainParam = this.musicRawGain.gain;
-		const linearVol = s.musicVolume;
-
-		gainParam.cancelScheduledValues(now);
-
-		if (s.musicFadeIn > 0 && clampedOffset < s.musicFadeIn) {
-			const progress = clampedOffset / s.musicFadeIn;
-			gainParam.setValueAtTime(linearVol * progress, now);
-			gainParam.linearRampToValueAtTime(linearVol, now + (s.musicFadeIn - clampedOffset));
+		if (ts.fadeIn > 0 && clampedOffset < ts.fadeIn) {
+			gp.setValueAtTime(vol * (clampedOffset / ts.fadeIn), now);
+			gp.linearRampToValueAtTime(vol, now + (ts.fadeIn - clampedOffset));
 		} else {
-			gainParam.setValueAtTime(linearVol, now);
+			gp.setValueAtTime(vol, now);
 		}
 
-		if (s.musicFadeOut > 0) {
-			const fadeOutStart = now + playDuration - s.musicFadeOut;
+		if (ts.fadeOut > 0) {
+			const fadeOutStart = now + playDuration - ts.fadeOut;
 			if (fadeOutStart > now) {
-				gainParam.setValueAtTime(linearVol, fadeOutStart);
-				gainParam.linearRampToValueAtTime(0, now + playDuration);
+				gp.setValueAtTime(vol, fadeOutStart);
+				gp.linearRampToValueAtTime(0, now + playDuration);
 			}
 		}
 
-		console.log(`🎵 Music — offset:${clampedOffset.toFixed(2)}s play:${playDuration.toFixed(2)}s fadeIn:${s.musicFadeIn}s fadeOut:${s.musicFadeOut}s`);
-
-		this.musicStopTimeout = setTimeout(() => {
-			this._haltMusic();
-		}, (playDuration + 0.15) * 1000);
+		entry.stopTimeout = setTimeout(() => { entry.isPlaying = false; }, (playDuration + 0.15) * 1000);
+		console.log(`🎵 [${ts.sessionId.slice(0,6)}] offset:${clampedOffset.toFixed(2)}s dur:${playDuration.toFixed(2)}s`);
 	}
 
-	private _haltMusic() {
-		this.clearMusicTimer();
-		if (this.musicPlayer) {
-			try { this.musicPlayer.stop(); } catch { /* already stopped */ }
-		}
-		this.musicIsPlaying = false;
+	private _haltTrack(entry: MusicTrackEntry) {
+		if (entry.stopTimeout) { clearTimeout(entry.stopTimeout); entry.stopTimeout = null; }
+		try { entry.player.stop(); } catch { /* already stopped */ }
+		entry.isPlaying = false;
 	}
 
-	stopMusic() {
-		this._haltMusic();
-		if (this.musicPlayer) {
-			this.musicPlayer.dispose();
-			this.musicPlayer = null;
-		}
-		if (this.musicGain) {
-			this.musicGain.dispose();
-			this.musicGain = null;
-		}
-		if (this.musicRawGain) {
-			this.musicRawGain.disconnect();
-			this.musicRawGain = null;
-		}
-		this.lastMusicVideoTime = -1;
-		this.lastMusicStartTime = -1;
-		this.lastMusicEndTime   = -1;
-		this.lastMusicTrimStart = -1;
-	}
-
-	setMusicVolume(volume: number) {
-		this.state.musicVolume = volume;
-		if (this.musicRawGain) {
-			const ctx = Tone.getContext().rawContext as AudioContext;
-			this.musicRawGain.gain.setTargetAtTime(volume, ctx.currentTime, 0.05);
+	stopMusic(sessionId?: string) {
+		if (sessionId) {
+			const entry = this.musicTracks.get(sessionId);
+			if (entry) {
+				this._haltTrack(entry);
+				entry.player.dispose();
+				entry.rawGain.disconnect();
+				this.musicTracks.delete(sessionId);
+			}
+		} else {
+			for (const entry of this.musicTracks.values()) {
+				this._haltTrack(entry);
+				entry.player.dispose();
+				entry.rawGain.disconnect();
+			}
+			this.musicTracks.clear();
 		}
 	}
 
-	setMusicFadeIn(v: number) {
-		this.state.musicFadeIn = v;
-		if (this.musicIsPlaying) {
-			this._haltMusic();
-			// Restart from current video position — barMoved will pick it up on next sync tick
-			this.lastMusicStartTime = -1;
-		}
+	setMusicVolume(_v: number)    { /* handled per-track via syncMusicToVideo trackStates */ }
+	setMusicFadeIn(_v: number)    {
+		for (const e of this.musicTracks.values()) { if (e.isPlaying) this._haltTrack(e); e.lastStartTime = -1; }
 	}
-
-	setMusicFadeOut(v: number) {
-		this.state.musicFadeOut = v;
-		if (this.musicIsPlaying) {
-			this._haltMusic();
-			this.lastMusicStartTime = -1;
-		}
+	setMusicFadeOut(_v: number)   {
+		for (const e of this.musicTracks.values()) { if (e.isPlaying) this._haltTrack(e); e.lastStartTime = -1; }
 	}
-
-	setMusicStartTime(v: number) {
-		this.state.musicStartTime = v;
-		// barMoved detection in syncMusicToVideo will handle restart
-	}
-
-	setMusicEndTime(v: number) {
-		this.state.musicEndTime = v;
-		// barMoved detection in syncMusicToVideo will handle restart
-	}
-
-	setMusicTrimStart(v: number) {
-		this.state.musicTrimStart = Math.max(0, v);
-	}
+	setMusicStartTime(_v: number) { /* barMoved detection handles restart */ }
+	setMusicEndTime(_v: number)   { /* barMoved detection handles restart */ }
+	setMusicTrimStart(_v: number) { /* barMoved detection handles restart */ }
 
 	// ── Cleanup ──────────────────────────────────────────────────────────────
 	stopAll() {

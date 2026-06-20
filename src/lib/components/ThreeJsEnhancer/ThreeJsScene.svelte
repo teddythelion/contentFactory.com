@@ -10,7 +10,10 @@
 	import ThreeJsLogo from './ThreeJsLogo.svelte';
 	import { text3DState } from '$lib/stores/text3d.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
+	import { mediaBinStore } from '$lib/stores/mediaBin.store';
+	import { timelineStore } from '$lib/stores/timeline.store';
 	import TimelineEditor from './TimelineEditor.svelte';
+	import MediaBin from './MediaBin.svelte';
 
 	let threeJsTextComponent: ThreeJsText;
 	let threeJsLogoComponent: ThreeJsLogo;
@@ -298,11 +301,19 @@
 			threeJsState.setSceneReady(true);
 			startPlayerPolling();
 			audioStudioStore.connectVideo(videoElement!);
-			videoState.setVideoDimensions(
-   			videoElement!.videoWidth,
-   			videoElement!.videoHeight,
-   			videoElement!.duration
-			);
+			const vidDuration = videoElement!.duration;
+			videoState.setVideoDimensions(videoElement!.videoWidth, videoElement!.videoHeight, vidDuration);
+			// Register video in media bin + create a video track (replace on re-load)
+			timelineStore.clearAll();
+			mediaBinStore.clearAll();
+			const videoAssetId = mediaBinStore.addAsset({
+				type: 'video',
+				name: 'Main Video',
+				sessionId: null,
+				previewUrl: videoUrl,
+				duration: vidDuration
+			});
+			timelineStore.addVideoTrack(videoAssetId, 'Main Video', vidDuration);
 		});
 
 		window.addEventListener('resize', handleResize);
@@ -781,12 +792,9 @@
 	{/if}
 
 	{#if videoElement && !(window as any).__threeJsCapturing}
-		<div class="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-sm">
-			{#if videoElement && !(window as any).__threeJsCapturing}
-				<div class="absolute bottom-0 left-0 right-0 bg-black/90 backdrop-blur-sm">
-					<TimelineEditor {videoElement} />
-				</div>
-			{/if}
+		<div class="absolute bottom-0 left-0 right-0 flex flex-col gap-1 bg-black/90 backdrop-blur-sm p-1">
+			<MediaBin />
+			<TimelineEditor {videoElement} />
 		</div>
 	{/if}
 </div>

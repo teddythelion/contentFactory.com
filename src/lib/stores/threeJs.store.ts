@@ -89,7 +89,7 @@ const initialState: ThreeJsState = {
 	particleGradientColor: '#00ffff',
 
 	videoPanX: 0,
-	videoPanY: 0,
+	videoPanY: 1,
 
 	isCapturing: false,
 	isSceneReady: false

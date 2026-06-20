@@ -3,12 +3,23 @@
 // The mixer handles Web Audio API — what you hear = what gets exported.
 
 import { writable, get } from 'svelte/store';
-import { audioMixer } from '$lib/utils/audioMixer.ts';
+import { audioMixer, type MusicTrackState } from '$lib/utils/audioMixer.ts';
+import { mediaBinStore } from './mediaBin.store';
+import { timelineStore } from './timeline.store';
 
 export interface SfxInstance {
 	id: string;
 	startTime: number;
 	endTime: number;
+}
+
+// Per-session music entry stored in the store (superset of MusicTrackState)
+export interface MusicEntry extends MusicTrackState {
+	previewUrl: string;
+	fileName: string | null;
+	generating: boolean;
+	error: string | null;
+	prompt: string;
 }
 
 interface AudioStudioState {
@@ -27,12 +38,16 @@ interface AudioStudioState {
 	sfxLoop: boolean;
 	sfxGenerating: boolean;
 	sfxError: string | null;
-	sfxAudioDuration: number; // actual decoded buffer duration
+	sfxAudioDuration: number;
 	sfxInstances: SfxInstance[];
 	sfxFadeIn: number;
 	sfxFadeOut: number;
 	sfxSuppressOriginal: boolean;
 
+	// Multi-track music: keyed by sessionId
+	musicEntries: Record<string, MusicEntry>;
+	activeMusicSessionId: string | null;
+	// Legacy single-track fields kept for AudioStudioPanel UI compatibility
 	musicPrompt: string;
 	musicSessionId: string | null;
 	musicPreviewUrl: string | null;
@@ -70,6 +85,8 @@ const initialState: AudioStudioState = {
 	sfxFadeOut: 0,
 	sfxSuppressOriginal: false,
 
+	musicEntries: {},
+	activeMusicSessionId: null,
 	musicPrompt: '',
 	musicSessionId: null,
 	musicPreviewUrl: null,
@@ -92,6 +109,22 @@ function makeId() {
 function createAudioStudioStore() {
 	const { subscribe, set, update } = writable<AudioStudioState>(initialState);
 
+	// Patch musicEntries[activeMusicSessionId] and also update the flat display field
+	function patchActiveEntry(patch: Partial<MusicEntry>) {
+		update((s) => {
+			if (!s.activeMusicSessionId) return s;
+			const existing = s.musicEntries[s.activeMusicSessionId];
+			if (!existing) return s;
+			return {
+				...s,
+				musicEntries: {
+					...s.musicEntries,
+					[s.activeMusicSessionId]: { ...existing, ...patch }
+				}
+			};
+		});
+	}
+
 	function syncOriginalToMixer() {
 		const s = get({ subscribe });
 		const effectivelyMuted = s.originalMuted || s.sfxSuppressOriginal || s.musicSuppressOriginal;
@@ -107,6 +140,24 @@ function createAudioStudioStore() {
 					: [{ id: makeId(), startTime: 0, endTime: duration }];
 			return { ...s, sfxAudioDuration: duration, sfxInstances: instances };
 		});
+		// Register in media bin + timeline (replace if re-generating)
+		const s = get({ subscribe });
+		if (s.sfxSessionId) {
+			const existing = timelineStore.findBySession(s.sfxSessionId);
+			if (existing) {
+				timelineStore.syncSfxClips(existing.id, s.sfxInstances, existing.assetId);
+			} else {
+				const name = s.sfxFileName || 'SFX';
+				const assetId = mediaBinStore.addAsset({
+					type: 'sfx',
+					name,
+					sessionId: s.sfxSessionId,
+					previewUrl: s.sfxPreviewUrl,
+					duration
+				});
+				timelineStore.addSfxTrack(assetId, name, s.sfxSessionId, s.sfxInstances);
+			}
+		}
 	}
 
 	return {
@@ -228,6 +279,7 @@ function createAudioStudioStore() {
 		setSfxError: (err: string) => update((s) => ({ ...s, sfxError: err, sfxGenerating: false })),
 
 		stopSfx: () => {
+			const { sfxSessionId } = get({ subscribe });
 			audioMixer.stopSfx();
 			update((s) => ({
 				...s,
@@ -238,6 +290,10 @@ function createAudioStudioStore() {
 				sfxInstances: [],
 				sfxAudioDuration: 0
 			}));
+			if (sfxSessionId) {
+				const track = timelineStore.findBySession(sfxSessionId);
+				if (track) timelineStore.removeTrack(track.id);
+			}
 			syncOriginalToMixer();
 		},
 
@@ -260,39 +316,64 @@ function createAudioStudioStore() {
 
 		syncSfxToVideo: (videoTime: number, isPlaying: boolean) => {
 			const s = get({ subscribe });
-			audioMixer.syncSfxToVideo(videoTime, isPlaying, s.sfxInstances);
+			const sfxTrack = s.sfxSessionId ? timelineStore.findBySession(s.sfxSessionId) : null;
+			const effectivePlaying = isPlaying && !(sfxTrack?.muted ?? false);
+			audioMixer.syncSfxToVideo(videoTime, effectivePlaying, s.sfxInstances);
 		},
 
 		// ── MUSIC ────────────────────────────────────────────────────────────
 		setMusicPrompt: (prompt: string) => update((s) => ({ ...s, musicPrompt: prompt })),
 
+		setActiveMusicSession: (sessionId: string | null) => {
+			update((s) => {
+				if (!sessionId) return { ...s, activeMusicSessionId: null };
+				const e = s.musicEntries[sessionId];
+				if (!e) return { ...s, activeMusicSessionId: sessionId };
+				return {
+					...s,
+					activeMusicSessionId: sessionId,
+					// Snap flat panel fields to this entry's values
+					musicVolume:    e.volume,
+					musicStartTime: e.startTime,
+					musicEndTime:   e.endTime,
+					musicTrimStart: e.trimStart,
+					musicFadeIn:    e.fadeIn,
+					musicFadeOut:   e.fadeOut,
+					musicSessionId: sessionId
+				};
+			});
+		},
+
 		setMusicVolume: (volume: number) => {
 			update((s) => ({ ...s, musicVolume: volume }));
+			patchActiveEntry({ volume });
 			audioMixer.setMusicVolume(volume);
 		},
 
 		setMusicStartTime: (v: number) => {
 			update((s) => ({ ...s, musicStartTime: v }));
-			audioMixer.setMusicStartTime(v);
+			patchActiveEntry({ startTime: v });
 		},
 
 		setMusicEndTime: (v: number) => {
 			update((s) => ({ ...s, musicEndTime: v }));
-			audioMixer.setMusicEndTime(v);
+			patchActiveEntry({ endTime: v });
 		},
 
 		setMusicTrimStart: (v: number) => {
 			update((s) => ({ ...s, musicTrimStart: v }));
-			audioMixer.setMusicTrimStart(v);
+			patchActiveEntry({ trimStart: v });
 		},
 
 		setMusicFadeIn: (v: number) => {
 			update((s) => ({ ...s, musicFadeIn: v }));
+			patchActiveEntry({ fadeIn: v });
 			audioMixer.setMusicFadeIn(v);
 		},
 
 		setMusicFadeOut: (v: number) => {
 			update((s) => ({ ...s, musicFadeOut: v }));
+			patchActiveEntry({ fadeOut: v });
 			audioMixer.setMusicFadeOut(v);
 		},
 
@@ -311,11 +392,30 @@ function createAudioStudioStore() {
 				musicError: null,
 				musicTrimStart: 0
 			}));
-			audioMixer.loadMusic(objectUrl, (durationSeconds) => {
-				const currentStart = get({ subscribe }).musicStartTime;
-				const newEnd = currentStart + durationSeconds;
-				update((s) => ({ ...s, musicEndTime: newEnd }));
-				audioMixer.setMusicEndTime(newEnd);
+			audioMixer.loadMusic(sessionId, objectUrl, (durationSeconds) => {
+				const s = get({ subscribe });
+				const startTime = 0;
+				const endTime   = startTime + durationSeconds;
+				const name      = fileName || 'Music';
+				const entry: MusicEntry = {
+					sessionId, previewUrl: objectUrl, fileName, generating: false, error: null, prompt: '',
+					volume: 0.3, startTime, endTime, trimStart: 0, fadeIn: 0, fadeOut: 0
+				};
+				update((st) => ({
+					...st,
+					musicEndTime: endTime,
+					musicFadeIn: 0, musicFadeOut: 0, musicTrimStart: 0,
+					musicStartTime: startTime, musicVolume: 0.3,
+					activeMusicSessionId: sessionId,
+					musicEntries: { ...st.musicEntries, [sessionId]: entry }
+				}));
+				const existing = timelineStore.findBySession(sessionId);
+				if (existing) {
+					timelineStore.updateClip(existing.id, existing.clips[0]?.id ?? '', { endTime });
+				} else {
+					const assetId = mediaBinStore.addAsset({ type: 'music', name, sessionId, previewUrl: objectUrl, duration: durationSeconds });
+					timelineStore.addMusicTrack(assetId, name, sessionId, startTime, endTime);
+				}
 			});
 		},
 
@@ -328,11 +428,30 @@ function createAudioStudioStore() {
 				musicError: null,
 				musicTrimStart: 0
 			}));
-			audioMixer.loadMusic(previewUrl, (durationSeconds) => {
-				const currentStart = get({ subscribe }).musicStartTime;
-				const newEnd = currentStart + durationSeconds;
-				update((s) => ({ ...s, musicEndTime: newEnd }));
-				audioMixer.setMusicEndTime(newEnd);
+			audioMixer.loadMusic(sessionId, previewUrl, (durationSeconds) => {
+				const s    = get({ subscribe });
+				const startTime = 0;
+				const endTime   = startTime + durationSeconds;
+				const name      = s.musicPrompt ? `Music: ${s.musicPrompt.slice(0, 30)}` : 'Generated Music';
+				const entry: MusicEntry = {
+					sessionId, previewUrl, fileName: null, generating: false, error: null, prompt: s.musicPrompt,
+					volume: 0.3, startTime, endTime, trimStart: 0, fadeIn: 0, fadeOut: 0
+				};
+				update((st) => ({
+					...st,
+					musicEndTime: endTime,
+					musicFadeIn: 0, musicFadeOut: 0, musicTrimStart: 0,
+					musicStartTime: startTime, musicVolume: 0.3,
+					activeMusicSessionId: sessionId,
+					musicEntries: { ...st.musicEntries, [sessionId]: entry }
+				}));
+				const existing = timelineStore.findBySession(sessionId);
+				if (existing) {
+					timelineStore.updateClip(existing.id, existing.clips[0]?.id ?? '', { endTime });
+				} else {
+					const assetId = mediaBinStore.addAsset({ type: 'music', name, sessionId, previewUrl, duration: durationSeconds });
+					timelineStore.addMusicTrack(assetId, name, sessionId, startTime, endTime);
+				}
 			});
 		},
 
@@ -342,15 +461,28 @@ function createAudioStudioStore() {
 		setMusicError: (err: string) =>
 			update((s) => ({ ...s, musicError: err, musicGenerating: false })),
 
-		stopMusic: () => {
-			audioMixer.stopMusic();
-			update((s) => ({
-				...s,
-				musicSessionId: null,
-				musicPreviewUrl: null,
-				musicFileName: null,
-				musicGenerating: false
-			}));
+		stopMusic: (sessionId?: string) => {
+			if (sessionId) {
+				audioMixer.stopMusic(sessionId);
+				update((s) => {
+					const entries = { ...s.musicEntries };
+					delete entries[sessionId];
+					return { ...s, musicEntries: entries, musicSessionId: s.musicSessionId === sessionId ? null : s.musicSessionId };
+				});
+				const track = timelineStore.findBySession(sessionId);
+				if (track) timelineStore.removeTrack(track.id);
+			} else {
+				const { musicSessionId } = get({ subscribe });
+				audioMixer.stopMusic();
+				update((s) => ({
+					...s, musicEntries: {},
+					musicSessionId: null, musicPreviewUrl: null, musicFileName: null, musicGenerating: false
+				}));
+				if (musicSessionId) {
+					const track = timelineStore.findBySession(musicSessionId);
+					if (track) timelineStore.removeTrack(track.id);
+				}
+			}
 			syncOriginalToMixer();
 		},
 
@@ -366,7 +498,8 @@ function createAudioStudioStore() {
 		},
 
 		regenerateMusic: (generateFn: () => Promise<void>) => {
-			audioMixer.stopMusic();
+			const { musicSessionId } = get({ subscribe });
+			if (musicSessionId) audioMixer.stopMusic(musicSessionId);
 			update((s) => ({ ...s, musicSessionId: null, musicPreviewUrl: null }));
 			generateFn();
 		},
@@ -376,7 +509,29 @@ function createAudioStudioStore() {
 		},
 
 		syncMusicToVideo: (videoTime: number, isPlaying: boolean) => {
-			audioMixer.syncMusicToVideo(videoTime, isPlaying);
+			const s = get({ subscribe });
+			const trackStates: MusicTrackState[] = Object.values(s.musicEntries).map((e) => {
+				const timelineTrack = timelineStore.findBySession(e.sessionId);
+				const muted = timelineTrack?.muted ?? false;
+				return {
+					sessionId: e.sessionId,
+					volume:    muted ? 0 : e.volume,
+					startTime: e.startTime,
+					endTime:   e.endTime,
+					trimStart: e.trimStart,
+					fadeIn:    e.fadeIn,
+					fadeOut:   e.fadeOut
+				};
+			});
+			audioMixer.syncMusicToVideo(videoTime, isPlaying, trackStates);
+		},
+
+		updateMusicEntry: (sessionId: string, patch: Partial<MusicEntry>) => {
+			update((s) => {
+				const existing = s.musicEntries[sessionId];
+				if (!existing) return s;
+				return { ...s, musicEntries: { ...s.musicEntries, [sessionId]: { ...existing, ...patch } } };
+			});
 		},
 
 		stopAll: () => { audioMixer.stopAll(); },
