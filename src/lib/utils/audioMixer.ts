@@ -412,11 +412,13 @@ class AudioMixer {
 	}
 
 	setMusicVolume(_v: number)    { /* handled per-track via syncMusicToVideo trackStates */ }
-	setMusicFadeIn(_v: number)    {
-		for (const e of this.musicTracks.values()) { if (e.isPlaying) this._haltTrack(e); e.lastStartTime = -1; }
+	setMusicFadeIn(sessionId: string)    {
+		const e = this.musicTracks.get(sessionId);
+		if (e) { if (e.isPlaying) this._haltTrack(e); e.lastStartTime = -1; }
 	}
-	setMusicFadeOut(_v: number)   {
-		for (const e of this.musicTracks.values()) { if (e.isPlaying) this._haltTrack(e); e.lastStartTime = -1; }
+	setMusicFadeOut(sessionId: string)   {
+		const e = this.musicTracks.get(sessionId);
+		if (e) { if (e.isPlaying) this._haltTrack(e); e.lastStartTime = -1; }
 	}
 	setMusicStartTime(_v: number) { /* barMoved detection handles restart */ }
 	setMusicEndTime(_v: number)   { /* barMoved detection handles restart */ }

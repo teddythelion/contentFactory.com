@@ -422,11 +422,12 @@
 								{:else if track.type === 'music'}
 									{@const mFadeIn  = audioStudio.musicFadeIn}
 									{@const mFadeOut = audioStudio.musicFadeOut}
+									{@const isActive = track.assetSessionId === audioStudio.activeMusicSessionId}
 									<!-- svelte-ignore a11y-no-static-element-interactions -->
 									<div
 										onmousedown={(e) => startMusicDrag(e, track, clip)}
 										ontouchstart={(e) => startMusicDrag(e, track, clip)}
-										style="position:absolute;top:5px;left:{tp(clip.startTime)}px;width:{cw}px;height:{TRACK_H-10}px;background:{track.color};border:1px solid rgba(147,51,234,0.85);border-radius:3px;cursor:move;overflow:hidden;user-select:none;"
+										style="position:absolute;top:5px;left:{tp(clip.startTime)}px;width:{cw}px;height:{TRACK_H-10}px;background:{track.color};border:2px solid {isActive ? 'rgba(250,204,21,1)' : 'rgba(147,51,234,0.85)'};border-radius:3px;cursor:move;overflow:hidden;user-select:none;{isActive ? 'box-shadow:0 0 0 1px rgba(250,204,21,0.4),0 0 8px rgba(250,204,21,0.25);' : ''}"
 									>
 										<!-- svelte-ignore a11y-no-static-element-interactions -->
 										<div onmousedown={(e) => startMusicResizeStart(e, track, clip)} ontouchstart={(e) => startMusicResizeStart(e, track, clip)} style="position:absolute;left:0;top:0;bottom:0;width:10px;cursor:ew-resize;background:rgba(255,255,255,0.18);z-index:2;"></div>

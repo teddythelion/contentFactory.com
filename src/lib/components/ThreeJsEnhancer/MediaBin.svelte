@@ -54,9 +54,11 @@
 				<span style="font-size:10px;font-weight:700;color:rgba(209,213,219,1);">📂 Media Bin</span>
 				<span style="font-size:9px;color:rgba(107,114,128,1);">{assets.length} clip{assets.length !== 1 ? 's' : ''}</span>
 				{#if armedAsset}
-					<span style="font-size:9px;font-weight:600;color:rgba(251,191,36,1);background:rgba(251,191,36,0.15);padding:1px 6px;border-radius:10px;border:1px solid rgba(251,191,36,0.3);">
-						Armed: {TYPE_ICON[armedAsset.type]} {armedAsset.name}
+					<span style="font-size:9px;font-weight:600;color:rgba(251,191,36,1);background:rgba(251,191,36,0.15);padding:1px 6px;border-radius:10px;border:1px solid rgba(251,191,36,0.3);" title="Ready to place — tap a track or New Track to drop it">
+						⬇ Place: {TYPE_ICON[armedAsset.type]} {armedAsset.name}
 					</span>
+				{:else}
+					<span style="font-size:8px;color:rgba(107,114,128,0.7);">tap a clip to stage it</span>
 				{/if}
 			</div>
 			<div style="display:flex;align-items:center;gap:4px;">

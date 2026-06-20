@@ -40,7 +40,19 @@
 	//$: isSavingEnhanced = $enhancedContentState.isSaving;
 	let audioStudio = $derived($audioStudioStore);
 	let videoDuration = $derived($videoState.videoDuration || 8);
-let musicMaxTime = $derived(videoDuration);
+	let musicMaxTime = $derived(videoDuration);
+	// Always read music controls from the active entry so switching bars instantly updates the panel
+	let activeMusicEntry = $derived(
+		audioStudio.activeMusicSessionId
+			? (audioStudio.musicEntries[audioStudio.activeMusicSessionId] ?? null)
+			: null
+	);
+	let mVol      = $derived(activeMusicEntry?.volume    ?? audioStudio.musicVolume);
+	let mStart    = $derived(activeMusicEntry?.startTime ?? audioStudio.musicStartTime);
+	let mEnd      = $derived(activeMusicEntry?.endTime   ?? audioStudio.musicEndTime);
+	let mTrim     = $derived(activeMusicEntry?.trimStart ?? audioStudio.musicTrimStart);
+	let mFadeIn   = $derived(activeMusicEntry?.fadeIn    ?? audioStudio.musicFadeIn);
+	let mFadeOut  = $derived(activeMusicEntry?.fadeOut   ?? audioStudio.musicFadeOut);
 
 	// // Sync original video volume/mute to the canvas video element
 	// $effect(() => {		
@@ -799,26 +811,26 @@ let musicMaxTime = $derived(videoDuration);
 							></textarea>
 							<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Music Volume</span>
-								<span class="text-xs text-gray-400">{Math.round(audioStudio.musicVolume * 100)}%</span>
+								<span class="text-xs text-gray-400">{Math.round(mVol * 100)}%</span>
 							</div>
 							<input type="range" min="0" max="1" step="0.01"
-								value={audioStudio.musicVolume}
+								value={mVol}
 								oninput={(e) => audioStudioStore.setMusicVolume(parseFloat(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 							<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Start Time</span>
-								<span class="text-xs text-gray-400">{audioStudio.musicStartTime.toFixed(1)}s</span>
+								<span class="text-xs text-gray-400">{mStart.toFixed(1)}s</span>
 							</div>
 							<input type="range" min="0" max={musicMaxTime} step="0.1"
-								value={audioStudio.musicStartTime}
+								value={mStart}
 								oninput={(e) => audioStudioStore.setMusicStartTime(parseFloat(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 							<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">End Time</span>
-								<span class="text-xs text-gray-400">{audioStudio.musicEndTime.toFixed(1)}s</span>
+								<span class="text-xs text-gray-400">{mEnd.toFixed(1)}s</span>
 							</div>
 							<input type="range" min="0" max={musicMaxTime} step="0.1"
-								value={audioStudio.musicEndTime}
+								value={mEnd}
 								oninput={(e) => audioStudioStore.setMusicEndTime(parseFloat(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 								<div class="mt-3 mb-1 flex items-center justify-between">
@@ -831,18 +843,18 @@ let musicMaxTime = $derived(videoDuration);
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 							<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Fade In</span>
-								<span class="text-xs text-gray-400">{audioStudio.musicFadeIn.toFixed(1)}s</span>
+								<span class="text-xs text-gray-400">{mFadeIn.toFixed(1)}s</span>
 							</div>
 							<input type="range" min="0" max="6" step="0.1"
-								value={audioStudio.musicFadeIn}
+								value={mFadeIn}
 								oninput={(e) => audioStudioStore.setMusicFadeIn(parseFloat(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 							<div class="mt-3 mb-1 flex items-center justify-between">
 								<span class="text-sm text-white">Fade Out</span>
-								<span class="text-xs text-gray-400">{audioStudio.musicFadeOut.toFixed(1)}s</span>
+								<span class="text-xs text-gray-400">{mFadeOut.toFixed(1)}s</span>
 							</div>
 							<input type="range" min="0" max="6" step="0.1"
-								value={audioStudio.musicFadeOut}
+								value={mFadeOut}
 								oninput={(e) => audioStudioStore.setMusicFadeOut(parseFloat(e.currentTarget.value))}
 								class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 							<div class="mt-3 mb-3 flex items-center justify-between">
@@ -861,7 +873,7 @@ let musicMaxTime = $derived(videoDuration);
 							<!-- Upload local audio file -->
 							<div class="mt-3">
 								<label class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
-									📁 {audioStudio.musicFileName ?? 'Upload Audio File'}
+									📁 Upload Audio File
 									<input type="file" accept="audio/*" onchange={handleUploadMusic} class="hidden" />
 								</label>
 							</div>
@@ -1212,30 +1224,30 @@ let musicMaxTime = $derived(videoDuration);
 								<!-- Volume -->
 								<div class="mt-3 flex items-center justify-between mb-1">
 									<span class="text-sm text-white">Music Volume</span>
-									<span class="text-xs text-gray-400">{Math.round(audioStudio.musicVolume * 100)}%</span>
+									<span class="text-xs text-gray-400">{Math.round(mVol * 100)}%</span>
 								</div>
 								<input type="range" min="0" max="1" step="0.01"
-									value={audioStudio.musicVolume}
+									value={mVol}
 									oninput={(e) => audioStudioStore.setMusicVolume(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 
 								<!-- Start Time -->
 								<div class="mt-3 flex items-center justify-between mb-1">
 									<span class="text-sm text-white">Start Time</span>
-									<span class="text-xs text-gray-400">{audioStudio.musicStartTime.toFixed(1)}s</span>
+									<span class="text-xs text-gray-400">{mStart.toFixed(1)}s</span>
 								</div>
 								<input type="range" min="0" max={musicMaxTime} step="0.1"
-									value={audioStudio.musicStartTime}
+									value={mStart}
 									oninput={(e) => audioStudioStore.setMusicStartTime(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 
 								<!-- End Time -->
 								<div class="mt-3 flex items-center justify-between mb-1">
 									<span class="text-sm text-white">End Time</span>
-									<span class="text-xs text-gray-400">{audioStudio.musicEndTime.toFixed(1)}s</span>
+									<span class="text-xs text-gray-400">{mEnd.toFixed(1)}s</span>
 								</div>
 								<input type="range" min="0" max={musicMaxTime} step="0.1"
-									value={audioStudio.musicEndTime}
+									value={mEnd}
 									oninput={(e) => audioStudioStore.setMusicEndTime(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 								<div class="mt-3 mb-1 flex items-center justify-between">
@@ -1249,20 +1261,20 @@ let musicMaxTime = $derived(videoDuration);
 								<!-- Fade In -->
 								<div class="mt-3 flex items-center justify-between mb-1">
 									<span class="text-sm text-white">Fade In</span>
-									<span class="text-xs text-gray-400">{audioStudio.musicFadeIn.toFixed(1)}s</span>
+									<span class="text-xs text-gray-400">{mFadeIn.toFixed(1)}s</span>
 								</div>
 								<input type="range" min="0" max="6" step="0.1"
-									value={audioStudio.musicFadeIn}
+									value={mFadeIn}
 									oninput={(e) => audioStudioStore.setMusicFadeIn(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 
 								<!-- Fade Out -->
 								<div class="mt-3 flex items-center justify-between mb-1">
 									<span class="text-sm text-white">Fade Out</span>
-									<span class="text-xs text-gray-400">{audioStudio.musicFadeOut.toFixed(1)}s</span>
+									<span class="text-xs text-gray-400">{mFadeOut.toFixed(1)}s</span>
 								</div>
 								<input type="range" min="0" max="6" step="0.1"
-									value={audioStudio.musicFadeOut}
+									value={mFadeOut}
 									oninput={(e) => audioStudioStore.setMusicFadeOut(parseFloat(e.currentTarget.value))}
 									class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-purple-500" />
 
@@ -1283,7 +1295,7 @@ let musicMaxTime = $derived(videoDuration);
 								<!-- Upload local audio file -->
 								<div class="mt-3">
 									<label class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
-										📁 {audioStudio.musicFileName ?? 'Upload Audio File'}
+										📁 Upload Audio File
 										<input type="file" accept="audio/*" onchange={handleUploadMusic} class="hidden" />
 									</label>
 								</div>

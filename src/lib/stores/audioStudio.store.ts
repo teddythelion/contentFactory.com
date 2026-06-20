@@ -368,13 +368,15 @@ function createAudioStudioStore() {
 		setMusicFadeIn: (v: number) => {
 			update((s) => ({ ...s, musicFadeIn: v }));
 			patchActiveEntry({ fadeIn: v });
-			audioMixer.setMusicFadeIn(v);
+			const sid = get({ subscribe }).activeMusicSessionId;
+			if (sid) audioMixer.setMusicFadeIn(sid);
 		},
 
 		setMusicFadeOut: (v: number) => {
 			update((s) => ({ ...s, musicFadeOut: v }));
 			patchActiveEntry({ fadeOut: v });
-			audioMixer.setMusicFadeOut(v);
+			const sid = get({ subscribe }).activeMusicSessionId;
+			if (sid) audioMixer.setMusicFadeOut(sid);
 		},
 
 		setMusicSuppressOriginal: (suppress: boolean) => {
