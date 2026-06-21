@@ -15,27 +15,34 @@ interface MixerState {
 	sfxLoop: boolean;
 }
 
-// Per-music-track state passed in from the store on each sync
+// One clip segment within a music track (maps timeline position → buffer window)
+export interface MusicClipState {
+	id: string;
+	startTime: number;   // position on output timeline
+	endTime: number;
+	sourceStart: number; // read-head position in the audio buffer
+	sourceEnd: number;
+}
+
+// Per-music-track state passed to the mixer each sync tick
 export interface MusicTrackState {
 	sessionId: string;
 	volume: number;
-	startTime: number;
-	endTime: number;
-	trimStart: number;
 	fadeIn: number;
 	fadeOut: number;
+	clips: MusicClipState[];
 }
 
-// Internal per-player object
+// Internal per-player bookkeeping
+interface ClipSnapshot { startTime: number; sourceStart: number; }
 interface MusicTrackEntry {
 	player: Tone.Player;
 	rawGain: GainNode;
 	stopTimeout: ReturnType<typeof setTimeout> | null;
 	isPlaying: boolean;
+	playingClipId: string | null;
 	lastVideoTime: number;
-	lastStartTime: number;
-	lastEndTime: number;
-	lastTrimStart: number;
+	clipSnapshots: Map<string, ClipSnapshot>;
 }
 
 class AudioMixer {
@@ -292,10 +299,9 @@ class AudioMixer {
 			player, rawGain,
 			stopTimeout: null,
 			isPlaying: false,
+			playingClipId: null,
 			lastVideoTime: -1,
-			lastStartTime: -1,
-			lastEndTime: -1,
-			lastTrimStart: -1
+			clipSnapshots: new Map()
 		};
 
 		player.load(previewUrl).then(() => {
@@ -319,30 +325,35 @@ class AudioMixer {
 	}
 
 	private _syncOneTrack(entry: MusicTrackEntry, ts: MusicTrackState, videoTime: number, isVideoPlaying: boolean) {
-		const inRange    = videoTime >= ts.startTime && videoTime < ts.endTime;
-		const shouldPlay = isVideoPlaying && inRange;
+		// Find which clip (if any) the playhead is inside
+		const activeClip = ts.clips.find(c => videoTime >= c.startTime && videoTime < c.endTime) ?? null;
+		const shouldPlay = isVideoPlaying && !!activeClip;
 
-		const isSeeked  = entry.lastVideoTime >= 0 && Math.abs(videoTime - entry.lastVideoTime) > 0.35;
+		const isSeeked = entry.lastVideoTime >= 0 && Math.abs(videoTime - entry.lastVideoTime) > 0.35;
 		entry.lastVideoTime = videoTime;
 
-		const barMoved =
-			ts.startTime !== entry.lastStartTime ||
-			ts.endTime   !== entry.lastEndTime   ||
-			ts.trimStart !== entry.lastTrimStart;
-		entry.lastStartTime = ts.startTime;
-		entry.lastEndTime   = ts.endTime;
-		entry.lastTrimStart = ts.trimStart;
+		// Detect if the currently-playing clip moved or was trimmed
+		let clipChanged = activeClip?.id !== entry.playingClipId;
+		let clipMoved   = false;
+		if (activeClip) {
+			const snap = entry.clipSnapshots.get(activeClip.id);
+			clipMoved = !!snap && (activeClip.startTime !== snap.startTime || activeClip.sourceStart !== snap.sourceStart);
+			entry.clipSnapshots.set(activeClip.id, { startTime: activeClip.startTime, sourceStart: activeClip.sourceStart });
+		}
 
 		if (shouldPlay) {
-			if (!entry.isPlaying || isSeeked || barMoved) {
-				const bufferOffset = ts.trimStart + Math.max(0, videoTime - ts.startTime);
-				this._startTrackFrom(entry, ts, bufferOffset, ts.endTime - videoTime);
+			if (!entry.isPlaying || isSeeked || clipChanged || clipMoved) {
+				const bufferOffset = activeClip!.sourceStart + Math.max(0, videoTime - activeClip!.startTime);
+				const remaining    = activeClip!.endTime - videoTime;
+				this._startTrackFrom(entry, ts, bufferOffset, remaining);
+				entry.playingClipId = activeClip!.id;
 			} else {
 				const ctx = Tone.getContext().rawContext as AudioContext;
 				entry.rawGain.gain.setTargetAtTime(ts.volume, ctx.currentTime, 0.05);
 			}
-		} else if (entry.isPlaying) {
-			this._haltTrack(entry);
+		} else {
+			if (entry.isPlaying) this._haltTrack(entry);
+			entry.playingClipId = null;
 		}
 	}
 
@@ -412,17 +423,14 @@ class AudioMixer {
 	}
 
 	setMusicVolume(_v: number)    { /* handled per-track via syncMusicToVideo trackStates */ }
-	setMusicFadeIn(sessionId: string)    {
+	setMusicFadeIn(sessionId: string) {
 		const e = this.musicTracks.get(sessionId);
-		if (e) { if (e.isPlaying) this._haltTrack(e); e.lastStartTime = -1; }
+		if (e) { if (e.isPlaying) this._haltTrack(e); e.clipSnapshots.clear(); e.playingClipId = null; }
 	}
-	setMusicFadeOut(sessionId: string)   {
+	setMusicFadeOut(sessionId: string) {
 		const e = this.musicTracks.get(sessionId);
-		if (e) { if (e.isPlaying) this._haltTrack(e); e.lastStartTime = -1; }
+		if (e) { if (e.isPlaying) this._haltTrack(e); e.clipSnapshots.clear(); e.playingClipId = null; }
 	}
-	setMusicStartTime(_v: number) { /* barMoved detection handles restart */ }
-	setMusicEndTime(_v: number)   { /* barMoved detection handles restart */ }
-	setMusicTrimStart(_v: number) { /* barMoved detection handles restart */ }
 
 	// ── Cleanup ──────────────────────────────────────────────────────────────
 	stopAll() {

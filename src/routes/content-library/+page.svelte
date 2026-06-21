@@ -5,7 +5,7 @@
 	interface ContentItem {
 		contentId: string;
 		userId: string;
-		type: 'image' | 'video';
+		type: 'image' | 'video' | 'audio';
 		title: string;
 		prompt: string;
 		publicUrl: string;
@@ -13,10 +13,11 @@
 		createdAt: any;
 		fileSize: number;
 		format: string;
+		duration?: number;
 		model?: string;
 	}
 
-	let activeTab: 'image' | 'video' = 'video'; // Videos first
+	let activeTab: 'image' | 'video' | 'audio' = 'video'; // Videos first
 	let items: ContentItem[] = [];
 	let loading = false;
 	let error: string | null = null;
@@ -70,9 +71,9 @@
 	}
 
 	function downloadItem(item: ContentItem) {
-		const fileName = item.title.endsWith('.mp4') || item.title.endsWith('.jpg')
-			? item.title
-			: `${item.title}.${item.format}`;
+		const knownExtensions = ['.mp4', '.jpg', '.png', '.mp3'];
+		const hasExt = knownExtensions.some(ext => item.title.endsWith(ext));
+		const fileName = hasExt ? item.title : `${item.title}.${item.format}`;
 
 		// GCS signed URLs block browser-side fetch (CORS), route through server proxy instead
 		const proxyUrl = `/api/proxyVideo?url=${encodeURIComponent(item.publicUrl)}&download=${encodeURIComponent(fileName)}`;
@@ -117,7 +118,7 @@
 		<!-- Header -->
 		<div class="mb-8">
 			<h1 class="mb-2 text-4xl font-bold text-white">📚 Content Library</h1>
-			<p class="text-gray-400">Your saved images and videos</p>
+			<p class="text-gray-400">Your saved images, videos, and generated audio</p>
 		</div>
 
 		<!-- Tabs — Videos first -->
@@ -142,6 +143,16 @@
 			>
 				📸 Images ({items.filter((i) => i.type === 'image').length})
 			</button>
+			<button
+				on:click={() => (activeTab = 'audio')}
+				class={`px-4 pb-3 font-semibold transition-colors ${
+					activeTab === 'audio'
+						? 'border-b-2 border-purple-400 text-purple-400'
+						: 'text-gray-400 hover:text-white'
+				}`}
+			>
+				🎵 Audio ({items.filter((i) => i.type === 'audio').length})
+			</button>
 		</div>
 
 		<!-- Loading State -->
@@ -161,21 +172,25 @@
 		<!-- Empty State -->
 		{#if filteredItems.length === 0 && !loading}
 			<div class="py-16 text-center">
-				<div class="mb-4 text-6xl">{activeTab === 'image' ? '📸' : '🎬'}</div>
+				<div class="mb-4 text-6xl">{activeTab === 'image' ? '📸' : activeTab === 'audio' ? '🎵' : '🎬'}</div>
 				<h2 class="mb-2 text-2xl font-bold text-white">
-					{activeTab === 'image' ? 'No images yet' : 'No videos yet'}
+					{activeTab === 'image' ? 'No images yet' : activeTab === 'audio' ? 'No audio yet' : 'No videos yet'}
 				</h2>
 				<p class="mb-6 text-gray-400">
 					{activeTab === 'image'
 						? 'Generate and save images to see them here'
+						: activeTab === 'audio'
+						? 'Generate music or SFX in the editor — they save here automatically'
 						: 'Capture and save videos to see them here'}
 				</p>
+				{#if activeTab !== 'audio'}
 				<a
 					href={activeTab === 'image' ? '/texttoimage' : '/texttovideo'}
 					class="inline-block rounded-lg bg-blue-600 px-6 py-2 text-white transition-colors hover:bg-blue-700"
 				>
 					{activeTab === 'image' ? '→ Create Image' : '→ Create Video'}
 				</a>
+				{/if}
 			</div>
 		{/if}
 
@@ -186,7 +201,13 @@
 					<div
 						class="group overflow-hidden rounded-lg border border-white/10 bg-gray-800/50 transition-all hover:border-white/20"
 					>
-						<!-- Thumbnail -->
+						<!-- Thumbnail / Player -->
+						{#if item.type === 'audio'}
+							<div class="flex h-36 w-full flex-col items-center justify-center gap-3 bg-gradient-to-br from-purple-900/60 to-gray-900 px-4">
+								<div class="text-5xl">🎵</div>
+								<audio src={item.publicUrl} controls class="w-full" style="height:32px;"></audio>
+							</div>
+						{:else}
 						<div class="relative h-48 w-full overflow-hidden bg-gray-900">
 							{#if item.type === 'image'}
 								<img
@@ -204,7 +225,7 @@
 									muted
  									playsinline
 								>
-								 <track kind="captions" />								
+								 <track kind="captions" />
 							</video>
 								<div
 									class="absolute inset-0 flex items-center justify-center bg-black/30 transition-colors group-hover:bg-black/40"
@@ -213,6 +234,7 @@
 								</div>
 							{/if}
 						</div>
+						{/if}
 
 						<!-- Info -->
 						<div class="p-4">
@@ -231,8 +253,9 @@
 									class="flex-1 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
 									title="Download"
 								>
-								Download ⬇️
+									Download ⬇️
 								</button>
+								{#if item.type !== 'audio'}
 								<button
 									on:click={() => loadIntoEditor(item)}
 									class="flex-1 rounded bg-gray-700 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-600"
@@ -240,6 +263,7 @@
 								>
 									Edit ✏️
 								</button>
+								{/if}
 								<button
 									on:click={() => deleteItem(item.contentId)}
 									class="flex-1 rounded bg-red-600/20 px-3 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/30 hover:text-red-300"

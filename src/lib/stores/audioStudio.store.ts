@@ -3,9 +3,26 @@
 // The mixer handles Web Audio API — what you hear = what gets exported.
 
 import { writable, get } from 'svelte/store';
-import { audioMixer, type MusicTrackState } from '$lib/utils/audioMixer.ts';
+import { audioMixer, type MusicTrackState, type MusicClipState } from '$lib/utils/audioMixer.ts';
 import { mediaBinStore } from './mediaBin.store';
 import { timelineStore } from './timeline.store';
+import { authStore } from './auth.store';
+
+// Fire-and-forget: saves generated audio (data: URLs only) to the content library.
+async function saveAudioToLibrary(previewUrl: string, title: string, prompt: string, duration: number) {
+	if (!previewUrl.startsWith('data:')) return; // skip uploaded/blob URLs
+	try {
+		const uid = get(authStore).user?.uid;
+		if (!uid) return;
+		await fetch('/api/saveContent', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ fileUrl: previewUrl, type: 'audio', title, prompt, format: 'mp3', duration })
+		});
+	} catch {
+		// silent fail — library save is best-effort
+	}
+}
 
 export interface SfxInstance {
 	id: string;
@@ -13,13 +30,22 @@ export interface SfxInstance {
 	endTime: number;
 }
 
-// Per-session music entry stored in the store (superset of MusicTrackState)
-export interface MusicEntry extends MusicTrackState {
+// Per-session music entry — display/meta state for the store and controls panel.
+// Actual clip positions live in timelineStore; mixer reads from there via syncMusicToVideo.
+export interface MusicEntry {
+	sessionId: string;
 	previewUrl: string;
 	fileName: string | null;
 	generating: boolean;
 	error: string | null;
 	prompt: string;
+	volume: number;
+	// Panel display values for the focused clip (updated by drag handlers)
+	startTime: number;
+	endTime: number;
+	trimStart: number;
+	fadeIn: number;
+	fadeOut: number;
 }
 
 interface AudioStudioState {
@@ -157,6 +183,9 @@ function createAudioStudioStore() {
 				});
 				timelineStore.addSfxTrack(assetId, name, s.sfxSessionId, s.sfxInstances);
 			}
+			const sfxPrompt = s.sfxPrompt ?? '';
+			const sfxTitle  = `SFX: ${sfxPrompt.slice(0, 40) || 'Generated SFX'}`;
+			if (s.sfxPreviewUrl) saveAudioToLibrary(s.sfxPreviewUrl, sfxTitle, sfxPrompt, duration);
 		}
 	}
 
@@ -454,6 +483,7 @@ function createAudioStudioStore() {
 					const assetId = mediaBinStore.addAsset({ type: 'music', name, sessionId, previewUrl, duration: durationSeconds });
 					timelineStore.addMusicTrack(assetId, name, sessionId, startTime, endTime);
 				}
+				saveAudioToLibrary(previewUrl, name, s.musicPrompt, durationSeconds);
 			});
 		},
 
@@ -514,15 +544,20 @@ function createAudioStudioStore() {
 			const s = get({ subscribe });
 			const trackStates: MusicTrackState[] = Object.values(s.musicEntries).map((e) => {
 				const timelineTrack = timelineStore.findBySession(e.sessionId);
-				const muted = timelineTrack?.muted ?? false;
+				const muted  = timelineTrack?.muted ?? false;
+				const clips: MusicClipState[] = (timelineTrack?.clips ?? []).map(c => ({
+					id: c.id,
+					startTime:   c.startTime,
+					endTime:     c.endTime,
+					sourceStart: c.sourceStart,
+					sourceEnd:   c.sourceEnd
+				}));
 				return {
 					sessionId: e.sessionId,
 					volume:    muted ? 0 : e.volume,
-					startTime: e.startTime,
-					endTime:   e.endTime,
-					trimStart: e.trimStart,
 					fadeIn:    e.fadeIn,
-					fadeOut:   e.fadeOut
+					fadeOut:   e.fadeOut,
+					clips
 				};
 			});
 			audioMixer.syncMusicToVideo(videoTime, isPlaying, trackStates);

@@ -7,7 +7,7 @@ import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 
 interface SaveContentParams {
 	fileUrl: string;
-	type: 'image' | 'video';
+	type: 'image' | 'video' | 'audio';
 	title?: string;
 	description?: string;
 	prompt?: string;
@@ -52,13 +52,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		// Upload to GCS
 		const fileName = `${params.type}-${Date.now()}.${params.format || 'png'}`;
-		const uploadResult = await uploadToGCS(
-			userId,
-			imageBuffer,
-			fileName,
-			params.type === 'image' ? 'image/png' : 'video/mp4',
-			params.type === 'image' ? 'images' : 'videos'
-		);
+		const mimeType = params.type === 'image' ? 'image/png' : params.type === 'audio' ? 'audio/mpeg' : 'video/mp4';
+		const folder   = params.type === 'image' ? 'images' : params.type === 'audio' ? 'audio' : 'videos';
+		const uploadResult = await uploadToGCS(userId, imageBuffer, fileName, mimeType, folder);
 
 		// Save metadata to Firestore
 		const contentRef = adminDb.collection('content').doc();
@@ -70,7 +66,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			type: params.type,
 			title:
 				params.title ||
-				`${params.type === 'image' ? 'Generated Image' : 'Generated Video'} ${new Date().toLocaleDateString()}`,
+				`${params.type === 'image' ? 'Generated Image' : params.type === 'audio' ? 'Generated Audio' : 'Generated Video'} ${new Date().toLocaleDateString()}`,
 			description: params.description || '',
 			prompt: params.prompt || '',
 			gcsPath: uploadResult.gcsPath,
@@ -96,7 +92,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.collection('users')
 			.doc(userId)
 			.update({
-				[params.type === 'image' ? 'imagesGenerated' : 'videosGenerated']: FieldValue.increment(1)
+				[params.type === 'image' ? 'imagesGenerated' : params.type === 'audio' ? 'audioGenerated' : 'videosGenerated']: FieldValue.increment(1)
 			})
 			.catch(() => {
 				// User doc might not exist yet, ignore

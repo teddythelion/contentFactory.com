@@ -214,6 +214,91 @@ function createTimelineStore() {
 			}));
 		},
 
+		// Split one clip into two at a given timeline time
+		splitClip(trackId: string, clipId: string, splitAt: number) {
+			update((s) => {
+				const track = s.tracks.find(t => t.id === trackId);
+				if (!track) return s;
+				const clip = track.clips.find(c => c.id === clipId);
+				if (!clip) return s;
+				if (splitAt <= clip.startTime + 0.1 || splitAt >= clip.endTime - 0.1) return s;
+
+				const sourceSplit = clip.sourceStart + (splitAt - clip.startTime);
+				const clipA: TimelineClip = { ...clip, endTime: splitAt, sourceEnd: sourceSplit };
+				const clipB: TimelineClip = {
+					id: makeId(), assetId: clip.assetId,
+					startTime: splitAt, endTime: clip.endTime,
+					sourceStart: sourceSplit, sourceEnd: clip.sourceEnd
+				};
+
+				return {
+					...s,
+					tracks: s.tracks.map(t => t.id !== trackId ? t : {
+						...t,
+						clips: [...t.clips.filter(c => c.id !== clipId), clipA, clipB]
+							.sort((a, b) => a.startTime - b.startTime)
+					})
+				};
+			});
+		},
+
+		// Insert a clip at an arbitrary position (used by paste)
+		insertClip(trackId: string, clip: Omit<TimelineClip, 'id'>) {
+			const id = makeId();
+			update((s) => ({
+				...s,
+				tracks: s.tracks.map(t => t.id !== trackId ? t : {
+					...t,
+					clips: [...t.clips, { ...clip, id }].sort((a, b) => a.startTime - b.startTime)
+				})
+			}));
+			return id;
+		},
+
+		// Remove a single clip. Auto-removes the track if it becomes empty.
+		removeClip(trackId: string, clipId: string) {
+			update((s) => {
+				const track = s.tracks.find(t => t.id === trackId);
+				if (!track) return s;
+				const remaining = track.clips.filter(c => c.id !== clipId);
+				if (remaining.length === 0) {
+					return {
+						...s,
+						tracks: s.tracks.filter(t => t.id !== trackId),
+						activeTrackId: s.activeTrackId === trackId ? null : s.activeTrackId
+					};
+				}
+				return {
+					...s,
+					tracks: s.tracks.map(t => t.id !== trackId ? t : { ...t, clips: remaining })
+				};
+			});
+		},
+
+		// Duplicate a clip — places copy immediately after the original
+		duplicateClip(trackId: string, clipId: string) {
+			update((s) => {
+				const track = s.tracks.find(t => t.id === trackId);
+				if (!track) return s;
+				const clip = track.clips.find(c => c.id === clipId);
+				if (!clip) return s;
+				const dur = clip.endTime - clip.startTime;
+				const copy: TimelineClip = {
+					...clip,
+					id: makeId(),
+					startTime: clip.endTime + 0.1,
+					endTime: clip.endTime + 0.1 + dur
+				};
+				return {
+					...s,
+					tracks: s.tracks.map(t => t.id !== trackId ? t : {
+						...t,
+						clips: [...t.clips, copy].sort((a, b) => a.startTime - b.startTime)
+					})
+				};
+			});
+		},
+
 		// Find the track id for a given sessionId (for playback lookup)
 		findBySession(sessionId: string): TimelineTrack | undefined {
 			let found: TimelineTrack | undefined;

@@ -29,6 +29,7 @@
 
 	// Music-ready toast
 	let showMusicToast = $state(false);
+	let musicWasGenerated = $state(false);
 	let musicToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Mobile tab state — tracks which group is active on mobile
@@ -131,6 +132,7 @@
 
 		audioStudioStore.setLocalMusicFile(file.name, objectUrl, sessionId);
 		if (musicToastTimer) clearTimeout(musicToastTimer);
+		musicWasGenerated = false;
 		showMusicToast = true;
 		musicToastTimer = setTimeout(() => { showMusicToast = false; }, 6000);
 	}
@@ -154,6 +156,7 @@
 			audioStudioStore.setMusicResult(data.musicSessionId, data.previewUrl);
 			// Show toast — music doesn't auto-play; user needs to hit play
 			if (musicToastTimer) clearTimeout(musicToastTimer);
+			musicWasGenerated = true;
 			showMusicToast = true;
 			musicToastTimer = setTimeout(() => { showMusicToast = false; }, 6000);
 		} catch (err) {
@@ -1485,6 +1488,9 @@
 			<div>
 				<p class="font-semibold text-sm">Music is ready!</p>
 				<p class="text-xs opacity-80">Hit play on the video to hear it in sync.</p>
+				{#if musicWasGenerated}
+					<p class="text-xs opacity-60 mt-0.5">Saved to your audio library.</p>
+				{/if}
 			</div>
 			<button
 				onclick={() => { showMusicToast = false; }}
