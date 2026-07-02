@@ -177,12 +177,12 @@
 					</a>
 				</li>
 
-				<!-- Prompt Coach -->
+				<!-- Prompt Engineer -->
 				<li>
 					<a
 						href={resolve("/prompt-coach")}
 						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname === '/prompt-coach' ? 'active' : ''}"
-						data-tip="Prompt Coach"
+						data-tip="Prompt Engineer"
 						onclick={closeSidebar}
 					>
 						<svg
@@ -197,7 +197,7 @@
 						>
 							<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm-1-5h2v2h-2zm0-8h2v5h-2z"/>
 						</svg>
-						<span class="is-drawer-close:hidden">Prompt Coach</span>
+						<span class="is-drawer-close:hidden">Prompt Engineer</span>
 					</a>
 				</li>
 

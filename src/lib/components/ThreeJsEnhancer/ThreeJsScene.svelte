@@ -30,6 +30,16 @@
 	let videoTexture: THREE.VideoTexture | null = null;
 	let videoElement: HTMLVideoElement | null = null;
 
+	// ── MULTI-CLIP COMPOSITING ────────────────────────────────────────
+	// Off-screen canvas composites multiple video elements each frame.
+	// THREE.CanvasTexture replaces VideoTexture so all shape/material effects are preserved.
+	let compositeCanvas: HTMLCanvasElement | null = null;
+	let compositeCtx: CanvasRenderingContext2D | null = null;
+	let compositeTexture: THREE.CanvasTexture | null = null;
+	// assetId → HTMLVideoElement for all secondary sources
+	let secondaryVideoElements: Map<string, HTMLVideoElement> = new Map();
+	let compositeLayout: 'single' | 'split-h' | 'split-v' | 'pip-tr' | 'pip-bl' | 'grid' = 'single';
+
 	let ambientLight: THREE.AmbientLight | null = null;
 	let directionalLight: THREE.DirectionalLight | null = null;
 	let particleSystem: THREE.Points | null = null;
@@ -175,6 +185,9 @@
 
 			if (videoElement) { videoElement.pause(); videoElement.src = ''; videoElement.load(); videoElement = null; }
 			if (videoTexture) { videoTexture.dispose(); videoTexture = null; }
+			if (compositeTexture) { compositeTexture.dispose(); compositeTexture = null; }
+			for (const [, el] of secondaryVideoElements) { el.pause(); el.src = ''; el.load(); }
+			secondaryVideoElements.clear();
 
 			if (renderer) { renderer.dispose(); renderer.forceContextLoss(); renderer = null; }
 
@@ -287,12 +300,19 @@
 		}
 
 		videoElement.addEventListener('loadedmetadata', () => {
-			videoTexture = new THREE.VideoTexture(videoElement!);
-			videoTexture.colorSpace = THREE.SRGBColorSpace;
-			videoTexture.minFilter = THREE.LinearFilter;
-			videoTexture.magFilter = THREE.LinearFilter;
-			videoTexture.generateMipmaps = false;
-			(window as any).__threeJsVideoTexture = videoTexture;
+			// Build an off-screen composite canvas at source resolution
+			compositeCanvas = document.createElement('canvas');
+			compositeCanvas.width  = videoElement!.videoWidth  || 1920;
+			compositeCanvas.height = videoElement!.videoHeight || 1080;
+			compositeCtx = compositeCanvas.getContext('2d');
+			compositeTexture = new THREE.CanvasTexture(compositeCanvas);
+			compositeTexture.colorSpace = THREE.SRGBColorSpace;
+			compositeTexture.minFilter = THREE.LinearFilter;
+			compositeTexture.magFilter = THREE.LinearFilter;
+			compositeTexture.generateMipmaps = false;
+			// Keep legacy alias so export/capture code still works
+			videoTexture = null;
+			(window as any).__threeJsVideoTexture = compositeTexture;
 
 			createMesh(selectedShape);
 			videoElement!.play().catch((err) => console.error('Play error:', err));
@@ -425,7 +445,7 @@
 		}
 
 		const material = new THREE.MeshStandardMaterial({
-			map: videoTexture,
+			map: compositeTexture ?? videoTexture,
 			side: THREE.DoubleSide,
 			metalness: 0.2,
 			roughness: 0.6,
@@ -437,6 +457,102 @@
 		mesh.scale.set(scale, scale, scale);
 		if (applyDiamondRotation) mesh.rotation.z = Math.PI / 4;
 		scene.add(mesh);
+	}
+
+	// ── COMPOSITE FRAME ──────────────────────────────────────────────
+
+	// Draws a video element letterboxed (contain-fit) into a canvas slot.
+	function drawContain(src: HTMLVideoElement, x: number, y: number, w: number, h: number) {
+		const iw = src.videoWidth || 1;
+		const ih = src.videoHeight || 1;
+		const scale = Math.min(w / iw, h / ih);
+		const sw = iw * scale;
+		const sh = ih * scale;
+		compositeCtx!.drawImage(src, x + (w - sw) / 2, y + (h - sh) / 2, sw, sh);
+	}
+
+	function updateCompositeFrame() {
+		if (!compositeCtx || !compositeCanvas || !videoElement) return;
+		const w = compositeCanvas.width;
+		const h = compositeCanvas.height;
+		compositeCtx.clearRect(0, 0, w, h);
+
+		// Show secondary regardless of paused state — show current frame even when paused
+		const videoTracks = $timelineStore.tracks.filter(t => t.type === 'video');
+		const secondaries = videoTracks.slice(1)
+			.map(t => secondaryVideoElements.get(t.assetId ?? ''))
+			.filter((el): el is HTMLVideoElement => !!el && el.readyState >= 2);
+
+		// Don't draw primary when it has ended — show black in its slot so secondary keeps showing
+		const primary = videoElement.readyState >= 2 && !videoElement.ended ? videoElement : null;
+
+		switch (compositeLayout) {
+			case 'single':
+				if (primary) drawContain(primary, 0, 0, w, h);
+				else if (secondaries[0]) drawContain(secondaries[0], 0, 0, w, h);
+				break;
+			case 'split-h':
+				if (primary) drawContain(primary, 0, 0, w / 2, h);
+				if (secondaries[0]) drawContain(secondaries[0], w / 2, 0, w / 2, h);
+				break;
+			case 'split-v':
+				if (primary) drawContain(primary, 0, 0, w, h / 2);
+				if (secondaries[0]) drawContain(secondaries[0], 0, h / 2, w, h / 2);
+				break;
+			case 'pip-tr':
+				if (primary) drawContain(primary, 0, 0, w, h);
+				if (secondaries[0]) { const pw = Math.round(w * 0.3), ph = Math.round(h * 0.3); drawContain(secondaries[0], w - pw - 16, 16, pw, ph); }
+				break;
+			case 'pip-bl':
+				if (primary) drawContain(primary, 0, 0, w, h);
+				if (secondaries[0]) { const pw = Math.round(w * 0.3), ph = Math.round(h * 0.3); drawContain(secondaries[0], 16, h - ph - 16, pw, ph); }
+				break;
+			case 'grid':
+				if (primary) drawContain(primary, 0, 0, w / 2, h / 2);
+				if (secondaries[0]) drawContain(secondaries[0], w / 2, 0, w / 2, h / 2);
+				if (secondaries[1]) drawContain(secondaries[1], 0, h / 2, w / 2, h / 2);
+				if (secondaries[2]) drawContain(secondaries[2], w / 2, h / 2, w / 2, h / 2);
+				break;
+		}
+		if (compositeTexture) compositeTexture.needsUpdate = true;
+	}
+
+	// ── SECONDARY VIDEO MANAGEMENT ────────────────────────────────────
+	function makeVideoElement(url: string, muted = true): HTMLVideoElement {
+		const el = document.createElement('video');
+		el.crossOrigin = '';
+		el.loop = false;
+		el.muted = muted;
+		el.setAttribute('playsinline', '');
+		el.setAttribute('webkit-playsinline', '');
+		el.src = url.startsWith('https://storage.googleapis.com')
+			? `/api/proxyVideo?url=${encodeURIComponent(url)}`
+			: url;
+		return el;
+	}
+
+	function addSecondaryVideo() {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = 'video/*';
+		input.onchange = () => {
+			const file = input.files?.[0];
+			if (!file) return;
+			const url = URL.createObjectURL(file);
+			const probe = document.createElement('video');
+			probe.src = url;
+			probe.onloadedmetadata = () => {
+				const duration = probe.duration;
+				const name = file.name.replace(/\.[^.]+$/, '');
+				const assetId = mediaBinStore.addAsset({ type: 'video', name, sessionId: null, previewUrl: url, duration });
+				const el = makeVideoElement(url, true);
+				secondaryVideoElements.set(assetId, el);
+				secondaryVideoElements = new Map(secondaryVideoElements);
+				// Place clip at t=0 to overlay with primary for compositing
+				timelineStore.addVideoTrack(assetId, name, duration, 0);
+			};
+		};
+		input.click();
 	}
 
 	function createParticleTexture(shape: string): THREE.CanvasTexture {
@@ -727,6 +843,7 @@
 		camera.position.z = cameraDistance;
 		if (ambientLight) ambientLight.intensity = ambientIntensity;
 		if (directionalLight) directionalLight.intensity = directionalIntensity;
+		updateCompositeFrame();
 		if (renderer) renderer.render(scene, camera);
 
 		// Live fade-to-black preview + original audio fade — mirrors FFmpeg filters at export time
@@ -767,7 +884,7 @@
 	}
 	function onTouchEnd() { isDragging = false; }
 
-	$: if (mesh && videoTexture && selectedShape) createMesh(selectedShape);
+	$: if (mesh && (compositeTexture ?? videoTexture) && selectedShape) createMesh(selectedShape);
 	$: if (mesh) mesh.scale.set(scale, scale, scale);
 	$: if (scene && (particleShape || particleColorMode || particleAnimation)) createParticleSystem();
 	$: if (particleSystem && particleGeometry && particleMaterial) {
@@ -791,10 +908,31 @@
 		<div class="pointer-events-none absolute inset-0 bg-black" style="opacity: {fadeOverlayOpacity};"></div>
 	{/if}
 
+	{#if $videoState.inVideoGap && !(window as any).__threeJsCapturing}
+		<div class="pointer-events-none absolute inset-0 bg-black" style="z-index:4;"></div>
+	{/if}
+
 	{#if videoElement && !(window as any).__threeJsCapturing}
+		<!-- Composite layout controls + add-clip button -->
+		<div style="position:absolute;top:6px;right:6px;z-index:20;display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.65);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px 6px;">
+			{#each [['single','⬛'],['split-h','⬜⬜'],['split-v','🔲'],['pip-tr','📺'],['pip-bl','🎬'],['grid','▦']] as [mode, icon]}
+				<button
+					on:click={() => { compositeLayout = mode; }}
+					title={mode}
+					style="width:26px;height:26px;border-radius:4px;border:1px solid {compositeLayout===mode?'rgba(99,102,241,1)':'rgba(255,255,255,0.15)'};background:{compositeLayout===mode?'rgba(99,102,241,0.35)':'rgba(255,255,255,0.06)'};color:white;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;"
+				>{icon}</button>
+			{/each}
+			<div style="width:1px;height:20px;background:rgba(255,255,255,0.15);margin:0 2px;"></div>
+			<button
+				on:click={addSecondaryVideo}
+				title="Add clip from file"
+				style="height:26px;padding:0 8px;border-radius:4px;border:1px solid rgba(99,102,241,0.6);background:rgba(99,102,241,0.25);color:white;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;"
+			>+ Clip</button>
+		</div>
+
 		<div class="absolute bottom-0 left-0 right-0 flex flex-col gap-1 bg-black/90 backdrop-blur-sm p-1">
 			<MediaBin />
-			<TimelineEditor {videoElement} />
+			<TimelineEditor {videoElement} {secondaryVideoElements} />
 		</div>
 	{/if}
 </div>

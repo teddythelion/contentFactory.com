@@ -1,10 +1,7 @@
-import { GoogleGenAI } from '@google/genai';
-import { GOOGLE_API_KEY } from '$env/static/private';
 import type { RequestHandler } from './$types';
 import { checkUsage, incrementUsage, getUserPlan } from '$lib/services/usage.service';
 import { TIER_CONFIG } from '$lib/types/subscription';
-
-const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+import { getVideoProvider } from '$lib/providers';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	const userId = locals.user?.uid;
@@ -15,6 +12,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const plan = await getUserPlan(userId);
 	if (!TIER_CONFIG[plan].canExtend) {
 		return new Response(JSON.stringify({ error: 'upgrade_required', feature: 'extend', plan }), { status: 403 });
+	}
+
+	const provider = getVideoProvider();
+	if (!provider.supportsExtend) {
+		return new Response(JSON.stringify({ error: 'unsupported', feature: 'extend', provider: provider.name }), { status: 501 });
 	}
 
 	const usageCheck = await checkUsage(userId, 'video');
@@ -34,25 +36,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		console.log(`🎬 Extending video (uri: ${videoObject.uri?.substring(0, 60) ?? 'n/a'}...)`);
 		console.log(`   Prompt: "${(prompt || '(continue naturally)').substring(0, 80)}"`);
 
-		// Pass ONLY uri — the SDK maps mimeType → encoding on the wire which the API rejects
-		const video = { uri: videoObject.uri as string };
-
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const operation = await (ai.models as any).generateVideos({
+		const operation = await provider.extendVideo({
 			model: 'veo-3.1-generate-preview',
 			prompt: prompt || '',
-			video,
-			config: {
-				numberOfVideos: 1,
-				durationSeconds: 8,  // must be 8 for extension
-				resolution: '720p',  // must be 720p for extension
-			},
+			videoUri: videoObject.uri as string,
 		});
 
-		console.log(`✅ Extension operation started: ${operation.name}`);
+		console.log(`✅ Extension operation started: ${operation.id}`);
 		await incrementUsage(userId, 'video');
 
-		return new Response(JSON.stringify({ operation: operation.name }), {
+		return new Response(JSON.stringify({ operation: operation.id }), {
 			headers: { 'Content-Type': 'application/json' },
 		});
 

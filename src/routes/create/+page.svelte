@@ -57,6 +57,14 @@ let showAuthModal = $state(false);
 	let hasContent = $derived(!!generatedContent || !!editSourceUrl);
 	let canAddRef = $derived(referenceFiles.length < 3);
 	let activeUrl = $derived(generatedContent ?? editSourceUrl);
+	// GCS URLs need the server proxy for CORS — used by the video preview element
+	function proxyIfGcs(url: string | null): string | null {
+		if (!url) return null;
+		if (url.startsWith('https://storage.googleapis.com'))
+			return `/api/proxyVideo?url=${encodeURIComponent(url)}`;
+		return url;
+	}
+	let activeVideoSrc = $derived(proxyIfGcs(activeUrl));
 	let activeContentType = $derived(contentType ?? (editSourceUrl ? mode : null));
 	let extendSourceUrl = $derived(
 		mode === 'extend' && contentType === 'video' && generatedContent ? generatedContent : null
@@ -191,6 +199,13 @@ let showAuthModal = $state(false);
 		if (editSourceUrl?.startsWith('blob:')) URL.revokeObjectURL(editSourceUrl);
 		editSourceUrl = null;
 		editSourceFileName = '';
+		// Remove ?edit and ?type params so refresh doesn't re-populate this
+		const url = new URL(window.location.href);
+		if (url.searchParams.has('edit') || url.searchParams.has('type')) {
+			url.searchParams.delete('edit');
+			url.searchParams.delete('type');
+			window.history.replaceState({}, '', url.toString());
+		}
 	}
 
 	// ── Generate ──────────────────────────────────────────────────────────────
@@ -629,7 +644,7 @@ let showAuthModal = $state(false);
 						{:else if extendSourceUrl}
 							<!-- Video ready to extend or just extended -->
 							<video
-								src={extendSourceUrl}
+								src={proxyIfGcs(extendSourceUrl)}
 								controls
 								class="w-full rounded-xl object-contain"
 								style="min-height: 320px; max-height: 560px; background:#000;"
@@ -705,7 +720,7 @@ let showAuthModal = $state(false);
 
 					{:else if activeContentType === 'video' && activeUrl}
 						<video
-							src={activeUrl}
+							src={activeVideoSrc}
 							controls
 							class="w-full rounded-xl object-contain"
 							style="min-height: 320px; max-height: 560px; background:#000;"

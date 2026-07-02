@@ -1,11 +1,13 @@
 import { GoogleGenAI } from '@google/genai';
-import { GOOGLE_API_KEY } from '$env/static/private';
+import { GEMINI_API_KEY } from '$env/static/private';
 import sharp from 'sharp';
 import { checkUsage, incrementUsage } from '$lib/services/usage.service';
 
-const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-const IMAGE_MODEL = 'gemini-3-pro-image-preview';
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
+
+//const IMAGE_MODEL = 'gemini-3-pro-image-preview';
 const VISION_MODEL = 'gemini-2.5-flash';
 
 /* =========================================================
@@ -332,7 +334,9 @@ export async function POST({ request, locals }: { request: Request; locals: any 
 
 		const usageCheck = await checkUsage(userId, 'image');
 		if (!usageCheck.allowed) {
-			return new Response(JSON.stringify({ error: 'limit_reached', usage: usageCheck }), { status: 429 });
+			return new Response(JSON.stringify({ error: 'limit_reached', usage: usageCheck }), {
+				status: 429
+			});
 		}
 
 		const formData = await request.formData();

@@ -1,10 +1,7 @@
-import { GoogleGenAI } from '@google/genai';
-import { GOOGLE_API_KEY } from '$env/static/private';
 import type { RequestHandler } from './$types';
 import { checkUsage, incrementUsage, getUserPlan } from '$lib/services/usage.service';
 import { TIER_CONFIG } from '$lib/types/subscription';
-
-const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+import { getVideoProvider } from '$lib/providers';
 
 function getMimeType(filename: string): string {
 	const ext = filename.toLowerCase().split('.').pop();
@@ -70,44 +67,25 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			? 'veo-3.1-generate-preview'
 			: tierLimits.videoModel;
 
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const generateParams: any = {
-			model,
-			prompt,
-			config: {
-				numberOfVideos: 1,
-				durationSeconds: clampedDuration,
-				aspectRatio,
-				resolution: '720p',
-				personGeneration: 'allow_all',
-			},
-		};
-
-		// 1 image → first-frame animation
-		// 2 images → interpolate start → end
-		// 3 images → interpolate start → middle → end
-		if (refImages.length === 1) {
-			generateParams.image = { imageBytes: refImages[0].imageBytes, mimeType: refImages[0].mimeType };
-		} else if (refImages.length === 2) {
-			generateParams.image     = { imageBytes: refImages[0].imageBytes, mimeType: refImages[0].mimeType };
-			generateParams.lastImage = { imageBytes: refImages[1].imageBytes, mimeType: refImages[1].mimeType };
-		} else if (refImages.length === 3) {
-			generateParams.image        = { imageBytes: refImages[0].imageBytes, mimeType: refImages[0].mimeType };
-			generateParams.middleImage  = { imageBytes: refImages[1].imageBytes, mimeType: refImages[1].mimeType };
-			generateParams.lastImage    = { imageBytes: refImages[2].imageBytes, mimeType: refImages[2].mimeType };
-		}
-
 		const modeMap = ['text-to-video', 'first-frame animation', 'interpolation (start→end)', 'interpolation (start→mid→end)'];
 		const mode = modeMap[refImages.length] ?? modeMap[0];
 		console.log(`🎬 ${model} | ${mode} | "${prompt.substring(0, 60)}..." | ${clampedDuration}s | ${aspectRatio} | ${refImages.length} image(s)`);
 
-		const operation = await ai.models.generateVideos(generateParams);
+		const provider = getVideoProvider();
+		const operation = await provider.generateVideo({
+			model,
+			prompt,
+			durationSeconds: clampedDuration,
+			aspectRatio,
+			resolution: '720p',
+			images: refImages,
+		});
 
-		console.log(`✅ Operation started: ${operation.name}`);
+		console.log(`✅ Operation started: ${operation.id}`);
 		await incrementUsage(userId, 'video');
 
 		return new Response(JSON.stringify({
-			operation: operation.name,
+			operation: operation.id,
 			mode,
 		}), {
 			headers: { 'Content-Type': 'application/json' },

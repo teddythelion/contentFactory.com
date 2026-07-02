@@ -8,8 +8,9 @@
 
 	interface Props {
 		videoElement?: HTMLVideoElement | null;
+		secondaryVideoElements?: Map<string, HTMLVideoElement>;
 	}
-	let { videoElement = null }: Props = $props();
+	let { videoElement = null, secondaryVideoElements = new Map() }: Props = $props();
 
 	let audioStudio  = $derived($audioStudioStore);
 	let timeline     = $derived($timelineStore);
@@ -17,31 +18,150 @@
 	let currentTime  = $derived($videoState.currentTime  || 0);
 	let isPlaying    = $derived($videoState.isPlaying);
 
-	// Manual cursor: lets the edit cursor go beyond video duration for audio-only regions.
-	// Null = follow the video element. Set when user drags/clicks past video end.
+	// Manual cursor: lets the edit cursor go beyond video duration for audio-only regions or gaps.
+	// Null = follow the video element. Set when user drags/clicks past video end or during gap traversal.
 	let manualCursor    = $state<number | null>(null);
-	let manualPlaying   = $state(false);   // rAF-driven play for audio-only region
+	let manualPlaying   = $state(false);   // rAF-driven play for audio-only region or gap
 	let manualPlayMs    = $state(0);       // wall-clock ms when manual play started
 	let manualPlayStart = $state(0);       // editTime value when manual play started
-	let editTime        = $derived(manualCursor !== null ? manualCursor : currentTime);
+
+	// Segment playback state — which clip is currently being played (used by playback engine only)
+	let activeVideoClipId = $state<string | null>(null);
+	let inVideoGap        = $state(false);   // true while traversing a gap between clips
+	let gapNextClipId     = $state<string | null>(null); // clip to resume after gap
+
+	// editTime: sourceToTimeline maps video.currentTime → correct timeline position for any
+	// split/rearrange layout, since source ranges never overlap after a split.
+	let editTime        = $derived(manualCursor !== null ? manualCursor : (sourceToTimeline(currentTime) ?? currentTime));
 	let effectivePlaying = $derived(isPlaying || manualPlaying);
 
-	// When video plays, hand control back to it
+	// When video plays normally, exit manual/gap modes
 	$effect(() => { if (isPlaying) { manualCursor = null; manualPlaying = false; } });
 
-	// rAF loop — advances manualCursor while manualPlaying is true
+	// Sync gap state to video store so ThreeJsScene can show black overlay
+	$effect(() => { videoState.setInVideoGap(inVideoGap); });
+
+	// Pause all secondary videos whenever primary stops (or gap traversal stops)
+	$effect(() => {
+		if (!isPlaying && !manualPlaying) {
+			for (const [, el] of secondaryVideoElements) el.pause();
+		}
+	});
+
+	// Seek + optionally play every secondary video element to the correct source offset
+	function syncSecondaries(play: boolean) {
+		const t = editTime;
+		for (const [assetId, el] of secondaryVideoElements) {
+			const track = timeline.tracks.find(tr => tr.type === 'video' && tr.assetId === assetId);
+			if (!track) continue;
+			const clip = track.clips.find(c => t >= c.startTime && t < c.endTime);
+			if (clip) {
+				el.currentTime = clip.sourceStart + (t - clip.startTime);
+				if (play) el.play().catch(() => {});
+			} else {
+				el.pause();
+			}
+		}
+	}
+
+	// ── SEGMENT PLAYBACK HELPERS ────────────────────────────────────
+
+	// Primary video track = first video track. Secondary tracks have their own elements.
+	function getPrimaryVideoTrack(): TimelineTrack | null {
+		return timeline.tracks.find(tr => tr.type === 'video') ?? null;
+	}
+
+	// Only primary-track clips — prevents secondary clips from interfering with the
+	// primary playback engine (handleClipEnd, sourceToTimeline, etc.)
+	function getVideoClipsSorted(): TimelineClip[] {
+		const track = getPrimaryVideoTrack();
+		if (!track) return [];
+		return [...track.clips].sort((a, b) => a.startTime - b.startTime);
+	}
+
+	function getClipById(id: string): TimelineClip | null {
+		for (const tr of timeline.tracks)
+			for (const c of tr.clips)
+				if (c.id === id) return c;
+		return null;
+	}
+
+	function getNextVideoClip(clipId: string): TimelineClip | null {
+		const clips = getVideoClipsSorted();
+		const idx = clips.findIndex(c => c.id === clipId);
+		return (idx >= 0 && idx < clips.length - 1) ? clips[idx + 1] : null;
+	}
+
+	// Looks at ALL tracks (video, music, sfx, secondary) so playback continues as long
+	// as any media is active on the timeline.
+	function getMaxTimelineEnd(): number {
+		let m = 0;
+		for (const tr of timeline.tracks) for (const c of tr.clips) m = Math.max(m, c.endTime);
+		return m;
+	}
+
+	function handleClipEnd() {
+		if (!activeVideoClipId || inVideoGap) return;
+		const clip = getClipById(activeVideoClipId);
+		if (!clip) return;
+		const nextClip = getNextVideoClip(activeVideoClipId);
+		if (nextClip) {
+			const gap = nextClip.startTime - clip.endTime;
+			if (gap > 0.08) {
+				// Gap between clips — pause video and traverse with rAF
+				if (videoElement && !videoElement.paused) videoElement.pause();
+				inVideoGap = true;
+				gapNextClipId = nextClip.id;
+				manualCursor = clip.endTime;
+				manualPlayStart = clip.endTime;
+				manualPlayMs = Date.now();
+				manualPlaying = true;
+			} else {
+				// Adjacent clips — jump directly to next source offset
+				activeVideoClipId = nextClip.id;
+				if (videoElement) videoElement.currentTime = nextClip.sourceStart;
+			}
+		} else {
+			// Primary track finished — check if secondary / audio extends further
+			const maxEnd = getMaxTimelineEnd();
+			if (maxEnd > clip.endTime) {
+				// Pause primary so composite shows black in its slot
+				if (videoElement && !videoElement.paused) videoElement.pause();
+				activeVideoClipId = null;
+				manualCursor = clip.endTime;
+				manualPlayStart = clip.endTime;
+				manualPlayMs = Date.now();
+				manualPlaying = true;
+				// Ensure secondaries are running — manualPlaying=true prevents the pause effect
+				syncSecondaries(true);
+			}
+		}
+	}
+
+	// rAF loop — advances manualCursor while manualPlaying is true (gaps + audio-only zones)
 	$effect(() => {
 		if (!manualPlaying) return;
 		let rafId: number;
-		const maxEnd = () => {
-			let m = 0;
-			for (const t of $timelineStore.tracks) for (const c of t.clips) m = Math.max(m, c.endTime);
-			return m;
-		};
 		const tick = () => {
 			const next = manualPlayStart + (Date.now() - manualPlayMs) / 1000;
 			manualCursor = next;
-			if (next >= maxEnd()) { manualPlaying = false; return; }
+
+			// Gap traversal: when we've reached the next clip's start, resume video
+			if (inVideoGap && videoElement && gapNextClipId) {
+				const nextClip = getClipById(gapNextClipId);
+				if (nextClip && next >= nextClip.startTime) {
+					inVideoGap = false;
+					activeVideoClipId = nextClip.id;
+					gapNextClipId = null;
+					manualCursor = null;
+					manualPlaying = false;
+					videoElement.currentTime = nextClip.sourceStart;
+					videoElement.play().catch(() => {});
+					return;
+				}
+			}
+
+			if (next >= getMaxTimelineEnd()) { manualPlaying = false; return; }
 			rafId = requestAnimationFrame(tick);
 		};
 		rafId = requestAnimationFrame(tick);
@@ -84,18 +204,18 @@
 		if (!videoElement) return;
 		const onPlay  = () => videoState.setIsPlaying(true);
 		const onPause = () => videoState.setIsPlaying(false);
-		const onTime  = () => videoState.setCurrentTime(videoElement!.currentTime);
+		const onTime  = () => {
+			const srcT = videoElement!.currentTime;
+			videoState.setCurrentTime(srcT);
+			// Detect when we've reached a clip's sourceEnd and need to jump to the next segment
+			if (!isPlaying || inVideoGap || !activeVideoClipId) return;
+			const clip = getClipById(activeVideoClipId);
+			if (clip && srcT >= clip.sourceEnd - 0.05) handleClipEnd();
+		};
 		const onEnded = () => {
 			videoState.setIsPlaying(false);
-			// If audio clips extend past video end, keep rolling with manual play
-			let maxEnd = 0;
-			for (const t of $timelineStore.tracks) for (const c of t.clips) maxEnd = Math.max(maxEnd, c.endTime);
-			if (maxEnd > (videoElement?.duration ?? 0)) {
-				manualCursor    = videoElement!.duration;
-				manualPlayStart = videoElement!.duration;
-				manualPlayMs    = Date.now();
-				manualPlaying   = true;
-			}
+			// Safety net: if onTime missed the boundary, handle it here
+			handleClipEnd();
 		};
 		videoElement.addEventListener('play',       onPlay);
 		videoElement.addEventListener('pause',      onPause);
@@ -147,19 +267,40 @@
 	// ── CONTROLS ────────────────────────────────────────────────────
 	function togglePlay() {
 		if (manualPlaying) {
-			// Stop manual play
 			manualPlaying = false;
-			return;
-		}
-		if (editTime >= videoDuration) {
-			// Cursor is in audio-only region — start manual play from here
-			manualPlayStart = editTime;
-			manualPlayMs    = Date.now();
-			manualPlaying   = true;
+			inVideoGap = false;
 			return;
 		}
 		if (!videoElement) return;
-		videoElement.paused ? videoElement.play() : videoElement.pause();
+		if (!videoElement.paused) { videoElement.pause(); return; }
+
+		// Find which video clip covers the current editTime
+		const clips = getVideoClipsSorted();
+		const clipAtTime = clips.find(c => editTime >= c.startTime && editTime < c.endTime);
+
+		if (clipAtTime) {
+			// Start from the correct source offset within this clip
+			activeVideoClipId = clipAtTime.id;
+			videoElement.currentTime = clipAtTime.sourceStart + (editTime - clipAtTime.startTime);
+			videoElement.play().catch(() => {});
+			syncSecondaries(true);
+		} else {
+			const nextClip = clips.find(c => c.startTime > editTime);
+			if (nextClip) {
+				// Cursor is in a gap — traverse it with manual rAF
+				inVideoGap = true;
+				gapNextClipId = nextClip.id;
+				manualCursor    = editTime;
+				manualPlayStart = editTime;
+				manualPlayMs    = Date.now();
+				manualPlaying   = true;
+			} else {
+				// Past all video clips — audio-only zone
+				manualPlayStart = editTime;
+				manualPlayMs    = Date.now();
+				manualPlaying   = true;
+			}
+		}
 	}
 	function zoomIn()  { pixelsPerSecond = Math.min(200, pixelsPerSecond * 1.4); }
 	function zoomOut() { pixelsPerSecond = Math.max(15,  pixelsPerSecond / 1.4); }
@@ -201,41 +342,68 @@
 		return 'touches' in e ? (e.touches[0]?.clientX ?? 0) : e.clientX;
 	}
 
+	// ── VIDEO CLIP TIME MAPPING ──────────────────────────────────────
+	// Maps a timeline position → source video time (null = in a gap, no video).
+	function timelineToSource(t: number): number | null {
+		const track = getPrimaryVideoTrack();
+		if (!track) return null;
+		const clips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+		const clip = clips.find(c => t >= c.startTime && t < c.endTime);
+		if (!clip) return null;
+		return clip.sourceStart + (t - clip.startTime);
+	}
+
+	// Maps a source video time → timeline position (null = source time is trimmed out).
+	function sourceToTimeline(s: number): number | null {
+		const track = getPrimaryVideoTrack();
+		if (!track) return null;
+		const clips = [...track.clips].sort((a, b) => a.sourceStart - b.sourceStart);
+		const clip = clips.find(c => s >= c.sourceStart && s < c.sourceEnd);
+		if (!clip) return null;
+		return clip.startTime + (s - clip.sourceStart);
+	}
+
 	// ── RULER SEEK ──────────────────────────────────────────────────
-	function handleRulerClick(e: MouseEvent | KeyboardEvent) {
+	function handleRulerClick(e: MouseEvent) {
 		if (!scrollEl) return;
 		const rect = scrollEl.getBoundingClientRect();
-		let clickX: number;
-		if (e instanceof KeyboardEvent) {
-			if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-			e.preventDefault();
-			clickX = scrollEl.scrollLeft + scrollEl.clientWidth / 2;
-		} else {
-			clickX = e.clientX - rect.left + scrollEl.scrollLeft;
-		}
-		const t = Math.max(0, pt(clickX));
-		if (videoElement && t <= videoDuration) {
+		const clickX = e.clientX - rect.left + scrollEl.scrollLeft;
+		seekTo(Math.max(0, pt(clickX)));
+	}
+
+	function handleRulerKey(e: KeyboardEvent) {
+		if (e.key !== 'Enter' && e.key !== ' ') return;
+		e.preventDefault();
+		if (!scrollEl) return;
+		seekTo(Math.max(0, pt(scrollEl.scrollLeft + scrollEl.clientWidth / 2)));
+	}
+
+	function seekTo(t: number) {
+		activeVideoClipId = null;
+		inVideoGap = false;
+		manualPlaying = false;
+		const srcT = timelineToSource(t);
+		if (videoElement && srcT !== null) {
+			videoElement.currentTime = srcT;
+			// Update immediately so editTime snaps to t without waiting for timeupdate
+			videoState.setCurrentTime(srcT);
 			manualCursor = null;
-			videoElement.currentTime = t;
+			syncSecondaries(false);
 		} else {
-			// Beyond video end — set manual cursor only, don't touch video
+			// Outside all primary clips (gap or secondary-only zone)
 			manualCursor = t;
+			syncSecondaries(false);
 		}
 	}
 
 	// ── PLAYHEAD DRAG ───────────────────────────────────────────────
 	function startPlayheadDrag(e: MouseEvent | TouchEvent) {
 		if (!scrollEl) return;
-		const rectLeft = scrollEl.getBoundingClientRect().left;
 		attachDrag(
 			(x) => {
+				const rectLeft = scrollEl.getBoundingClientRect().left;
 				const t = Math.max(0, pt(x - rectLeft + scrollEl.scrollLeft));
-				if (videoElement && t <= videoDuration) {
-					manualCursor = null;
-					videoElement.currentTime = t;
-				} else {
-					manualCursor = t;
-				}
+				seekTo(t);
 			},
 			() => {}
 		);
@@ -292,6 +460,48 @@
 				const newSrcEnd = sourceEnd0 + (newEnd - end0);
 				timelineStore.updateClip(track.id, clip.id, { endTime: newEnd, sourceEnd: newSrcEnd });
 				if (sid) audioStudioStore.updateMusicEntry(sid, { endTime: newEnd });
+			},
+			() => {}
+		);
+		e.stopPropagation(); e.preventDefault();
+	}
+
+	// ── VIDEO CLIP DRAG / RESIZE ────────────────────────────────────
+	function startVideoDrag(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
+		activeClipId = clip.id;
+		timelineStore.setActiveTrack(track.id);
+		const x0 = cx(e); const start0 = clip.startTime; const dur = clip.endTime - clip.startTime;
+		attachDrag(
+			(x) => {
+				const s = Math.max(0, start0 + (x - x0) / pixelsPerSecond);
+				timelineStore.updateClip(track.id, clip.id, { startTime: s, endTime: s + dur });
+			},
+			() => {}
+		);
+		e.preventDefault();
+	}
+
+	function startVideoResizeStart(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
+		const x0 = cx(e); const start0 = clip.startTime; const sourceStart0 = clip.sourceStart;
+		attachDrag(
+			(x) => {
+				const dt = (x - x0) / pixelsPerSecond;
+				const newStart    = Math.max(0, Math.min(clip.endTime - 0.1, start0 + dt));
+				const newSrcStart = Math.max(0, sourceStart0 + (newStart - start0));
+				timelineStore.updateClip(track.id, clip.id, { startTime: newStart, sourceStart: newSrcStart });
+			},
+			() => {}
+		);
+		e.stopPropagation(); e.preventDefault();
+	}
+
+	function startVideoResizeEnd(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
+		const x0 = cx(e); const end0 = clip.endTime; const sourceEnd0 = clip.sourceEnd;
+		attachDrag(
+			(x) => {
+				const newEnd    = Math.max(clip.startTime + 0.1, Math.min(videoDuration, end0 + (x - x0) / pixelsPerSecond));
+				const newSrcEnd = Math.min(videoDuration, sourceEnd0 + (newEnd - end0));
+				timelineStore.updateClip(track.id, clip.id, { endTime: newEnd, sourceEnd: newSrcEnd });
 			},
 			() => {}
 		);
@@ -446,7 +656,7 @@
 				{/if}
 			</button>
 			<!-- Split at playhead (music only, when a clip is focused) -->
-			{#if activeClipId && timeline.tracks.find(t => t.id === timeline.activeTrackId)?.type === 'music'}
+			{#if activeClipId && (timeline.tracks.find(t => t.id === timeline.activeTrackId)?.type === 'music' || timeline.tracks.find(t => t.id === timeline.activeTrackId)?.type === 'video')}
 				<button
 					onclick={splitActiveClip}
 					style="height:20px;padding:0 7px;border-radius:4px;background:rgba(234,179,8,0.2);border:1px solid rgba(234,179,8,0.6);color:rgba(234,179,8,1);cursor:pointer;font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:3px;"
@@ -544,7 +754,7 @@
 				<div
 				tabindex="0"
 				role="button"
-					onkeydown={handleRulerClick}
+					onkeydown={handleRulerKey}
 					onclick={handleRulerClick}
 					style="position:absolute;top:0;left:0;width:100%;height:{RULER_H}px;background:#0f172a;border-bottom:1px solid rgba(255,255,255,0.08);cursor:pointer;z-index:4;"
 				>
@@ -595,11 +805,28 @@
 								{@const cw = Math.max(4, tp(clip.endTime - clip.startTime))}
 
 								{#if track.type === 'video'}
-									<!-- Non-interactive video clip -->
-									<div style="position:absolute;top:5px;left:{tp(clip.startTime)}px;width:{cw}px;height:{TRACK_H-10}px;background:{track.color};border:1px solid rgba(107,114,128,0.5);border-radius:3px;display:flex;align-items:center;padding:0 8px;pointer-events:none;overflow:hidden;">
+									{@const isActive = clip.id === activeClipId}
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div
+										onmousedown={(e) => startVideoDrag(e, track, clip)}
+										ontouchstart={(e) => startVideoDrag(e, track, clip)}
+										oncontextmenu={(e) => { e.preventDefault(); openCtxMenu(e, track, clip); }}
+										style="position:absolute;top:5px;left:{tp(clip.startTime)}px;width:{cw}px;height:{TRACK_H-10}px;background:{track.color};border:2px solid {isActive ? 'rgba(250,204,21,1)' : 'rgba(107,114,128,0.5)'};border-radius:3px;cursor:move;overflow:hidden;user-select:none;{isActive ? 'box-shadow:0 0 0 1px rgba(250,204,21,0.4),0 0 8px rgba(250,204,21,0.25);' : ''}"
+									>
+										<!-- Left resize handle -->
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<div onmousedown={(e) => startVideoResizeStart(e, track, clip)} ontouchstart={(e) => startVideoResizeStart(e, track, clip)} style="position:absolute;left:0;top:0;bottom:0;width:10px;cursor:ew-resize;background:rgba(255,255,255,0.18);z-index:2;"></div>
 										{#if cw > 50}
-											<span style="font-size:9px;font-weight:600;color:rgba(209,213,219,0.9);white-space:nowrap;">🎬 {fmt(clip.endTime - clip.startTime)}</span>
+											<div style="padding:2px 12px;pointer-events:none;position:relative;z-index:0;">
+												<div style="font-size:9px;font-weight:600;color:rgba(209,213,219,0.9);white-space:nowrap;">🎬 {fmt(clip.endTime - clip.startTime)}</div>
+												{#if cw > 100}
+													<div style="font-size:8px;color:rgba(255,255,255,0.5);white-space:nowrap;">{clip.startTime.toFixed(1)}s – {clip.endTime.toFixed(1)}s</div>
+												{/if}
+											</div>
 										{/if}
+										<!-- Right resize handle -->
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<div onmousedown={(e) => startVideoResizeEnd(e, track, clip)} ontouchstart={(e) => startVideoResizeEnd(e, track, clip)} style="position:absolute;right:0;top:0;bottom:0;width:10px;cursor:ew-resize;background:rgba(255,255,255,0.18);z-index:2;"></div>
 									</div>
 
 								{:else if track.type === 'music'}

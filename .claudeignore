@@ -1,0 +1,15 @@
+node_modules/
+.svelte-kit/
+dist/
+build/
+.firebase/
+firestore.indexes.json
+firestore.rules
+*.mp3
+*.wav
+*.mp4
+*.glb
+*.gltf
+*.obj
+*.fbx
+.env*

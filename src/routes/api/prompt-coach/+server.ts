@@ -8,6 +8,74 @@ import { ANTHROPIC_API_KEY } from '$env/static/private';
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
+// Intent-conditional technical criteria. Detected deterministically per request
+// and appended to the system prompt so the engineer never has to self-classify.
+// Single source of truth — keep the system-prompt spec block as principle only.
+const MEDIA_SPECS: Array<{ keywords: string[]; spec: string }> = [
+	{
+		keywords: ['logo', 'brand mark', 'brandmark', 'wordmark', 'emblem'],
+		spec: 'LOGO: isolated solo mark on a fully transparent (or plain white) background — no scene, no photographic lighting, no drop shadow. Centered, flat, print-ready. Never place the logo inside an environment.'
+	},
+	{
+		keywords: ['app icon', 'favicon', 'icon set', ' icon'],
+		spec: 'ICON: transparent background, square framing, simple bold silhouette legible at small size, minimal detail.'
+	},
+	{
+		keywords: ['sticker', 'decal', 'badge'],
+		spec: 'STICKER/BADGE: die-cut with a thick clean border, transparent background.'
+	},
+	{
+		keywords: ['product', 'product shot', 'e-commerce', 'ecommerce', 'packshot'],
+		spec: 'PRODUCT: single hero object on a seamless white or transparent background, soft studio lighting, no props or clutter.'
+	},
+	{
+		keywords: ['text', 'quote', 'word art', 'wordart', 'typography', 'infographic', 'headline', 'slogan', 'tagline', 'caption'],
+		spec: 'EMBEDDED TEXT: do NOT rely on the generator to render text — it misspells. Generate the base image text-free with clear negative space; the exact copy is composited via the 3D text layer (Troika). If text must be in-generation, supply the exact string and state "spelling must be exact."'
+	},
+	{
+		keywords: ['portrait', 'headshot', 'avatar', 'profile picture', 'profile pic'],
+		spec: 'PORTRAIT/AVATAR: head-and-shoulders or square framing, eye contact, neutral or on-brand background, consistent identity.'
+	},
+	{
+		keywords: ['texture', 'pattern', 'tileable', 'seamless texture', 'wallpaper'],
+		spec: 'TEXTURE/PATTERN: edges must tile and wrap with no visible seam.'
+	},
+	{
+		keywords: ['line art', 'lineart', 'coloring page', 'coloring book'],
+		spec: 'LINE ART: pure black linework on white, no shading or color.'
+	},
+	{
+		keywords: ['looping', 'seamless loop', 'boomerang'],
+		spec: 'SEAMLESS LOOP VIDEO: first and last frame must match for a clean loop — no hard cut.'
+	},
+	{
+		keywords: ['logo sting', 'logo reveal', 'logo animation', 'animated logo', 'intro bumper', 'outro'],
+		spec: 'LOGO STING VIDEO: solid keyable or transparent background for compositing, hold on the final frame.'
+	},
+	{
+		keywords: ['video', 'animation', 'motion', 'reel', 'short', 'clip', 'veo'],
+		spec: 'VIDEO CONTINUITY: state the target aspect ratio (9:16, 16:9, 1:1). For multi-clip / extended export, lock a consistent seed/reference so the same subject persists frame-to-frame.'
+	}
+];
+
+function detectMediaSpecs(
+	messages: Array<{ role: string; content: string }>,
+	context: Record<string, string> | undefined
+): string[] {
+	const haystack = [
+		context?.contentType ?? '',
+		...messages.filter((m) => m.role === 'user').map((m) => m.content)
+	]
+		.join(' ')
+		.toLowerCase();
+
+	const specs: string[] = [];
+	for (const { keywords, spec } of MEDIA_SPECS) {
+		if (keywords.some((kw) => haystack.includes(kw))) specs.push(spec);
+	}
+	return specs;
+}
+
 const SYSTEM_PROMPT = `You are the Prompt Engineer for Content Factory. You are not a chatbot. You are a research-driven creative strategist who turns demographic data, geographic context, behavioral psychology, and niche market intelligence into actionable visual content direction.
 
 Your job is to answer the question most users don't know to ask: "What should this content actually look like, and why?"
@@ -90,13 +158,22 @@ Each prompt should be immediately usable in Content Factory's video or image gen
 After the prompts, add one line:
 "Add your specific location, business name, or any brand colors to sharpen these further."
 
-### 6. 3D REFERENCE SUGGESTION (when relevant)
+**TECHNICAL SPEC — MANDATORY.** When this request carries detected media-type requirements (supplied after the session context as ACTIVE MEDIA-TYPE REQUIREMENTS), bake those exact constraints into every engineered prompt — they are production requirements, not stylistic suggestions, and override any conflicting creative direction. If a media type is clearly implied but no requirement was supplied, apply the same principles anyway: logos/icons/products belong on isolated transparent or seamless backgrounds with no scene; embedded text should be routed to the 3D text layer rather than rendered by the generator; and multi-clip/extended video needs seed-locked continuity.
 
-If the content type would benefit from 3D — logos, product shots, text-heavy visuals, branded motion content — mention it naturally:
+### 6. 3D REFERENCE SUGGESTION (only when the need requires it)
 
-"For this type of content, building a 3D reference image in the enhancer first will give the video generator a precise visual anchor. This is especially effective for [specific reason related to their niche]. The result will be distinctive in a way that prompted-only generation rarely achieves."
+Do NOT pitch 3D as a general upgrade, an "anchor," or a way to make content more distinctive. 3D is never presented as improving a normal image or video. Most requests do not need it — say nothing about 3D for those.
 
-Only include this when it genuinely fits. Never as a default.
+Only raise 3D when the established intent is a job a flat generated image genuinely cannot do well, specifically:
+- A logo, product, or object that must stay geometrically consistent across many video frames or multiple angles
+- Real dimensional/extruded typography (not text overlaid on a flat image — that goes to the Troika text layer)
+- A branded object that has to be rotated, relit, or re-posed while staying identical
+
+If and only if one of those is the confirmed need, state it plainly and factually — what the 3D reference is for, not why it's better:
+
+"Because this needs [the specific requirement above], a 3D reference in the enhancer is the right tool — it gives the generator a fixed object to work from so [specific requirement] stays consistent."
+
+If none of those apply, do not mention 3D at all.
 
 ---
 
@@ -163,10 +240,15 @@ CURRENT SESSION CONTEXT:
 
 Use all available context to deliver increasingly specific research output. If niche and demographic are known, do not ask again — build on them.` : '';
 
+		const activeSpecs = detectMediaSpecs(messages, context);
+		const specPrompt = activeSpecs.length
+			? `\n\nACTIVE MEDIA-TYPE REQUIREMENTS (detected from this request — apply to every engineered prompt, non-negotiable):\n${activeSpecs.map((s) => `- ${s}`).join('\n')}`
+			: '';
+
 		const response = await anthropic.messages.create({
-			model: 'claude-opus-4-7',
+			model: 'claude-opus-4-8',
 			max_tokens: 3000,
-			system: SYSTEM_PROMPT + contextPrompt,
+			system: SYSTEM_PROMPT + contextPrompt + specPrompt,
 			messages: messages.map((msg: { role: string; content: string }) => ({
 				role: msg.role,
 				content: msg.content

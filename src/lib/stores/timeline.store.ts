@@ -57,7 +57,7 @@ function createTimelineStore() {
 		subscribe,
 
 		// ── TRACK CREATION ───────────────────────────────────────────────
-		addVideoTrack(assetId: string, name: string, duration: number): string {
+		addVideoTrack(assetId: string, name: string, duration: number, startAt = 0): string {
 			const clipId = makeId();
 			return addTrack({
 				type: 'video',
@@ -70,8 +70,8 @@ function createTimelineStore() {
 				clips: [{
 					id: clipId,
 					assetId,
-					startTime: 0,
-					endTime: duration,
+					startTime: startAt,
+					endTime: startAt + duration,
 					sourceStart: 0,
 					sourceEnd: duration
 				}]

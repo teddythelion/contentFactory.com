@@ -72,7 +72,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			gcsPath: uploadResult.gcsPath,
 			publicUrl: uploadResult.publicUrl,
 			format: params.format,
-			model: params.model || 'gpt-image-1.5',
+			model: params.model || 'nano-banana-pro',
 			generationTime: params.generationTime || 0,
 			tags: params.tags || [],
 			createdAt: Timestamp.now(),

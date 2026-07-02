@@ -16,6 +16,7 @@ interface VideoState {
 	videoHeight: number;
 	currentTime: number; // Single source of truth for playback position
 	isPlaying: boolean; // Single source of truth for play/pause state
+	inVideoGap: boolean; // true when playhead is between clips (show black screen)
 }
 
 const initialState: VideoState = {
@@ -29,7 +30,8 @@ const initialState: VideoState = {
 	videoWidth: 0,
 	videoHeight: 0,
 	currentTime: 0,
-	isPlaying: false
+	isPlaying: false,
+	inVideoGap: false
 };
 
 function createVideoStore() {
@@ -88,6 +90,10 @@ function createVideoStore() {
 		// NEW: Update play/pause state (called by video element)
 		setIsPlaying: (playing: boolean) => {
 			update((state) => ({ ...state, isPlaying: playing }));
+		},
+
+		setInVideoGap: (inVideoGap: boolean) => {
+			update((state) => ({ ...state, inVideoGap }));
 		},
 
 		clearVideo: () => {

@@ -1,6 +1,6 @@
 // src/lib/utils/audioMixer.ts
 // Web Audio mixer powered by Tone.js
-// Same public API as before — drop-in replacement, nothing else changes.
+
 
 import * as Tone from 'tone';
 
