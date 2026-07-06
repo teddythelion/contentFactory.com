@@ -1,4 +1,4 @@
-import { GOOGLE_API_KEY } from '$env/static/private';
+import { GEMINI_API_KEY } from '$env/static/private';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, request }) => {
@@ -29,8 +29,8 @@ export const GET: RequestHandler = async ({ url, request }) => {
 		let fetchUrl = videoUrl;
 		if (videoUrl.includes('generativelanguage.googleapis.com')) {
 			fetchUrl = videoUrl.includes('?')
-				? `${videoUrl}&key=${GOOGLE_API_KEY}`
-				: `${videoUrl}:download?alt=media&key=${GOOGLE_API_KEY}`;
+				? `${videoUrl}&key=${GEMINI_API_KEY}`
+				: `${videoUrl}:download?alt=media&key=${GEMINI_API_KEY}`;
 		}
 
 		const upstream = await fetch(fetchUrl, { headers: upstreamHeaders });

@@ -5,7 +5,7 @@
 // wire behavior changed, it just sits behind the VideoProvider interface now.
 
 import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
-import { GOOGLE_API_KEY } from '$env/static/private';
+import { GEMINI_API_KEY } from '$env/static/private';
 import type {
 	VideoProvider,
 	GenerateVideoParams,
@@ -16,7 +16,7 @@ import type {
 } from './types';
 
 export function createGoogleVideoProvider(opts: ProviderOptions = {}): VideoProvider {
-	const ai = new GoogleGenAI({ apiKey: opts.apiKey || GOOGLE_API_KEY });
+	const ai = new GoogleGenAI({ apiKey: opts.apiKey || GEMINI_API_KEY });
 
 	return {
 		name: 'google-veo',

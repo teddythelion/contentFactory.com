@@ -158,6 +158,10 @@
 	}
 
 	onMount(() => {
+		// Fresh session on every entry — a persisted chat serves stale prompts when
+		// navigating back here from /create.
+		workflowContext.reset();
+		suggestedPrompts = [];
 		if ($workflowContext.chatHistory.length === 0) {
 			workflowContext.addMessage(
 				'assistant',

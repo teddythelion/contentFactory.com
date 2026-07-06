@@ -367,7 +367,6 @@
 			id: 'logo',
 			title: '🎨 Image Overlay',
 			items: [
-				{ label: 'Enable Image', type: 'toggle' },
 				{ label: 'Upload Image', type: 'component', component: LogoUpload, componentProps: {} },
 				{ label: 'Scale', type: 'range', min: 0.05, max: 4, step: 0.01 },
 				{ label: 'Opacity', type: 'range', min: 0, max: 1, step: 0.05 },
@@ -445,7 +444,6 @@
 		}
 		if (groupId === 'logo') {
 			switch (label) {
-				case 'Enable Image': return $logoState.enabled;
 				case 'Position X': return $logoState.position.x;
 				case 'Position Y': return $logoState.position.y;
 				case 'Position Z': return $logoState.position.z;
@@ -513,7 +511,6 @@
 		if (groupId === 'logo') {
 			const currentState = $logoState;
 			switch (label) {
-				case 'Enable Image': logoState.setEnabled(value); break;
 				case 'Position X': logoState.setPosition(value, currentState.position.y, currentState.position.z); break;
 				case 'Position Y': logoState.setPosition(currentState.position.x, value, currentState.position.z); break;
 				case 'Position Z': logoState.setPosition(currentState.position.x, currentState.position.y, value); break;

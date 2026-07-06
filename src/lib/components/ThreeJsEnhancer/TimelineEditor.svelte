@@ -205,6 +205,9 @@
 		const onPlay  = () => videoState.setIsPlaying(true);
 		const onPause = () => videoState.setIsPlaying(false);
 		const onTime  = () => {
+			// During capture the playhead is driven by ThreeJsScene's poller — bail so
+			// the clip-boundary logic can't seek the video away from the capture loop.
+			if ((window as any).__threeJsCapturing) return;
 			const srcT = videoElement!.currentTime;
 			videoState.setCurrentTime(srcT);
 			// Detect when we've reached a clip's sourceEnd and need to jump to the next segment
@@ -213,6 +216,7 @@
 			if (clip && srcT >= clip.sourceEnd - 0.05) handleClipEnd();
 		};
 		const onEnded = () => {
+			if ((window as any).__threeJsCapturing) return;
 			videoState.setIsPlaying(false);
 			// Safety net: if onTime missed the boundary, handle it here
 			handleClipEnd();
@@ -229,6 +233,21 @@
 			videoElement!.removeEventListener('timeupdate', onTime);
 			videoElement!.removeEventListener('ended',      onEnded);
 		};
+	});
+
+	// ── SPACEBAR PLAY/PAUSE ─────────────────────────────────────────
+	$effect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (e.code !== 'Space') return;
+			// Don't hijack space while typing or when a control would also react to it
+			const t = e.target as HTMLElement | null;
+			if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.tagName === 'BUTTON' || t.isContentEditable)) return;
+			if ((window as any).__threeJsCapturing) return;
+			e.preventDefault(); // stop the page from scrolling
+			togglePlay();
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
 	});
 
 	// ── AUDIO SYNC ──────────────────────────────────────────────────

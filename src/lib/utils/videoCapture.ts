@@ -99,11 +99,21 @@ export async function captureThreeJsVideo(
 				// not the mathematical i/fps target (they can diverge due to frame quantization).
 				const actualTime = videoElement.currentTime;
 
-				// Force texture dirty — Three.js VideoTexture relies on requestVideoFrameCallback
-				// on modern browsers, which may not fire synchronously after a manual seek on a
-				// paused video. Without this, the GPU slot stays at frame 0 the whole capture.
-				const mainVideoTexture = (window as any).__threeJsVideoTexture;
-				if (mainVideoTexture) mainVideoTexture.needsUpdate = true;
+				// Bring secondary clips (split/PiP layouts) to the same time before compositing.
+				const seekSecondaries = (window as any).__threeJsSeekSecondaries;
+				if (seekSecondaries) await seekSecondaries(actualTime);
+
+				// Draw the current video frame into the composite canvas — animate() no-ops
+				// during capture, so this is the only thing that gets the seeked frame onto
+				// the CanvasTexture. It also sets needsUpdate on the texture.
+				const drawComposite = (window as any).__threeJsDrawComposite;
+				if (drawComposite) {
+					drawComposite();
+				} else {
+					// Legacy VideoTexture path — force the GPU slot dirty after a manual seek.
+					const mainVideoTexture = (window as any).__threeJsVideoTexture;
+					if (mainVideoTexture) mainVideoTexture.needsUpdate = true;
+				}
 
 				const textMesh = (window as any).__textMesh;
 				if (textMesh?._videoTexture) {
@@ -116,19 +126,10 @@ export async function captureThreeJsVideo(
 				threeRenderer.render(threeScene, threeCamera);
 				gl.finish();
 
-				const pixels = new Uint8Array(width * height * 4);
-				gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-
-				// Y-flip (WebGL origin is bottom-left) then compress to JPEG.
-				// JPEG at 92% quality is visually lossless for video frames and
-				// reduces ~2.9MB raw RGBA to ~100-200KB per frame.
-				const flipped = new Uint8ClampedArray(width * height * 4);
-				for (let y = 0; y < height; y++) {
-					const sourceRow = (height - 1 - y) * width * 4;
-					const destRow = y * width * 4;
-					flipped.set(pixels.subarray(sourceRow, sourceRow + width * 4), destRow);
-				}
-				jpegCtx.putImageData(new ImageData(flipped, width, height), 0, 0);
+				// drawImage from a WebGL canvas (preserveDrawingBuffer: true) copies GPU-side,
+				// already top-left oriented — replaces readPixels + CPU Y-flip, which stalled
+				// the pipeline and allocated ~16MB of scratch buffers per frame.
+				jpegCtx.drawImage(canvas, 0, 0);
 				const jpegBlob = await new Promise<Blob>((resolve) =>
 					jpegCanvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
 				);

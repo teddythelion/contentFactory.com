@@ -1,5 +1,5 @@
 // src/routes/api/content/download/+server.ts
-import { GOOGLE_API_KEY } from '$env/static/private';
+import { GEMINI_API_KEY } from '$env/static/private';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -15,15 +15,15 @@ export const GET: RequestHandler = async ({ url }) => {
 	let fetchUrl = fileUrl;
 	if (fileUrl.includes('generativelanguage.googleapis.com')) {
 		fetchUrl = fileUrl.includes('?')
-			? `${fileUrl}&key=${GOOGLE_API_KEY}`
-			: `${fileUrl}:download?alt=media&key=${GOOGLE_API_KEY}`;
+			? `${fileUrl}&key=${GEMINI_API_KEY}`
+			: `${fileUrl}:download?alt=media&key=${GEMINI_API_KEY}`;
 	} else if (fileUrl.startsWith('/')) {
 		// Relative proxy URL — extract the inner Gemini URL and handle directly
 		const innerUrl = new URL(fileUrl, 'http://localhost').searchParams.get('url');
 		if (innerUrl && innerUrl.includes('generativelanguage.googleapis.com')) {
 			fetchUrl = innerUrl.includes('?')
-				? `${innerUrl}&key=${GOOGLE_API_KEY}`
-				: `${innerUrl}:download?alt=media&key=${GOOGLE_API_KEY}`;
+				? `${innerUrl}&key=${GEMINI_API_KEY}`
+				: `${innerUrl}:download?alt=media&key=${GEMINI_API_KEY}`;
 		} else {
 			return new Response('Cannot resolve relative URL for download', { status: 400 });
 		}

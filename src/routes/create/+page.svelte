@@ -431,6 +431,7 @@ let showAuthModal = $state(false);
 		} catch { referenceFiles = []; }
 		generatedContent = null;
 		contentType = null;
+		prompt = '';
 		mode = 'video';
 		showToastMsg('Generated image sent as video reference.');
 	}
@@ -447,6 +448,7 @@ let showAuthModal = $state(false);
 		editSourceFileName = '';
 		generatedContent = null;
 		contentType = null;
+		prompt = '';
 		mode = 'video';
 		showToastMsg('Uploaded image sent as video reference.');
 	}
@@ -528,6 +530,7 @@ let showAuthModal = $state(false);
 			contentType = null;
 			editSourceUrl = null;
 			editSourceFileName = '';
+			prompt = '';
 			mode = 'video';
 			showToastMsg('Enhanced image sent as video reference.');
 		}}

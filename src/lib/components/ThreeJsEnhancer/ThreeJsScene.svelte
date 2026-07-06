@@ -107,6 +107,13 @@
 				if (!vid) return;
 				if (!isScrubbing) currentTime = vid.currentTime;
 				duration = vid.duration || 0;
+				// Drive the timeline playhead from here — it must not depend on the
+				// editor's timeupdate listeners. While paused we stay silent so manual
+				// playhead drags/seeks aren't stomped; during capture the video is
+				// paused-but-seeking, so keep pushing progress.
+				if (!vid.paused || (window as any).__threeJsCapturing) {
+					videoState.setCurrentTime(vid.currentTime);
+				}
 						}, 100);
 			}
 
@@ -212,6 +219,8 @@
 			(window as any).__threeJsCamera = null;
 			(window as any).__threeJsCapturing = false;
 			(window as any).__threeJsUpdateScene = null;
+			(window as any).__threeJsDrawComposite = null;
+			(window as any).__threeJsSeekSecondaries = null;
 			(window as any).__threeJsVideoTexture = null;
 			threeJsState.setSceneReady(false);
 
@@ -245,6 +254,41 @@
 		(window as any).__threeJsScene = scene;
 		(window as any).__threeJsCamera = camera;
 		(window as any).__threeJsCapturing = false;
+
+		// Capture needs to drive the composite draw itself — animate() no-ops while
+		// __threeJsCapturing is set, so without this hook the composite canvas (and
+		// therefore the main video) is never updated in exported frames.
+		(window as any).__threeJsDrawComposite = updateCompositeFrame;
+
+		// Seek all secondary clips to the given timeline time and resolve once their
+		// frames are decoded — otherwise capture exports them frozen at whatever frame
+		// they were paused on. Assigning an unchanged currentTime never fires 'seeked',
+		// hence the diff check; the timeout covers stalled decodes so capture can't hang.
+		(window as any).__threeJsSeekSecondaries = async (t: number) => {
+			const tracks = $timelineStore.tracks.filter((tr) => tr.type === 'video').slice(1);
+			const waits: Promise<void>[] = [];
+			for (const tr of tracks) {
+				const el = secondaryVideoElements.get(tr.assetId ?? '');
+				if (!el || el.readyState < 1) continue;
+				if (!el.paused) el.pause();
+				const clip = tr.clips.find((c) => t >= c.startTime && t < c.endTime);
+				if (!clip) continue;
+				const target = clip.sourceStart + (t - clip.startTime);
+				if (Math.abs(el.currentTime - target) < 0.001) continue;
+				waits.push(
+					new Promise<void>((resolve) => {
+						const timeout = setTimeout(resolve, 500);
+						el.addEventListener(
+							'seeked',
+							() => { clearTimeout(timeout); resolve(); },
+							{ once: true }
+						);
+					})
+				);
+				el.currentTime = target;
+			}
+			await Promise.all(waits);
+		};
 
 		(window as any).__threeJsUpdateScene = (time: number) => {
 			if (mesh) {
