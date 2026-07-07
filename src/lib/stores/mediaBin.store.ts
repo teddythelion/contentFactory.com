@@ -4,7 +4,7 @@
 
 import { writable } from 'svelte/store';
 
-export type AssetType = 'video' | 'music' | 'sfx' | 'voice';
+export type AssetType = 'video' | 'image' | 'music' | 'sfx' | 'voice';
 
 export interface MediaAsset {
 	id: string;

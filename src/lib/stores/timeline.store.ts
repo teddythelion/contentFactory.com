@@ -24,6 +24,7 @@ export interface TimelineTrack {
 	assetSessionId: string | null; // sfxSessionId / musicSessionId for playback lookup
 	clips: TimelineClip[];
 	muted: boolean;
+	volume?: number; // secondary video tracks: own playback/mux volume (default 1)
 	zIndex: number; // video tracks: lower index = rendered on top
 }
 
@@ -143,11 +144,39 @@ function createTimelineStore() {
 			update((s) => ({ ...s, activeTrackId: trackId }));
 		},
 
+		setTrackVolume(trackId: string, volume: number) {
+			update((s) => ({
+				...s,
+				tracks: s.tracks.map((t) => (t.id === trackId ? { ...t, volume } : t))
+			}));
+		},
+
 		muteTrack(trackId: string, muted: boolean) {
 			update((s) => ({
 				...s,
 				tracks: s.tracks.map((t) => (t.id === trackId ? { ...t, muted } : t))
 			}));
+		},
+
+		// Move a video track to a target position among video tracks (0 = top =
+		// primary compositing slot), shifting the others accordingly. Non-video
+		// tracks keep their array slots — only the video ordering changes.
+		moveVideoTrackTo(trackId: string, targetPos: number) {
+			update((s) => {
+				const vidIdxs = s.tracks
+					.map((t, i) => (t.type === 'video' ? i : -1))
+					.filter((i) => i !== -1);
+				const fromPos = vidIdxs.findIndex((i) => s.tracks[i].id === trackId);
+				if (fromPos === -1) return s;
+				const clamped = Math.max(0, Math.min(vidIdxs.length - 1, targetPos));
+				if (clamped === fromPos) return s;
+				const vids = vidIdxs.map((i) => s.tracks[i]);
+				const [moved] = vids.splice(fromPos, 1);
+				vids.splice(clamped, 0, moved);
+				const tracks = [...s.tracks];
+				vidIdxs.forEach((slot, k) => { tracks[slot] = vids[k]; });
+				return { ...s, tracks };
+			});
 		},
 
 		renameTrack(trackId: string, name: string) {

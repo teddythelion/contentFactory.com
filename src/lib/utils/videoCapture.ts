@@ -6,6 +6,8 @@
 
 import { get } from 'svelte/store';
 import { videoState } from '$lib/stores/video.store';
+import { timelineStore } from '$lib/stores/timeline.store';
+import { mediaBinStore } from '$lib/stores/mediaBin.store';
 import { encodeJobStore } from '$lib/stores/encodeJob.store';
 import { authStore } from '$lib/stores/auth.store';
 import { audioSessionStore } from '$lib/stores/audioSession.store'; // NEW
@@ -33,7 +35,28 @@ export async function captureThreeJsVideo(
 		throw new Error('Three.js renderer/scene/camera not found — cannot guarantee frame sync');
 	}
 
-	const videoDuration = videoElement.duration;
+	// ── Timeline-aware export ────────────────────────────────────────────
+	// The output walks TIMELINE time from 0 to the end of the last clip on any
+	// track — not the main video's raw source duration — so trims, rearranged
+	// clips, secondaries and images past the main video's end all land in the
+	// file, and the export matches what preview plays.
+	const timeline = get(timelineStore);
+	let timelineEnd = 0;
+	for (const tr of timeline.tracks)
+		for (const c of tr.clips) timelineEnd = Math.max(timelineEnd, c.endTime);
+	if (timelineEnd === 0) timelineEnd = videoElement.duration; // no timeline — raw video
+
+	const mainAssetId = (window as any).__threeJsMainVideoAssetId as string | null;
+	const mainTrack =
+		timeline.tracks.find((t) => t.type === 'video' && t.assetId === mainAssetId) ??
+		timeline.tracks.find((t) => t.type === 'video');
+	const mainClips = mainTrack ? [...mainTrack.clips].sort((a, b) => a.startTime - b.startTime) : [];
+	// Timeline moment → main-video source time (null = main video has no clip there)
+	const mainSourceAt = (t: number): number | null => {
+		const c = mainClips.find((k) => t >= k.startTime && t < k.endTime);
+		return c ? c.sourceStart + (t - c.startTime) : null;
+	};
+
 	const fps = 30;
 	// Physical pixel dimensions — what gl.readPixels actually reads.
 	const width = canvas.width;
@@ -45,7 +68,7 @@ export async function captureThreeJsVideo(
 	const outHeight = canvas.clientHeight;
 	console.log(`🖼️ Canvas size: ${width}x${height}`);
 	console.log(`🖼️ Canvas client size: ${canvas.clientWidth}x${canvas.clientHeight}`);
-	const totalFrames = Math.ceil(videoDuration * fps);
+	const totalFrames = Math.ceil(timelineEnd * fps);
 	const totalBatches = Math.ceil(totalFrames / BATCH_SIZE);
 
 	// Read audioSessionId from store — will be null if video had no audio
@@ -56,6 +79,59 @@ export async function captureThreeJsVideo(
 		audioStudio.originalMuted ||
 		audioStudio.sfxSuppressOriginal ||
 		audioStudio.musicSuppressOriginal;
+
+	// ── Clip audio plan ──────────────────────────────────────────────────
+	// Original audio takes the legacy whole-file path only for the trivial layout
+	// (single untrimmed main clip at timeline 0). Anything else — moved/trimmed
+	// main clips, secondary clips with extracted audio — is described per clip
+	// and mixed server-side with trim + delay + volume.
+	interface ClipAudio {
+		sessionId: string; timelineStart: number; sourceStart: number;
+		duration: number; volume: number; fadeIn: number; fadeOut: number;
+	}
+	const clipAudios: ClipAudio[] = [];
+
+	const mainTrivial =
+		mainClips.length === 1 &&
+		Math.abs(mainClips[0].startTime) < 0.01 &&
+		Math.abs(mainClips[0].sourceStart) < 0.01 &&
+		Math.abs(mainClips[0].sourceEnd - videoElement.duration) < 0.05;
+
+	let legacyAudioSessionId = audioSessionId;
+	if (!mainTrivial && audioSessionId && !suppressOriginalAudio) {
+		mainClips.forEach((c, i) => {
+			clipAudios.push({
+				sessionId: audioSessionId,
+				timelineStart: c.startTime,
+				sourceStart: c.sourceStart,
+				duration: c.endTime - c.startTime,
+				volume: 1,
+				fadeIn: i === 0 ? audioStudio.originalFadeIn : 0,
+				fadeOut: i === mainClips.length - 1 ? audioStudio.originalFadeOut : 0
+			});
+		});
+		legacyAudioSessionId = null;
+	}
+
+	// Secondary video clips — audio extracted when the clip was added (asset.sessionId)
+	const binAssets = get(mediaBinStore).assets;
+	for (const tr of timeline.tracks) {
+		if (tr.type !== 'video' || tr.assetId === mainAssetId || tr.muted) continue;
+		const asset = binAssets.find((a) => a.id === tr.assetId);
+		if (!asset?.sessionId || asset.type !== 'video') continue;
+		for (const c of tr.clips) {
+			clipAudios.push({
+				sessionId: asset.sessionId,
+				timelineStart: c.startTime,
+				sourceStart: c.sourceStart,
+				duration: c.endTime - c.startTime,
+				volume: tr.volume ?? 1,
+				fadeIn: 0,
+				fadeOut: 0
+			});
+		}
+	}
+
 	progressCallback?.(0, 'Starting capture...');
 
 	videoElement.pause();
@@ -87,21 +163,33 @@ export async function captureThreeJsVideo(
 			const batchFrames: Blob[] = [];
 
 			for (let i = startFrame; i < endFrame; i++) {
-				const targetTime = i / fps;
+				const T = i / fps; // timeline time for this output frame
 
-				videoElement.currentTime = targetTime;
+				// Seek the main video only where a main-track clip covers this moment —
+				// the compositor's coverage check hides it elsewhere. Skip no-op seeks
+				// (an unchanged currentTime never fires 'seeked'); the timeout covers
+				// stalled seeks so the capture can't hang.
+				const srcT = mainSourceAt(T);
+				if (srcT !== null && Math.abs(videoElement.currentTime - srcT) > 1 / (fps * 2)) {
+					await new Promise<void>((resolve) => {
+						const timeout = setTimeout(resolve, 1000);
+						videoElement.addEventListener(
+							'seeked',
+							() => { clearTimeout(timeout); resolve(); },
+							{ once: true }
+						);
+						videoElement.currentTime = srcT;
+					});
+				}
 
-				await new Promise<void>((resolve) => {
-					videoElement.addEventListener('seeked', () => resolve(), { once: true });
-				});
-
-				// Single source of truth — use the actual position the browser seeked to,
-				// not the mathematical i/fps target (they can diverge due to frame quantization).
-				const actualTime = videoElement.currentTime;
+				// Publish the timeline clock — the compositor's layer selection and the
+				// scene animations key off it (the editor's own publisher pauses during
+				// capture so this value wins).
+				(window as any).__timelineEditTime = T;
 
 				// Bring secondary clips (split/PiP layouts) to the same time before compositing.
 				const seekSecondaries = (window as any).__threeJsSeekSecondaries;
-				if (seekSecondaries) await seekSecondaries(actualTime);
+				if (seekSecondaries) await seekSecondaries(T);
 
 				// Draw the current video frame into the composite canvas — animate() no-ops
 				// during capture, so this is the only thing that gets the seeked frame onto
@@ -121,7 +209,7 @@ export async function captureThreeJsVideo(
 				}
 
 				const updateScene = (window as any).__threeJsUpdateScene;
-				if (updateScene) updateScene(actualTime);
+				if (updateScene) updateScene(T);
 
 				threeRenderer.render(threeScene, threeCamera);
 				gl.finish();
@@ -194,7 +282,8 @@ export async function captureThreeJsVideo(
 				outWidth,
 				outHeight,
 				userId,
-				audioSessionId,
+				audioSessionId: legacyAudioSessionId,
+				clipAudios,
 				sfxSessionId: audioStudio.sfxSessionId,
 				musicSessionId: audioStudio.musicSessionId,
 				sfxVolume: audioStudio.sfxVolume,

@@ -9,7 +9,7 @@ import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
 	import AuthModal from '$lib/components/AuthModal.svelte';
 	import ThreeJsEnhancer from '$lib/components/ThreeJsEnhancer/ThreeJsEnhancer.svelte';
 	import ThreeJSEnhancer from '$lib/components/ThreeJSEnhancer.svelte';
-	import type { UsageCheckResult } from '$lib/types/subscription';
+	import { TIER_CONFIG, type UsageCheckResult } from '$lib/types/subscription';
 
 	// ── Core state ────────────────────────────────────────────────────────────
 	let mode = $state<'image' | 'video' | 'extend'>('image');
@@ -35,6 +35,19 @@ import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
 	let videoOperation = $state<string | null>(null);
 	let audioSessionId = $state<string | null>(null);
 	let showAdvanced = $state(false);
+
+	// Image-only generation options — server re-validates all of these per plan.
+	// 'auto' omits the field entirely = pre-existing behavior (edits follow the
+	// reference image's aspect; model default resolution).
+	const IMAGE_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'];
+	let imageAspectRatio = $state('auto');
+	let imageSize = $state<'auto' | '1K' | '2K' | '4K'>('auto');
+	let imageVariants = $state(1);
+	let imageQuality = $state<'standard' | 'premium'>('standard');
+	let generatedVariants = $state<string[]>([]);
+	// false = show the variant grid (initial view for multi-variant results);
+	// true = a variant is focused in the normal single-image preview.
+	let variantFocused = $state(false);
 
 	// Extend mode
 	let videoObject = $state<Record<string, unknown> | null>(null);
@@ -74,6 +87,7 @@ let showAuthModal = $state(false);
 	// Tier-gated features — populated after plan fetch in onMount
 	let planCanExtend = $derived($subscriptionStore.canExtend);
 	let planCanUsePremiumQuality = $derived($subscriptionStore.canUsePremiumQuality);
+	let planTier = $derived(TIER_CONFIG[$subscriptionStore.plan]);
 
 	// ── Load from content library + pre-fetch plan ────────────────────────────
 	onMount(async () => {
@@ -114,6 +128,8 @@ let showAuthModal = $state(false);
 		if (editSourceUrl?.startsWith('blob:')) URL.revokeObjectURL(editSourceUrl);
 		referencePreviews.forEach(p => { if (p?.startsWith('blob:')) URL.revokeObjectURL(p); });
 		generatedContent = null;
+		generatedVariants = [];
+		variantFocused = false;
 		contentType = null;
 		prompt = '';
 		referenceFiles = [];
@@ -249,8 +265,13 @@ let showAuthModal = $state(false);
 	async function generateImage() {
 		const fd = new FormData();
 		fd.append('prompt', prompt);
+		if (imageAspectRatio !== 'auto') fd.append('aspectRatio', imageAspectRatio);
+		if (imageSize !== 'auto') fd.append('imageSize', imageSize);
+		fd.append('variants', String(imageVariants));
+		fd.append('quality', imageQuality);
 		referenceFiles.forEach(f => fd.append('images', f));
 
+		generatedVariants = [];
 		const response = await fetch('/api/imageEdit', { method: 'POST', body: fd });
 		const data = await response.json();
 
@@ -262,7 +283,9 @@ let showAuthModal = $state(false);
 		}
 		if (!data.success) throw new Error(data.error || 'Image generation failed');
 		if (!data.imageUrl) throw new Error('No image received from server');
-		generatedContent = data.imageUrl;
+		generatedVariants = data.imageUrls ?? [data.imageUrl];
+		generatedContent = generatedVariants[0];
+		variantFocused = generatedVariants.length === 1;
 		contentType = 'image';
 		status = '';
 	}
@@ -691,6 +714,31 @@ let showAuthModal = $state(false);
 							</div>
 						</div>
 
+					{:else if activeContentType === 'image' && activeUrl && generatedVariants.length > 1 && !variantFocused}
+						<!-- Variant grid — quartered view, click a cell to focus it -->
+						<div class="grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden" style="min-height: 320px;">
+							{#each generatedVariants as v, i (i)}
+								<div class="relative group bg-base-300/30 rounded-lg overflow-hidden">
+									<button
+										class="block w-full h-full cursor-zoom-in"
+										onclick={() => { generatedContent = v; variantFocused = true; }}
+										title="Focus variant {i + 1}"
+									>
+										<img src={v} alt="Variant {i + 1}" class="w-full h-full object-cover" style="min-height: 200px; max-height: 275px;" />
+									</button>
+									<span class="absolute bottom-1.5 left-2 text-[10px] font-bold text-white/80 bg-black/50 px-1.5 rounded pointer-events-none">{i + 1}</span>
+									<div class="dropdown dropdown-end absolute top-2 right-2">
+										<button tabindex="0" class="btn btn-xs btn-neutral btn-circle shadow-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">⋮</button>
+										<ul class="dropdown-content menu bg-base-100 rounded-box z-10 w-44 p-1 shadow-xl text-xs">
+											<li><button onclick={() => { generatedContent = v; downloadContent(); }}>⬇ Download</button></li>
+											<li><button onclick={() => { generatedContent = v; sendToVideoRefs(); }}>🎬 Send to video refs</button></li>
+											<li><button onclick={() => { generatedContent = v; variantFocused = true; editContent(); }}>✏️ Edit content</button></li>
+										</ul>
+									</div>
+								</div>
+							{/each}
+						</div>
+
 					{:else if activeContentType === 'image' && activeUrl}
 						<img
 							src={activeUrl}
@@ -699,6 +747,11 @@ let showAuthModal = $state(false);
 							style="min-height: 320px; max-height: 560px;"
 						/>
 						<div class="absolute top-3 right-3 flex gap-2">
+							{#if generatedVariants.length > 1}
+								<button onclick={() => (variantFocused = false)} class="btn btn-sm btn-neutral gap-1.5 shadow-lg" title="Back to all variants">
+									⊞ Variants
+								</button>
+							{/if}
 							<button onclick={downloadContent} class="btn btn-sm btn-neutral gap-1.5 shadow-lg">
 								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
 									<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -961,8 +1014,8 @@ let showAuthModal = $state(false);
 							</svg>
 						</div>
 
-						<!-- Advanced options (video mode only) -->
-						{#if mode === 'video'}
+						<!-- Advanced options (image + video modes) -->
+						{#if mode === 'video' || mode === 'image'}
 							<div class="mt-2 border-t border-base-300/50 pt-4">
 								<button
 									onclick={() => (showAdvanced = !showAdvanced)}
@@ -974,7 +1027,79 @@ let showAuthModal = $state(false);
 									</svg>
 									Advanced options
 								</button>
-								{#if showAdvanced}
+								{#if showAdvanced && mode === 'image'}
+									<div class="mt-3 space-y-4">
+										<div class="grid grid-cols-2 gap-4">
+											<div>
+												<p class="text-xs text-base-content/40 mb-1">Aspect ratio</p>
+												<select
+													bind:value={imageAspectRatio}
+													class="select select-bordered select-sm w-full text-sm"
+													disabled={isGenerating}
+												>
+													<option value="auto">Auto — match reference</option>
+													{#each IMAGE_ASPECT_RATIOS as r (r)}
+														<option value={r}>{r}</option>
+													{/each}
+												</select>
+											</div>
+											<div>
+												<p class="text-xs text-base-content/40 mb-1">Resolution</p>
+												<select
+													bind:value={imageSize}
+													class="select select-bordered select-sm w-full text-sm"
+													disabled={isGenerating}
+												>
+													<option value="auto">Auto — model default</option>
+													<option value="1K">1K</option>
+													<option value="2K" disabled={planTier.maxImageSize === '1K'}>2K{planTier.maxImageSize === '1K' ? ' — Starter+' : ''}</option>
+													<option value="4K" disabled={planTier.maxImageSize !== '4K' || imageQuality !== 'premium'}>4K{planTier.maxImageSize !== '4K' ? ' — Pro' : ' — Premium model'}</option>
+												</select>
+											</div>
+										</div>
+										<div class="grid grid-cols-2 gap-4">
+											<div>
+												<p class="text-xs text-base-content/40 mb-1">Variants</p>
+												<select
+													bind:value={imageVariants}
+													class="select select-bordered select-sm w-full text-sm"
+													disabled={isGenerating}
+												>
+													{#each [1, 2, 3, 4] as n (n)}
+														<option value={n} disabled={n > planTier.maxImageVariants}>
+															{n}{n > planTier.maxImageVariants ? (n <= 2 ? ' — Starter+' : ' — Pro') : ''}
+														</option>
+													{/each}
+												</select>
+												<p class="text-[10px] text-base-content/30 mt-0.5">Each variant counts as one image</p>
+											</div>
+											<div>
+												<p class="text-xs text-base-content/40 mb-1">Model</p>
+												<div class="join w-full">
+													<button
+														onclick={() => {
+															imageQuality = 'standard';
+															if (imageSize === '4K') imageSize = 'auto'; // 4K rides the premium model
+														}}
+														class="join-item btn btn-sm flex-1 {imageQuality === 'standard' ? 'btn-primary' : 'btn-ghost border border-base-300'}"
+														disabled={isGenerating}
+													>
+														⚡ Standard
+													</button>
+													<button
+														onclick={() => (imageQuality = 'premium')}
+														class="join-item btn btn-sm flex-1 {imageQuality === 'premium' ? 'btn-warning' : 'btn-ghost border border-base-300'} {!planCanUsePremiumQuality ? 'opacity-40' : ''}"
+														disabled={isGenerating || !planCanUsePremiumQuality}
+														title={planCanUsePremiumQuality ? '' : 'Pro plan required'}
+													>
+														✦ Premium {#if !planCanUsePremiumQuality}<span class="text-[9px]">PRO</span>{/if}
+													</button>
+												</div>
+											</div>
+										</div>
+									</div>
+								{/if}
+								{#if showAdvanced && mode === 'video'}
 									<div class="mt-3 space-y-4">
 										<div class="grid grid-cols-2 gap-4">
 											<div>
@@ -1013,11 +1138,9 @@ let showAuthModal = $state(false);
 													⚡ Fast
 												</button>
 												<button
-													onclick={() => planCanUsePremiumQuality
-														? (videoQuality = 'premium')
-														: showToastMsg('Premium quality requires a Pro plan.')}
-													class="join-item btn btn-sm flex-1 {videoQuality === 'premium' && planCanUsePremiumQuality ? 'btn-warning' : 'btn-ghost border border-base-300'} {!planCanUsePremiumQuality ? 'opacity-50' : ''}"
-													disabled={isGenerating}
+													onclick={() => (videoQuality = 'premium')}
+													class="join-item btn btn-sm flex-1 {videoQuality === 'premium' ? 'btn-warning' : 'btn-ghost border border-base-300'} {!planCanUsePremiumQuality ? 'opacity-40' : ''}"
+													disabled={isGenerating || !planCanUsePremiumQuality}
 													title={planCanUsePremiumQuality ? '' : 'Pro plan required'}
 												>
 													✦ Premium {#if !planCanUsePremiumQuality}<span class="text-[9px]">PRO</span>{/if}

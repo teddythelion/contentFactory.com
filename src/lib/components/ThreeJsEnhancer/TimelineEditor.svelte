@@ -9,8 +9,9 @@
 	interface Props {
 		videoElement?: HTMLVideoElement | null;
 		secondaryVideoElements?: Map<string, HTMLVideoElement>;
+		mainVideoAssetId?: string | null;
 	}
-	let { videoElement = null, secondaryVideoElements = new Map() }: Props = $props();
+	let { videoElement = null, secondaryVideoElements = new Map(), mainVideoAssetId = null }: Props = $props();
 
 	let audioStudio  = $derived($audioStudioStore);
 	let timeline     = $derived($timelineStore);
@@ -41,16 +42,54 @@
 		if (!videoElement) return;
 		let raf = 0;
 		const tick = () => {
-			liveTime = videoElement!.currentTime;
+			// While a seek is in flight the element can report its stale position —
+			// don't sample it, and don't release a manual cursor against it.
+			if (!videoElement!.seeking) liveTime = videoElement!.currentTime;
+			// Everything below belongs to live preview — during capture the capture
+			// loop owns the timeline clock and all secondary elements.
+			if (!(window as any).__threeJsCapturing) {
+				// Publish the timeline moment for the compositor — it needs to know
+				// which tracks' clips cover "now" to pick the visible layers.
+				(window as any).__timelineEditTime = editTime;
+				const t = editTime;
+				for (const [assetId, el] of secondaryVideoElements) {
+					const tr = timeline.tracks.find(k => k.type === 'video' && k.assetId === assetId);
+					if (!tr) continue;
+					// Secondary clips play their own audio — track M / vol control it
+					el.muted = tr.muted;
+					el.volume = tr.volume ?? 1;
+					const clip = tr.clips.find(c => t >= c.startTime && t < c.endTime);
+					if (clip && effectivePlaying) {
+						const target = clip.sourceStart + (t - clip.startTime);
+						if (el.paused && el.readyState >= 2) {
+							el.currentTime = target;
+							el.play().catch(() => {});
+						} else if (!el.seeking && Math.abs(el.currentTime - target) > 0.3) {
+							el.currentTime = target; // drifted — resync to the timeline
+						}
+					} else if (!el.paused) {
+						el.pause();
+					}
+				}
+			}
 			// A manual cursor left behind by a ruler click freezes the playhead once
 			// real playback resumes — release it unless gap traversal owns it.
-			if (manualCursor !== null && !manualPlaying && !inVideoGap && !videoElement!.paused) {
+			if (manualCursor !== null && !manualPlaying && !inVideoGap && !videoElement!.paused && !videoElement!.seeking) {
 				manualCursor = null;
+			}
+			// Frame-accurate clip-boundary stop — timeupdate only fires ~4×/s, which
+			// would let up to ~250ms of audio leak past a trim cut.
+			if (isPlaying && !inVideoGap && activeVideoClipId && !videoElement!.seeking) {
+				const bc = getClipById(activeVideoClipId);
+				if (bc && liveTime >= bc.sourceEnd - 1 / 60) handleClipEnd();
 			}
 			raf = requestAnimationFrame(tick);
 		};
 		raf = requestAnimationFrame(tick);
-		return () => cancelAnimationFrame(raf);
+		return () => {
+			cancelAnimationFrame(raf);
+			(window as any).__timelineEditTime = null;
+		};
 	});
 
 	// editTime: sourceToTimeline maps video.currentTime → correct timeline position for any
@@ -89,9 +128,15 @@
 
 	// ── SEGMENT PLAYBACK HELPERS ────────────────────────────────────
 
-	// Primary video track = first video track. Secondary tracks have their own elements.
+	// The transport drives the main video element, so the playback engine stays
+	// bound to its track even when it's been demoted below other video tracks
+	// (track order only changes compositing priority, not who owns playback).
 	function getPrimaryVideoTrack(): TimelineTrack | null {
-		return timeline.tracks.find(tr => tr.type === 'video') ?? null;
+		return (
+			timeline.tracks.find(tr => tr.type === 'video' && tr.assetId === mainVideoAssetId) ??
+			timeline.tracks.find(tr => tr.type === 'video') ??
+			null
+		);
 	}
 
 	// Only primary-track clips — prevents secondary clips from interfering with the
@@ -147,7 +192,7 @@
 		} else {
 			// Primary track finished — check if secondary / audio extends further
 			const maxEnd = getMaxTimelineEnd();
-			if (maxEnd > clip.endTime) {
+			if (maxEnd > clip.endTime + 0.05) {
 				// Pause primary so composite shows black in its slot
 				if (videoElement && !videoElement.paused) videoElement.pause();
 				activeVideoClipId = null;
@@ -157,6 +202,13 @@
 				manualPlaying = true;
 				// Ensure secondaries are running — manualPlaying=true prevents the pause effect
 				syncSecondaries(true);
+			} else {
+				// Nothing beyond this clip — stop here. A trimmed clip ends before the
+				// element's natural end, so without this the element (and its audio)
+				// keeps playing past the deleted region.
+				if (videoElement && !videoElement.paused) videoElement.pause();
+				manualCursor = clip.endTime;
+				activeVideoClipId = null;
 			}
 		}
 	}
@@ -234,7 +286,15 @@
 			const srcT = videoElement!.currentTime;
 			videoState.setCurrentTime(srcT);
 			// Detect when we've reached a clip's sourceEnd and need to jump to the next segment
-			if (!isPlaying || inVideoGap || !activeVideoClipId) return;
+			if (!isPlaying || inVideoGap) return;
+			// Autoplay starts without an active clip — infer it from the source time
+			// so trimmed-clip boundaries are still enforced.
+			if (!activeVideoClipId) {
+				activeVideoClipId = getVideoClipsSorted().find(
+					c => srcT >= c.sourceStart && srcT < c.sourceEnd
+				)?.id ?? null;
+				if (!activeVideoClipId) return;
+			}
 			const clip = getClipById(activeVideoClipId);
 			if (clip && srcT >= clip.sourceEnd - 0.05) handleClipEnd();
 		};
@@ -316,6 +376,10 @@
 		if (!videoElement) return;
 		if (!videoElement.paused) { videoElement.pause(); return; }
 
+		// Play pressed at/after the end of everything — wrap back to the start,
+		// otherwise the manual rAF exits immediately and play does nothing.
+		if (editTime >= getMaxTimelineEnd() - 0.05) seekTo(0);
+
 		// Find which video clip covers the current editTime
 		const clips = getVideoClipsSorted();
 		const clipAtTime = clips.find(c => editTime >= c.startTime && editTime < c.endTime);
@@ -336,11 +400,14 @@
 				manualPlayStart = editTime;
 				manualPlayMs    = Date.now();
 				manualPlaying   = true;
+				syncSecondaries(true);
 			} else {
-				// Past all video clips — audio-only zone
+				// Past all primary clips — secondary/audio-only zone. Secondaries must
+				// be started here or their video stays frozen while the cursor moves.
 				manualPlayStart = editTime;
 				manualPlayMs    = Date.now();
 				manualPlaying   = true;
+				syncSecondaries(true);
 			}
 		}
 	}
@@ -348,23 +415,29 @@
 	function zoomOut() { pixelsPerSecond = Math.max(15,  pixelsPerSecond / 1.4); }
 
 	function getTrackVol(track: TimelineTrack): number {
-		if (track.type === 'video') return audioStudio.originalVolume;
+		if (track.type === 'video') {
+			// Main video volume lives in audioStudio; secondary clips carry their own
+			return track.assetId === mainVideoAssetId ? audioStudio.originalVolume : (track.volume ?? 1);
+		}
 		if (track.type === 'music') return audioStudio.musicEntries[track.assetSessionId ?? '']?.volume ?? 0.3;
 		if (track.type === 'sfx')   return audioStudio.sfxVolume;
 		return 0.5;
 	}
 	function setTrackVol(track: TimelineTrack, pct: number) {
 		const v = Math.max(0, Math.min(100, pct)) / 100;
-		if (track.type === 'video') audioStudioStore.setOriginalVolume(v);
+		if (track.type === 'video') {
+			if (track.assetId === mainVideoAssetId) audioStudioStore.setOriginalVolume(v);
+			else timelineStore.setTrackVolume(track.id, v);
+		}
 		else if (track.type === 'music' && track.assetSessionId) audioStudioStore.updateMusicEntry(track.assetSessionId, { volume: v });
 		else if (track.type === 'sfx') audioStudioStore.setSfxVolume(v);
 	}
 
 	// ── UNIFIED DRAG HELPER ─────────────────────────────────────────
-	function attachDrag(onMove: (x: number) => void, onStop: () => void) {
-		function mouseMove(e: MouseEvent) { onMove(e.clientX); }
+	function attachDrag(onMove: (x: number, y: number) => void, onStop: () => void) {
+		function mouseMove(e: MouseEvent) { onMove(e.clientX, e.clientY); }
 		function touchMove(e: TouchEvent) {
-			if (e.touches[0]) onMove(e.touches[0].clientX);
+			if (e.touches[0]) onMove(e.touches[0].clientX, e.touches[0].clientY);
 			e.preventDefault();
 		}
 		function stop() { onStop(); cleanup(); }
@@ -399,6 +472,15 @@
 	function sourceToTimeline(s: number): number | null {
 		const track = getPrimaryVideoTrack();
 		if (!track) return null;
+		// Prefer the clip the transport is actively playing — duplicated clips share
+		// a source range, so a pure source→timeline lookup would always resolve to
+		// the first copy and snap the timeline clock back to it.
+		if (activeVideoClipId) {
+			const active = track.clips.find(c => c.id === activeVideoClipId);
+			if (active && s >= active.sourceStart - 0.05 && s < active.sourceEnd + 0.05) {
+				return active.startTime + (s - active.sourceStart);
+			}
+		}
 		const clips = [...track.clips].sort((a, b) => a.sourceStart - b.sourceStart);
 		const clip = clips.find(c => s >= c.sourceStart && s < c.sourceEnd);
 		if (!clip) return null;
@@ -420,22 +502,29 @@
 		seekTo(Math.max(0, pt(scrollEl.scrollLeft + scrollEl.clientWidth / 2)));
 	}
 
+	let seekToken = 0;
 	function seekTo(t: number) {
-		activeVideoClipId = null;
+		// Track which clip the seek lands in — duplicates share source ranges, so
+		// editTime needs the clip identity to map source→timeline unambiguously.
+		activeVideoClipId = getVideoClipsSorted().find(c => t >= c.startTime && t < c.endTime)?.id ?? null;
 		inVideoGap = false;
 		manualPlaying = false;
+		// Own the playhead immediately — element seeks are async (and slow over the
+		// proxy), so reading the position back mid-seek snaps the cursor to wherever
+		// the element still is (it was getting pinned at the previous clip boundary).
+		manualCursor = t;
+		const token = ++seekToken;
 		const srcT = timelineToSource(t);
 		if (videoElement && srcT !== null) {
 			videoElement.currentTime = srcT;
-			// Update immediately so editTime snaps to t without waiting for timeupdate
 			videoState.setCurrentTime(srcT);
-			manualCursor = null;
-			syncSecondaries(false);
-		} else {
-			// Outside all primary clips (gap or secondary-only zone)
-			manualCursor = t;
-			syncSecondaries(false);
+			// Hand the cursor back to element-tracking once this seek actually lands
+			// (a newer seek/drag supersedes it via the token).
+			videoElement.addEventListener('seeked', () => {
+				if (token === seekToken && !manualPlaying && !inVideoGap) manualCursor = null;
+			}, { once: true });
 		}
+		syncSecondaries(false);
 	}
 
 	// ── PLAYHEAD DRAG ───────────────────────────────────────────────
@@ -446,6 +535,23 @@
 				const rectLeft = scrollEl.getBoundingClientRect().left;
 				const t = Math.max(0, pt(x - rectLeft + scrollEl.scrollLeft));
 				seekTo(t);
+			},
+			() => {}
+		);
+		e.stopPropagation(); e.preventDefault();
+	}
+
+	// ── TRACK DRAG REORDER (video layer priority) ───────────────────
+	function startTrackDrag(e: MouseEvent | TouchEvent, track: TimelineTrack) {
+		const y0 = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
+		const origPos = timeline.tracks.filter(t => t.type === 'video').findIndex(t => t.id === track.id);
+		if (origPos === -1) return;
+		timelineStore.setActiveTrack(track.id);
+		attachDrag(
+			(_x, y) => {
+				// Live-reorder: target slot from vertical distance dragged. Anchored to
+				// the original position so repeated moves stay idempotent mid-drag.
+				timelineStore.moveVideoTrackTo(track.id, origPos + Math.round((y - y0) / TRACK_H));
 			},
 			() => {}
 		);
@@ -513,10 +619,17 @@
 		activeClipId = clip.id;
 		timelineStore.setActiveTrack(track.id);
 		const x0 = cx(e); const start0 = clip.startTime; const dur = clip.endTime - clip.startTime;
+		const y0 = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
+		const origPos = timeline.tracks.filter(t => t.type === 'video').findIndex(t => t.id === track.id);
 		attachDrag(
-			(x) => {
+			(x, y) => {
 				const s = Math.max(0, start0 + (x - x0) / pixelsPerSecond);
 				timelineStore.updateClip(track.id, clip.id, { startTime: s, endTime: s + dur });
+				// Vertical drag across rows re-layers the track (standard NLE behavior).
+				// Anchored to the original position so live reordering stays idempotent.
+				if (origPos !== -1) {
+					timelineStore.moveVideoTrackTo(track.id, origPos + Math.round((y - y0) / TRACK_H));
+				}
 			},
 			() => {}
 		);
@@ -539,10 +652,22 @@
 
 	function startVideoResizeEnd(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
 		const x0 = cx(e); const end0 = clip.endTime; const sourceEnd0 = clip.sourceEnd;
+		// Clip length is bounded by its own source media, not the main video's
+		// duration (export follows the timeline now). Images have no intrinsic
+		// length — they extend freely.
+		const asset = $mediaBinStore.assets.find(a => a.id === track.assetId);
+		const isImage = asset?.type === 'image';
+		const srcDuration = asset?.duration ?? videoDuration;
 		attachDrag(
 			(x) => {
-				const newEnd    = Math.max(clip.startTime + 0.1, Math.min(videoDuration, end0 + (x - x0) / pixelsPerSecond));
-				const newSrcEnd = Math.min(videoDuration, sourceEnd0 + (newEnd - end0));
+				let newEnd    = Math.max(clip.startTime + 0.1, end0 + (x - x0) / pixelsPerSecond);
+				let newSrcEnd = sourceEnd0 + (newEnd - end0);
+				if (isImage) {
+					newSrcEnd = newEnd - clip.startTime;
+				} else if (newSrcEnd > srcDuration) {
+					newEnd   -= newSrcEnd - srcDuration;
+					newSrcEnd = srcDuration;
+				}
 				timelineStore.updateClip(track.id, clip.id, { endTime: newEnd, sourceEnd: newSrcEnd });
 			},
 			() => {}
@@ -742,6 +867,16 @@
 					>
 						<!-- Track colour dot -->
 						<div style="width:5px;height:5px;border-radius:50%;background:{track.color};flex-shrink:0;"></div>
+						<!-- Drag to reorder video layer priority (top = primary, supersedes below) -->
+						{#if track.type === 'video' && timeline.tracks.filter(t => t.type === 'video').length > 1}
+							<button
+								onmousedown={(e) => startTrackDrag(e, track)}
+								ontouchstart={(e) => startTrackDrag(e, track)}
+								onclick={(e) => e.stopPropagation()}
+								title="Drag up/down to reorder layer (top = shown on top)"
+								style="width:14px;height:22px;border-radius:3px;background:rgba(55,65,81,0.6);border:1px solid rgba(255,255,255,0.1);color:rgba(156,163,175,1);cursor:grab;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;"
+							>≡</button>
+						{/if}
 						<!-- Volume spinner -->
 						<div style="display:flex;flex-direction:column;align-items:center;gap:0px;flex:1;min-width:0;">
 							<span style="font-size:7px;color:rgba(107,114,128,1);text-transform:uppercase;letter-spacing:0.04em;line-height:1;">vol</span>
@@ -760,7 +895,7 @@
 								e.stopPropagation();
 								const newMuted = !track.muted;
 								timelineStore.muteTrack(track.id, newMuted);
-								if (track.type === 'video') audioStudioStore.setOriginalMuted(newMuted);
+								if (track.type === 'video' && track.assetId === mainVideoAssetId) audioStudioStore.setOriginalMuted(newMuted);
 							}}
 							style="width:16px;height:16px;border-radius:3px;background:{track.muted ? 'rgba(239,68,68,0.3)' : 'rgba(55,65,81,0.6)'};border:1px solid rgba(255,255,255,0.1);color:{track.muted ? 'rgba(239,68,68,1)' : 'rgba(156,163,175,1)'};cursor:pointer;font-size:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
 							title={track.muted ? 'Unmute' : 'Mute'}

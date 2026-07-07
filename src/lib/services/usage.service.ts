@@ -103,7 +103,7 @@ export async function checkUsage(userId: string, type: GenerationType): Promise<
 	};
 }
 
-export async function incrementUsage(userId: string, type: GenerationType): Promise<void> {
+export async function incrementUsage(userId: string, type: GenerationType, count = 1): Promise<void> {
 	const plan = await getUserPlan(userId);
 	const dateKey = getDateKey(plan);
 	const docId = getUsageDocId(userId, dateKey);
@@ -115,14 +115,14 @@ export async function incrementUsage(userId: string, type: GenerationType): Prom
 		await usageRef.set({
 			userId,
 			date: dateKey,
-			imagesGenerated: type === 'image' ? 1 : 0,
-			videosGenerated: type === 'video' ? 1 : 0,
+			imagesGenerated: type === 'image' ? count : 0,
+			videosGenerated: type === 'video' ? count : 0,
 			lastGenerationAt: Timestamp.now()
 		});
 	} else {
 		const field = type === 'image' ? 'imagesGenerated' : 'videosGenerated';
 		await usageRef.update({
-			[field]: FieldValue.increment(1),
+			[field]: FieldValue.increment(count),
 			lastGenerationAt: Timestamp.now()
 		});
 	}

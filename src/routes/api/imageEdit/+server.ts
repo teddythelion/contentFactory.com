@@ -1,13 +1,20 @@
 import { GoogleGenAI } from '@google/genai';
 import { GEMINI_API_KEY } from '$env/static/private';
 import sharp from 'sharp';
-import { checkUsage, incrementUsage } from '$lib/services/usage.service';
+import { checkUsage, incrementUsage, getUserPlan } from '$lib/services/usage.service';
+import { TIER_CONFIG, type ImageSize } from '$lib/types/subscription';
 
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-const IMAGE_MODEL = 'gemini-2.5-flash-image';
+// Nano Banana 2 family. Lite is fastest/cheapest but not optimized for reference
+// images or sequential editing — only used for free-tier prompt-only generations.
+const IMAGE_MODEL = 'gemini-3.1-flash-image';           // Nano Banana 2 — workhorse
+const IMAGE_MODEL_LITE = 'gemini-3.1-flash-lite-image'; // Nano Banana 2 Lite — 1K only
+const IMAGE_MODEL_PRO = 'gemini-3-pro-image';           // Nano Banana Pro — premium toggle
 
-//const IMAGE_MODEL = 'gemini-3-pro-image-preview';
+const VALID_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+const SIZE_LADDER: ImageSize[] = ['1K', '2K', '4K'];
+
 const VISION_MODEL = 'gemini-2.5-flash';
 
 /* =========================================================
@@ -255,17 +262,25 @@ Valid subjectType values: person, product, place, object, animal, unknown`
 async function editWithNanoBananaPro(params: {
 	imageBuffers: Buffer[];
 	prompt: string;
+	model?: string;
+	aspectRatio?: string;
+	imageSize?: ImageSize;
 }): Promise<ImageOut> {
 	const parts: any[] = [{ text: params.prompt }];
 	for (const buf of params.imageBuffers) {
 		parts.push(bufferToInlinePart(buf));
 	}
 
+	const imageConfig: Record<string, string> = {};
+	if (params.aspectRatio) imageConfig.aspectRatio = params.aspectRatio;
+	if (params.imageSize) imageConfig.imageSize = params.imageSize;
+
 	const result = await ai.models.generateContent({
-		model: IMAGE_MODEL,
+		model: params.model ?? IMAGE_MODEL,
 		contents: [{ role: 'user', parts }],
 		config: {
-			responseModalities: ['TEXT', 'IMAGE']
+			responseModalities: ['TEXT', 'IMAGE'],
+			...(Object.keys(imageConfig).length > 0 ? { imageConfig } : {})
 		}
 	});
 
@@ -354,21 +369,65 @@ export async function POST({ request, locals }: { request: Request; locals: any 
 			});
 		}
 
+		// ── Plan-gated generation options ────────────────────────────────
+		const plan = await getUserPlan(userId);
+		const tier = TIER_CONFIG[plan];
+
+		const reqAspect = formData.get('aspectRatio') as string | null;
+		const aspectRatio = reqAspect && VALID_ASPECT_RATIOS.includes(reqAspect) ? reqAspect : undefined;
+
+		// Size: omitted = model default (pre-existing behavior). When requested,
+		// clamp to the tier's ceiling — server enforces regardless of client UI.
+		const reqSize = formData.get('imageSize') as string | null;
+		let imageSize: ImageSize | undefined;
+		if (reqSize && SIZE_LADDER.includes(reqSize as ImageSize)) {
+			const tierMaxIdx = SIZE_LADDER.indexOf(tier.maxImageSize);
+			const reqIdx = SIZE_LADDER.indexOf(reqSize as ImageSize);
+			imageSize = SIZE_LADDER[Math.min(reqIdx, tierMaxIdx)];
+		}
+
+		// Model: premium toggle (pro plan) → Nano Banana Pro; free prompt-only → Lite
+		// (Lite is not optimized for reference inputs); everything else → NB2 flash.
+		const premium = formData.get('quality') === 'premium' && tier.canUsePremiumImage;
+		const model = premium
+			? IMAGE_MODEL_PRO
+			: imageFiles.length === 0 && plan === 'free'
+				? IMAGE_MODEL_LITE
+				: IMAGE_MODEL;
+		if (model === IMAGE_MODEL_LITE) imageSize = undefined; // Lite only does 1K — its default
+		if (imageSize === '4K' && !premium) imageSize = '2K'; // 4K requires the premium model
+
+		// Variants: parallel candidates — each is billed and counts against quota
+		const reqVariants = parseInt((formData.get('variants') as string) || '1') || 1;
+		let variants = Math.max(1, Math.min(reqVariants, tier.maxImageVariants));
+		if (usageCheck.imagesRemaining >= 0) {
+			variants = Math.min(variants, Math.max(1, usageCheck.imagesRemaining));
+		}
+
+		const genOpts = { model, aspectRatio, imageSize };
+		console.log(`🖼️ ${model} | ${aspectRatio ?? 'auto'} @ ${imageSize ?? 'default'} ×${variants} | plan:${plan} | refs:${imageFiles.length}`);
+
 		// 1) Normalize primary to PNG
 		if (imageFiles.length === 0) {
-			// Prompt-only generation
-			const out = await editWithNanoBananaPro({
-				imageBuffers: [],
-				prompt: `${PHOTOREALISTIC_ENHANCEMENT_SYSTEM_PROMPT}\n\nUSER REQUEST:\n${userPrompt}\n\nCommercial-grade realism. Crisp detail. Accurate materials. Plausible lighting.`
-			});
+			// Prompt-only generation — N parallel variants
+			const outs = await Promise.all(
+				Array.from({ length: variants }, () =>
+					editWithNanoBananaPro({
+						imageBuffers: [],
+						prompt: `${PHOTOREALISTIC_ENHANCEMENT_SYSTEM_PROMPT}\n\nUSER REQUEST:\n${userPrompt}\n\nCommercial-grade realism. Crisp detail. Accurate materials. Plausible lighting.`,
+						...genOpts
+					})
+				)
+			);
 
-			await incrementUsage(userId, 'image');
+			await incrementUsage(userId, 'image', outs.length);
 			return new Response(
 				JSON.stringify({
 					success: true,
-					imageUrl: out.dataUrl,
+					imageUrl: outs[0].dataUrl,
+					imageUrls: outs.map((o) => o.dataUrl),
 					mode: 'prompt-only',
-					model: 'nano-banana-pro',
+					model,
 					imagesUsed: 0
 				}),
 				{ headers: { 'Content-Type': 'application/json' } }
@@ -422,10 +481,11 @@ export async function POST({ request, locals }: { request: Request; locals: any 
 		/* ---- HUMAN PIPELINE ---- */
 
 		if (isHuman) {
-			// Stabilization pass
+			// Stabilization pass — once, shared across variants
 			const stabilized = await editWithNanoBananaPro({
 				imageBuffers: [primaryBuffer],
-				prompt: `${IDENTITY_LOCK_SYSTEM_PROMPT}\n\nTASK: Faithfully reconstruct this reference image. Change nothing. No beautification, no stylization. Pixel-level identity fidelity.`
+				prompt: `${IDENTITY_LOCK_SYSTEM_PROMPT}\n\nTASK: Faithfully reconstruct this reference image. Change nothing. No beautification, no stylization. Pixel-level identity fidelity.`,
+				...genOpts
 			});
 
 			const stabSim = await checkLikeness({
@@ -434,32 +494,38 @@ export async function POST({ request, locals }: { request: Request; locals: any 
 			});
 			console.log('Stabilization:', stabSim.similarityScore, stabSim.notes);
 
-			// Edit pass
+			// Edit pass — each variant generated + likeness-checked (+ retried) independently
 			const editPrompt = `${IDENTITY_LOCK_SYSTEM_PROMPT}\n\n${compositeGuidance ? `COMPOSITING:\n${compositeGuidance}\n\n` : ''}USER REQUEST:\n${userPrompt}\n\nFace is PROTECTED. Apply edits everywhere else. Maintain photorealism.`;
 
-			let final = await editWithNanoBananaPro({ imageBuffers: allBuffers, prompt: editPrompt });
-			let sim = await checkLikeness({ referenceBuffer: primaryBuffer, candidateB64: final.b64 });
-			console.log('Final:', sim.similarityScore, sim.notes);
+			const genVariant = async () => {
+				let final = await editWithNanoBananaPro({ imageBuffers: allBuffers, prompt: editPrompt, ...genOpts });
+				let sim = await checkLikeness({ referenceBuffer: primaryBuffer, candidateB64: final.b64 });
 
-			// Retry if drifted
-			if (sim.similarityScore < 85) {
-				const retryPrompt = `${IDENTITY_LOCK_SYSTEM_PROMPT}\n\n${compositeGuidance ? `COMPOSITING:\n${compositeGuidance}\n\n` : ''}USER REQUEST:\n${userPrompt}\n\nCRITICAL RETRY: Previous attempt drifted. The person MUST be unmistakably identical. Be extremely conservative.`;
+				// Retry if drifted
+				if (sim.similarityScore < 85) {
+					const retryPrompt = `${IDENTITY_LOCK_SYSTEM_PROMPT}\n\n${compositeGuidance ? `COMPOSITING:\n${compositeGuidance}\n\n` : ''}USER REQUEST:\n${userPrompt}\n\nCRITICAL RETRY: Previous attempt drifted. The person MUST be unmistakably identical. Be extremely conservative.`;
 
-				final = await editWithNanoBananaPro({ imageBuffers: allBuffers, prompt: retryPrompt });
-				sim = await checkLikeness({ referenceBuffer: primaryBuffer, candidateB64: final.b64 });
-				console.log('Retry:', sim.similarityScore, sim.notes);
-			}
+					final = await editWithNanoBananaPro({ imageBuffers: allBuffers, prompt: retryPrompt, ...genOpts });
+					sim = await checkLikeness({ referenceBuffer: primaryBuffer, candidateB64: final.b64 });
+				}
+				return { final, sim };
+			};
 
-			await incrementUsage(userId, 'image');
+			const results = await Promise.all(Array.from({ length: variants }, genVariant));
+			results.forEach((r, i) => console.log(`Variant ${i}:`, r.sim.similarityScore, r.sim.notes));
+
+			await incrementUsage(userId, 'image', results.length);
 			return new Response(
 				JSON.stringify({
 					success: true,
-					imageUrl: final.dataUrl,
+					imageUrl: results[0].final.dataUrl,
+					imageUrls: results.map((r) => r.final.dataUrl),
 					mode: 'identity-lock',
-					model: 'nano-banana-pro',
+					model,
 					imagesUsed: imageFiles.length,
 					faceProtected: true,
-					similarity: sim,
+					similarity: results[0].sim,
+					similarities: results.map((r) => r.sim),
 					stabilizationSimilarity: stabSim
 				}),
 				{ headers: { 'Content-Type': 'application/json' } }
@@ -468,18 +534,24 @@ export async function POST({ request, locals }: { request: Request; locals: any 
 
 		/* ---- NON-HUMAN PIPELINE ---- */
 
-		const out = await editWithNanoBananaPro({
-			imageBuffers: allBuffers,
-			prompt: `${PHOTOREALISTIC_ENHANCEMENT_SYSTEM_PROMPT}\n\n${compositeGuidance ? `COMPOSITING:\n${compositeGuidance}\n\n` : ''}USER REQUEST:\n${userPrompt}\n\nCommercial-grade realism. Crisp detail. Accurate materials. Plausible lighting.`
-		});
+		const outs = await Promise.all(
+			Array.from({ length: variants }, () =>
+				editWithNanoBananaPro({
+					imageBuffers: allBuffers,
+					prompt: `${PHOTOREALISTIC_ENHANCEMENT_SYSTEM_PROMPT}\n\n${compositeGuidance ? `COMPOSITING:\n${compositeGuidance}\n\n` : ''}USER REQUEST:\n${userPrompt}\n\nCommercial-grade realism. Crisp detail. Accurate materials. Plausible lighting.`,
+					...genOpts
+				})
+			)
+		);
 
-		await incrementUsage(userId, 'image');
+		await incrementUsage(userId, 'image', outs.length);
 		return new Response(
 			JSON.stringify({
 				success: true,
-				imageUrl: out.dataUrl,
+				imageUrl: outs[0].dataUrl,
+				imageUrls: outs.map((o) => o.dataUrl),
 				mode: 'photorealistic',
-				model: 'nano-banana-pro',
+				model,
 				imagesUsed: imageFiles.length
 			}),
 			{ headers: { 'Content-Type': 'application/json' } }

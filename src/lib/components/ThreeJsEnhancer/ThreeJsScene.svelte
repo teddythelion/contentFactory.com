@@ -38,6 +38,11 @@
 	let compositeTexture: THREE.CanvasTexture | null = null;
 	// assetId → HTMLVideoElement for all secondary sources
 	let secondaryVideoElements: Map<string, HTMLVideoElement> = new Map();
+	// assetId → HTMLImageElement for static image clips (drawn like a frozen video)
+	let imageElements: Map<string, HTMLImageElement> = new Map();
+	// The main video's media-bin asset id — its track can be reordered below other
+	// video tracks, so "primary element" and "first video track" are decoupled.
+	let mainVideoAssetId: string | null = null;
 	let compositeLayout: 'single' | 'split-h' | 'split-v' | 'pip-tr' | 'pip-bl' | 'grid' = 'single';
 
 	let ambientLight: THREE.AmbientLight | null = null;
@@ -195,6 +200,7 @@
 			if (compositeTexture) { compositeTexture.dispose(); compositeTexture = null; }
 			for (const [, el] of secondaryVideoElements) { el.pause(); el.src = ''; el.load(); }
 			secondaryVideoElements.clear();
+			imageElements.clear();
 
 			if (renderer) { renderer.dispose(); renderer.forceContextLoss(); renderer = null; }
 
@@ -221,6 +227,7 @@
 			(window as any).__threeJsUpdateScene = null;
 			(window as any).__threeJsDrawComposite = null;
 			(window as any).__threeJsSeekSecondaries = null;
+			(window as any).__threeJsMainVideoAssetId = null;
 			(window as any).__threeJsVideoTexture = null;
 			threeJsState.setSceneReady(false);
 
@@ -265,7 +272,9 @@
 		// they were paused on. Assigning an unchanged currentTime never fires 'seeked',
 		// hence the diff check; the timeout covers stalled decodes so capture can't hang.
 		(window as any).__threeJsSeekSecondaries = async (t: number) => {
-			const tracks = $timelineStore.tracks.filter((tr) => tr.type === 'video').slice(1);
+			const tracks = $timelineStore.tracks.filter(
+				(tr) => tr.type === 'video' && tr.assetId !== mainVideoAssetId
+			);
 			const waits: Promise<void>[] = [];
 			for (const tr of tracks) {
 				const el = secondaryVideoElements.get(tr.assetId ?? '');
@@ -377,6 +386,9 @@
 				previewUrl: videoUrl,
 				duration: vidDuration
 			});
+			mainVideoAssetId = videoAssetId;
+			// Capture reads this to map timeline time → main-video source time
+			(window as any).__threeJsMainVideoAssetId = videoAssetId;
 			timelineStore.addVideoTrack(videoAssetId, 'Main Video', vidDuration);
 		});
 
@@ -505,10 +517,10 @@
 
 	// ── COMPOSITE FRAME ──────────────────────────────────────────────
 
-	// Draws a video element letterboxed (contain-fit) into a canvas slot.
-	function drawContain(src: HTMLVideoElement, x: number, y: number, w: number, h: number) {
-		const iw = src.videoWidth || 1;
-		const ih = src.videoHeight || 1;
+	// Draws a video or image element letterboxed (contain-fit) into a canvas slot.
+	function drawContain(src: HTMLVideoElement | HTMLImageElement, x: number, y: number, w: number, h: number) {
+		const iw = (src instanceof HTMLVideoElement ? src.videoWidth : src.naturalWidth) || 1;
+		const ih = (src instanceof HTMLVideoElement ? src.videoHeight : src.naturalHeight) || 1;
 		const scale = Math.min(w / iw, h / ih);
 		const sw = iw * scale;
 		const sh = ih * scale;
@@ -521,14 +533,35 @@
 		const h = compositeCanvas.height;
 		compositeCtx.clearRect(0, 0, w, h);
 
-		// Show secondary regardless of paused state — show current frame even when paused
-		const videoTracks = $timelineStore.tracks.filter(t => t.type === 'video');
-		const secondaries = videoTracks.slice(1)
-			.map(t => secondaryVideoElements.get(t.assetId ?? ''))
-			.filter((el): el is HTMLVideoElement => !!el && el.readyState >= 2);
+		// Timeline moment currently shown — published by TimelineEditor's rAF loop.
+		// Falls back to the main element's own time (identity mapping) if no editor.
+		const now: number = (window as any).__timelineEditTime ?? videoElement.currentTime;
 
-		// Don't draw primary when it has ended — show black in its slot so secondary keeps showing
-		const primary = videoElement.readyState >= 2 && !videoElement.ended ? videoElement : null;
+		// Track order defines layer priority: the first video track fills the primary
+		// slot, so promoting/demoting tracks reorders what supersedes what. Selection
+		// is time-aware — only tracks with a clip covering this moment are drawn; a
+		// paused element holds its last decoded frame and would otherwise paint over
+		// lower layers anywhere on the timeline. Main video maps to videoElement,
+		// every other track via secondaryVideoElements; main is skipped once ended.
+		const orderedEls: Array<HTMLVideoElement | HTMLImageElement> = [];
+		for (const tr of $timelineStore.tracks) {
+			if (tr.type !== 'video') continue;
+			if (!tr.clips.some((c) => now >= c.startTime - 0.05 && now < c.endTime + 0.05)) continue;
+			const el: HTMLVideoElement | HTMLImageElement | null | undefined =
+				tr.assetId === mainVideoAssetId
+					? videoElement
+					: secondaryVideoElements.get(tr.assetId ?? '') ?? imageElements.get(tr.assetId ?? '');
+			if (!el) continue;
+			if (el instanceof HTMLVideoElement) {
+				if (el.readyState < 2) continue;
+				if (el === videoElement && el.ended) continue;
+			} else if (!el.complete || !el.naturalWidth) {
+				continue;
+			}
+			orderedEls.push(el);
+		}
+		const primary = orderedEls[0] ?? null;
+		const secondaries = orderedEls.slice(1);
 
 		switch (compositeLayout) {
 			case 'single':
@@ -575,25 +608,50 @@
 		return el;
 	}
 
-	function addSecondaryVideo() {
+	function addSecondaryClip() {
 		const input = document.createElement('input');
 		input.type = 'file';
-		input.accept = 'video/*';
+		input.accept = 'video/*,image/*';
 		input.onchange = () => {
 			const file = input.files?.[0];
 			if (!file) return;
 			const url = URL.createObjectURL(file);
+			const name = file.name.replace(/\.[^.]+$/, '');
+
+			if (file.type.startsWith('image/')) {
+				// Static image clip — default 4s, drag/resize on the timeline like any clip
+				const img = new Image();
+				img.onload = () => {
+					const duration = 4;
+					const assetId = mediaBinStore.addAsset({ type: 'image', name, sessionId: null, previewUrl: url, duration });
+					imageElements.set(assetId, img);
+					imageElements = new Map(imageElements);
+					timelineStore.addVideoTrack(assetId, name, duration, 0);
+				};
+				img.src = url;
+				return;
+			}
+
 			const probe = document.createElement('video');
 			probe.src = url;
 			probe.onloadedmetadata = () => {
 				const duration = probe.duration;
-				const name = file.name.replace(/\.[^.]+$/, '');
 				const assetId = mediaBinStore.addAsset({ type: 'video', name, sessionId: null, previewUrl: url, duration });
 				const el = makeVideoElement(url, true);
 				secondaryVideoElements.set(assetId, el);
 				secondaryVideoElements = new Map(secondaryVideoElements);
 				// Place clip at t=0 to overlay with primary for compositing
 				timelineStore.addVideoTrack(assetId, name, duration, 0);
+				// Extract the clip's audio server-side so export can mux it — the
+				// asset's sessionId carries the audio session (null = clip is silent).
+				const fd = new FormData();
+				fd.append('videoFile', file);
+				fetch('/api/extractAudio', { method: 'POST', body: fd })
+					.then((r) => (r.ok ? r.json() : null))
+					.then((d) => {
+						if (d?.audioSessionId) mediaBinStore.updateAsset(assetId, { sessionId: d.audioSessionId });
+					})
+					.catch(() => {});
 			};
 		};
 		input.click();
@@ -952,9 +1010,8 @@
 		<div class="pointer-events-none absolute inset-0 bg-black" style="opacity: {fadeOverlayOpacity};"></div>
 	{/if}
 
-	{#if $videoState.inVideoGap && !(window as any).__threeJsCapturing}
-		<div class="pointer-events-none absolute inset-0 bg-black" style="z-index:4;"></div>
-	{/if}
+	<!-- Gap overlay removed — the time-aware compositor decides what's visible;
+	     a primary-track gap can still have secondary/image clips playing. -->
 
 	{#if videoElement && !(window as any).__threeJsCapturing}
 		<!-- Composite layout controls + add-clip button -->
@@ -968,15 +1025,15 @@
 			{/each}
 			<div style="width:1px;height:20px;background:rgba(255,255,255,0.15);margin:0 2px;"></div>
 			<button
-				on:click={addSecondaryVideo}
-				title="Add clip from file"
+				on:click={addSecondaryClip}
+				title="Add video or image clip from file"
 				style="height:26px;padding:0 8px;border-radius:4px;border:1px solid rgba(99,102,241,0.6);background:rgba(99,102,241,0.25);color:white;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;"
 			>+ Clip</button>
 		</div>
 
 		<div class="absolute bottom-0 left-0 right-0 flex flex-col gap-1 bg-black/90 backdrop-blur-sm p-1">
 			<MediaBin />
-			<TimelineEditor {videoElement} {secondaryVideoElements} />
+			<TimelineEditor {videoElement} {secondaryVideoElements} {mainVideoAssetId} />
 		</div>
 	{/if}
 </div>

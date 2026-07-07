@@ -38,6 +38,17 @@ function getTempBase(): string {
 }
 
 interface SfxInstance { startTime: number; endTime: number; }
+// Per-clip audio segment: a window of a server-side audio-{sessionId}.aac file
+// placed at a timeline offset (moved/trimmed main audio + secondary clip audio).
+interface ClipAudio {
+	sessionId: string;
+	timelineStart: number;
+	sourceStart: number;
+	duration: number;
+	volume: number;
+	fadeIn: number;
+	fadeOut: number;
+}
 
 async function runEncode(
 	sessionId: string,
@@ -64,7 +75,8 @@ async function runEncode(
 	originalFadeIn: number,
 	originalFadeOut: number,
 	videoFadeIn: number,
-	videoFadeOut: number
+	videoFadeOut: number,
+	clipAudios: ClipAudio[]
 ) {
 	const baseTemp = getTempBase();
 	const sessionDir = path.join(baseTemp, `session-${sessionId}`);
@@ -122,10 +134,19 @@ async function runEncode(
 		const hasSfx = sfxSessionId && await validFile(sfxFile);
 		const hasMusic = musicSessionId && await validFile(musicFile);
 
-		const hasAnyAudioOutput = (hasAudio && !suppressOriginalAudio) || hasSfx || hasMusic;
+		// Clip audio segments whose source files actually exist on disk
+		const validClipAudios: ClipAudio[] = [];
+		for (const ca of clipAudios) {
+			if (ca?.sessionId && await validFile(path.join(audioDir, `audio-${ca.sessionId}.aac`))) {
+				validClipAudios.push(ca);
+			}
+		}
+
+		const hasAnyAudioOutput =
+			(hasAudio && !suppressOriginalAudio) || hasSfx || hasMusic || validClipAudios.length > 0;
 
 		if (hasAnyAudioOutput) {
-			console.log(`🎚️ Muxing audio — original:${hasAudio} sfx:${hasSfx} music:${hasMusic}`);
+			console.log(`🎚️ Muxing audio — original:${hasAudio} sfx:${hasSfx} music:${hasMusic} clips:${validClipAudios.length}`);
 
 			const inputs: string[] = [`"${FFMPEG_PATH}" -i "${silentOutputPath}"`];
 			let inputIndex = 1;
@@ -198,6 +219,26 @@ async function runEncode(
 				});
 				inputIndex++;
 			}
+
+			// Per-clip audio segments: trim the source window, re-zero PTS, then
+			// delay into the clip's timeline slot before mixing.
+			validClipAudios.forEach((ca, i) => {
+				inputs.push(`-i "${path.join(audioDir, `audio-${ca.sessionId}.aac`)}"`);
+				const filters: string[] = [
+					`atrim=start=${ca.sourceStart.toFixed(3)}:end=${(ca.sourceStart + ca.duration).toFixed(3)}`,
+					`asetpts=PTS-STARTPTS`,
+					`volume=${ca.volume}`
+				];
+				if (ca.fadeIn > 0) filters.push(`afade=t=in:st=0:d=${ca.fadeIn}`);
+				if (ca.fadeOut > 0) {
+					filters.push(`afade=t=out:st=${Math.max(0, ca.duration - ca.fadeOut).toFixed(3)}:d=${ca.fadeOut}`);
+				}
+				filters.push(`adelay=${Math.round(ca.timelineStart * 1000)}:all=1`);
+				const outLabel = `[clip${i}]`;
+				filterParts.push(`[${inputIndex}:a]${filters.join(',')}${outLabel}`);
+				mixLabels.push(outLabel);
+				inputIndex++;
+			});
 
 			// Build per-stream filter chains: trim → volume → afade in → afade out → label
 
@@ -383,7 +424,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		originalFadeIn = 0,
 		originalFadeOut = 0,
 		videoFadeIn = 0,
-		videoFadeOut = 0
+		videoFadeOut = 0,
+		clipAudios = [] as ClipAudio[]
 	} = body;
 
 	if (!userId) {
@@ -419,7 +461,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		originalFadeIn,
 		originalFadeOut,
 		videoFadeIn,
-		videoFadeOut
+		videoFadeOut,
+		clipAudios
 	);
 
 	return new Response(JSON.stringify({ success: true, jobId: sessionId }), {

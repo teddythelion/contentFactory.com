@@ -13,12 +13,14 @@
 
 	const TYPE_ICON: Record<string, string> = {
 		video: '🎬',
+		image: '🖼️',
 		music: '🎵',
 		sfx:   '🔊',
 		voice: '🎤'
 	};
 	const TYPE_COLOR: Record<string, string> = {
 		video: 'rgba(75,85,99,0.7)',
+		image: 'rgba(16,185,129,0.7)',
 		music: 'rgba(147,51,234,0.7)',
 		sfx:   'rgba(37,99,235,0.7)',
 		voice: 'rgba(249,115,22,0.7)'
@@ -32,7 +34,7 @@
 	function placeOnNewTrack() {
 		if (!armedAsset) return;
 		const a = armedAsset;
-		if (a.type === 'video') {
+		if (a.type === 'video' || a.type === 'image') {
 			timelineStore.addVideoTrack(a.id, a.name, a.duration);
 		} else if (a.type === 'music') {
 			timelineStore.addMusicTrack(a.id, a.name, a.sessionId ?? a.id, 0, a.duration);

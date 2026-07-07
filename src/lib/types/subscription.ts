@@ -6,6 +6,8 @@ import type { Timestamp } from 'firebase/firestore';
 
 export type PlanTier = 'free' | 'starter' | 'pro';
 
+export type ImageSize = '1K' | '2K' | '4K';
+
 export interface TierLimits {
 	maxImages: number;           // -1 = unlimited
 	maxVideos: number;           // -1 = unlimited
@@ -16,21 +18,27 @@ export interface TierLimits {
 	canExtend: boolean;          // video extension (pro only)
 	canUsePremiumQuality: boolean; // veo-3.1-generate-preview (pro only)
 	videoModel: string;          // default model for this tier
+	maxImageVariants: number;    // parallel candidates per image prompt (each bills + counts)
+	maxImageSize: ImageSize;     // generation size ceiling (1K/2K/4K)
+	canUsePremiumImage: boolean; // gemini-3-pro-image toggle (pro only)
 }
 
 const FREE_VIDEO_MODEL = 'veo-3.1-lite-generate-preview';
 
 export const TIER_CONFIG: Record<PlanTier, TierLimits> = {
 	free: {
-		maxImages: 2,
+		maxImages: 3,
 		maxVideos: 2,
-		period: 'daily',
+		period: 'monthly',
 		enhancerAccess: true,
 		libraryAccess: true,
 		storageLimit: 5368709120,
 		canExtend: false,
 		canUsePremiumQuality: false,
-		videoModel: FREE_VIDEO_MODEL
+		videoModel: FREE_VIDEO_MODEL,
+		maxImageVariants: 1,
+		maxImageSize: '1K',
+		canUsePremiumImage: false
 	},
 	starter: {
 		maxImages: 20,
@@ -41,7 +49,10 @@ export const TIER_CONFIG: Record<PlanTier, TierLimits> = {
 		storageLimit: 5368709120,
 		canExtend: false,
 		canUsePremiumQuality: false,
-		videoModel: 'veo-3.1-fast-generate-preview'
+		videoModel: 'veo-3.1-fast-generate-preview',
+		maxImageVariants: 2,
+		maxImageSize: '2K',
+		canUsePremiumImage: false
 	},
 	pro: {
 		maxImages: 100,
@@ -52,7 +63,10 @@ export const TIER_CONFIG: Record<PlanTier, TierLimits> = {
 		storageLimit: 5368709120,
 		canExtend: true,
 		canUsePremiumQuality: true,
-		videoModel: 'veo-3.1-fast-generate-preview' // premium toggle upgrades to veo-3.1-generate-preview
+		videoModel: 'veo-3.1-fast-generate-preview', // premium toggle upgrades to veo-3.1-generate-preview
+		maxImageVariants: 4,
+		maxImageSize: '4K',
+		canUsePremiumImage: true
 	}
 };
 
