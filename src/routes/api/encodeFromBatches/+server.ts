@@ -93,6 +93,22 @@ async function runEncode(
 		}
 
 		const audioDir = path.join(getTempBase(), 'audio');
+
+		// ── Frame continuity check ───────────────────────────────────────────
+		// FFmpeg's image2 demuxer stops at the first numbering gap, silently
+		// truncating the video while full-length audio muxes over it. Fail loudly
+		// instead so a broken upload is visible, not a mystery blank video.
+		const present = new Set(await readdir(sessionDir).catch(() => [] as string[]));
+		const missing: number[] = [];
+		for (let i = 0; i < totalFrames; i++) {
+			if (!present.has(`frame-${String(i).padStart(6, '0')}.jpg`)) missing.push(i);
+		}
+		if (missing.length > 0) {
+			throw new Error(
+				`Frame gap: ${missing.length}/${totalFrames} frames missing (first at ${missing[0]} ≈ ${(missing[0] / fps).toFixed(1)}s). Upload incomplete — capture again.`
+			);
+		}
+
 		// ── PASS 1: Encode frames to silent MP4 ──────────────────────────────
 		const outDuration = totalFrames / fps;
 		const vfFilters: string[] = [`scale=trunc(${outWidth}/2)*2:trunc(${outHeight}/2)*2`];

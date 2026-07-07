@@ -150,6 +150,10 @@ export async function captureThreeJsVideo(
 
 		const sessionId = Date.now().toString();
 		let batchNumber = 0;
+		// Uploads run in the background while the next batch captures — over a real
+		// network (VPS) the awaited-per-batch pattern stalled the whole capture on
+		// every ~4MB upload. Failures surface at the Promise.all before encode.
+		const uploadPromises: Promise<void>[] = [];
 
 		// Single reusable 2D canvas for JPEG conversion — created once, reused per frame.
 		// This avoids raw RGBA uploads (~88MB/batch) by compressing to JPEG (~3-5MB/batch).
@@ -245,21 +249,19 @@ export async function captureThreeJsVideo(
 				formData.append(`frame_${idx}`, blob, 'f.jpg');
 			});
 
-			const response = await fetch('/api/uploadFrameBatch', {
-				method: 'POST',
-				body: formData
-			});
-
-			console.log(
-				`📤 Batch ${batchNumber} response: ${response.status} ${response.ok ? '✅' : '❌'}`
+			const batchIdx = batchNumber;
+			uploadPromises.push(
+				fetch('/api/uploadFrameBatch', { method: 'POST', body: formData }).then((response) => {
+					console.log(`📤 Batch ${batchIdx} response: ${response.status} ${response.ok ? '✅' : '❌'}`);
+					if (!response.ok)
+						throw new Error(`Batch ${batchIdx} upload failed with status ${response.status}`);
+				})
 			);
-
-			if (!response.ok)
-				throw new Error(`Batch ${batchNumber} upload failed with status ${response.status}`);
-
-			console.log(`✅ Batch ${batchNumber} confirmed saved`);
 			batchNumber++;
 		}
+
+		progressCallback?.(96, 'Finishing uploads...');
+		await Promise.all(uploadPromises);
 
 		console.log(`✅ All ${totalBatches} batches uploaded — kicking off background encode...`);
 
