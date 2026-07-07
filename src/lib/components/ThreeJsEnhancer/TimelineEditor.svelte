@@ -15,7 +15,11 @@
 	let audioStudio  = $derived($audioStudioStore);
 	let timeline     = $derived($timelineStore);
 	let videoDuration = $derived($videoState.videoDuration || 30);
-	let currentTime  = $derived($videoState.currentTime  || 0);
+	// Playhead time — read directly off the video element every frame (rAF below).
+	// The event/store path (timeupdate → videoState → here) misses several play and
+	// seek paths, which left the playhead intermittently frozen.
+	let liveTime = $state(0);
+	let currentTime  = $derived(liveTime);
 	let isPlaying    = $derived($videoState.isPlaying);
 
 	// Manual cursor: lets the edit cursor go beyond video duration for audio-only regions or gaps.
@@ -29,6 +33,25 @@
 	let activeVideoClipId = $state<string | null>(null);
 	let inVideoGap        = $state(false);   // true while traversing a gap between clips
 	let gapNextClipId     = $state<string | null>(null); // clip to resume after gap
+
+	// rAF poller feeding liveTime — runs while the editor is mounted, so the playhead
+	// tracks every play/seek path (buttons, spacebar, capture, post-capture autoplay)
+	// without depending on media events firing.
+	$effect(() => {
+		if (!videoElement) return;
+		let raf = 0;
+		const tick = () => {
+			liveTime = videoElement!.currentTime;
+			// A manual cursor left behind by a ruler click freezes the playhead once
+			// real playback resumes — release it unless gap traversal owns it.
+			if (manualCursor !== null && !manualPlaying && !inVideoGap && !videoElement!.paused) {
+				manualCursor = null;
+			}
+			raf = requestAnimationFrame(tick);
+		};
+		raf = requestAnimationFrame(tick);
+		return () => cancelAnimationFrame(raf);
+	});
 
 	// editTime: sourceToTimeline maps video.currentTime → correct timeline position for any
 	// split/rearrange layout, since source ranges never overlap after a split.
