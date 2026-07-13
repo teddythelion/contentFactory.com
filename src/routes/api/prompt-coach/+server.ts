@@ -218,7 +218,52 @@ If they ask a question mid-conversation like "what about Instagram Reels specifi
 
 Direct. Confident. Research-backed. No filler words. No "Great question!" No "Absolutely!"
 Treat the user as a smart adult who wants insight, not encouragement.
-The goal: they finish every conversation knowing something they didn't know when they started.`;
+The goal: they finish every conversation knowing something they didn't know when they started.
+
+---
+
+## OUTPUT CONTRACT (mandatory — enforced by schema)
+
+Your entire response is a JSON object with these fields:
+- "message": the complete formatted chat response exactly as the user should read it — intake questions, or the full research output with every section including the numbered ENGINEERED PROMPTS and the PRO TIP line.
+- "prompts": the same engineered prompts as standalone plain-text strings (no numbering, no markdown), each immediately usable in the image/video generator as-is. Empty array while you are still in intake and have not produced prompts.
+- "proTip": the pro-tip text without the emoji prefix, or null during intake.
+- "reference3d": the 3D reference suggestion text when section 6 applies, otherwise null.`;
+
+// Structured-output schema — the API constrains generation to this shape, so the
+// prompts arrive as data instead of being regex-scraped out of markdown prose
+// (which silently broke every time the model formatted its answer differently).
+const RESPONSE_SCHEMA = {
+	type: 'object',
+	properties: {
+		message: {
+			type: 'string',
+			description: 'The full formatted chat response shown to the user.'
+		},
+		prompts: {
+			type: 'array',
+			description: 'Engineered prompts as standalone strings, ready to use. Empty during intake.',
+			items: { type: 'string' }
+		},
+		proTip: {
+			anyOf: [{ type: 'string' }, { type: 'null' }],
+			description: 'The PRO TIP insight text, no emoji prefix. Null during intake.'
+		},
+		reference3d: {
+			anyOf: [{ type: 'string' }, { type: 'null' }],
+			description: 'The 3D reference suggestion when one applies, else null.'
+		}
+	},
+	required: ['message', 'prompts', 'proTip', 'reference3d'],
+	additionalProperties: false
+} as const;
+
+interface EngineerResponse {
+	message: string;
+	prompts: string[];
+	proTip: string | null;
+	reference3d: string | null;
+}
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	try {
@@ -247,21 +292,40 @@ Use all available context to deliver increasingly specific research output. If n
 
 		const response = await anthropic.messages.create({
 			model: 'claude-opus-4-8',
-			max_tokens: 3000,
+			max_tokens: 4096,
 			system: SYSTEM_PROMPT + contextPrompt + specPrompt,
+			output_config: { format: { type: 'json_schema', schema: RESPONSE_SCHEMA } },
 			messages: messages.map((msg: { role: string; content: string }) => ({
 				role: msg.role,
 				content: msg.content
 			}))
 		});
 
-		const assistantMessage = response.content[0];
-		const text = assistantMessage.type === 'text' ? assistantMessage.text : '';
+		const assistantMessage = response.content.find((b) => b.type === 'text');
+		const raw = assistantMessage?.type === 'text' ? assistantMessage.text : '';
+
+		let text: string;
+		let promptsInfo: Array<{ text: string; quality: 'draft' | 'good' | 'excellent' }>;
+		let researchInsights: { proTip: string | null; reference: string | null };
+
+		try {
+			// Structured outputs guarantee this parses — the fallback below only fires
+			// on truncation (stop_reason max_tokens) or an unexpected API change.
+			const parsed = JSON.parse(raw) as EngineerResponse;
+			text = parsed.message;
+			promptsInfo = (parsed.prompts ?? [])
+				.filter((p) => typeof p === 'string' && p.trim().length > 0)
+				.map((p) => ({ text: p.trim(), quality: assessPromptQuality(p) }));
+			researchInsights = { proTip: parsed.proTip ?? null, reference: parsed.reference3d ?? null };
+			console.log(`🎯 Structured response — ${promptsInfo.length} prompts (stop: ${response.stop_reason})`);
+		} catch (parseErr) {
+			console.warn('⚠️ Structured output parse failed — falling back to legacy extraction:', parseErr);
+			text = raw;
+			promptsInfo = extractPromptsFromMessage(text);
+			researchInsights = extractResearchInsights(text);
+		}
 
 		const extractedContext = extractContextFromResponse(text, context);
-		const promptsInfo = extractPromptsFromMessage(text);
-		const researchInsights = extractResearchInsights(text);
-		console.log(`🎯 Prompts extracted: ${promptsInfo.length} | Has ENGINEERED PROMPTS section: ${/ENGINEERED PROMPTS/i.test(text)}`);
 
 		return json({
 			message: text,

@@ -1,19 +1,251 @@
 // src/lib/utils/videoCapture.ts
-// FIXED: Deterministic frame capture — explicit render + gl.finish() per frame
-// FIXED: Async job queue — encode fires in background, browser polls for completion
-// UPDATED: Reads audioSessionId from audioSessionStore and passes it to encodeFromBatches
-//          so the server can mux the preserved audio back into the final video.
+// Deterministic frame capture — explicit render + gl.finish() per frame.
+// Frame delivery is pluggable: the WebCodecs path hardware-encodes H.264 in the
+// browser and uploads ONE small mp4 (VPS only stream-copies + muxes audio);
+// the JPEG-batch path remains as the fallback for unsupported browsers.
+// Reads audioSessionId from audioSessionStore and passes it to encodeFromBatches
+// so the server can mux the preserved audio back into the final video.
 
 import { get } from 'svelte/store';
+import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { videoState } from '$lib/stores/video.store';
 import { timelineStore } from '$lib/stores/timeline.store';
 import { mediaBinStore } from '$lib/stores/mediaBin.store';
 import { encodeJobStore } from '$lib/stores/encodeJob.store';
 import { authStore } from '$lib/stores/auth.store';
-import { audioSessionStore } from '$lib/stores/audioSession.store'; // NEW
+import { audioSessionStore } from '$lib/stores/audioSession.store';
 import { audioStudioStore } from '$lib/stores/audioStudio.store';
 
 const BATCH_SIZE = 30;
+
+// Where each rendered frame goes after gl.finish(). addFrame may apply
+// backpressure (encoder queue / batch upload); finalize must not resolve
+// until every frame is durably on the server.
+interface CaptureSink {
+	addFrame(frameIndex: number): Promise<void>;
+	finalize(): Promise<void>;
+	dispose(): void;
+}
+
+interface WebCodecsSinkOptions {
+	sourceCanvas: HTMLCanvasElement;
+	width: number; // even, output resolution
+	height: number; // even, output resolution
+	fps: number;
+	duration: number; // timeline seconds — for baking video fades
+	videoFadeIn: number;
+	videoFadeOut: number;
+	sessionId: string;
+	progressCallback?: (progress: number, message: string) => void;
+}
+
+// Returns null when WebCodecs H.264 encoding isn't available — caller falls
+// back to JPEG batches. Video fade in/out is baked into the pixels here
+// because the server never re-encodes this stream (it can't run vf filters
+// under -c:v copy).
+async function createWebCodecsSink(opts: WebCodecsSinkOptions): Promise<CaptureSink | null> {
+	if (typeof VideoEncoder === 'undefined') return null;
+
+	const { width, height, fps } = opts;
+	const bitrate = 8_000_000;
+	// High → Main → Constrained Baseline, level 5.1 first for large canvases
+	const candidates = ['avc1.640033', 'avc1.640028', 'avc1.4d0033', 'avc1.4d0028', 'avc1.42e028'];
+	let codec: string | null = null;
+	for (const c of candidates) {
+		try {
+			const support = await VideoEncoder.isConfigSupported({
+				codec: c,
+				width,
+				height,
+				bitrate,
+				framerate: fps,
+				avc: { format: 'avc' }
+			});
+			if (support.supported) {
+				codec = c;
+				break;
+			}
+		} catch {
+			// malformed/unknown codec string on this browser — try the next
+		}
+	}
+	if (!codec) return null;
+
+	const muxer = new Muxer({
+		target: new ArrayBufferTarget(),
+		video: { codec: 'avc', width, height },
+		fastStart: 'in-memory'
+	});
+
+	let encodeError: DOMException | null = null;
+	const encoder = new VideoEncoder({
+		output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+		error: (e) => {
+			encodeError = e;
+		}
+	});
+	encoder.configure({
+		codec,
+		width,
+		height,
+		bitrate,
+		framerate: fps,
+		avc: { format: 'avc' },
+		latencyMode: 'quality'
+	});
+
+	console.log(`🎥 WebCodecs encoder active — ${codec} @ ${width}x${height}, in-browser H.264`);
+
+	// Downscale from physical (DPR-scaled) pixels to output resolution here,
+	// replacing the server-side scale filter.
+	const outCanvas = document.createElement('canvas');
+	outCanvas.width = width;
+	outCanvas.height = height;
+	const ctx = outCanvas.getContext('2d')!;
+
+	const frameMicros = Math.round(1e6 / fps);
+	const fadeOutStart = opts.duration - opts.videoFadeOut;
+
+	return {
+		async addFrame(i: number) {
+			if (encodeError) throw encodeError;
+
+			ctx.drawImage(opts.sourceCanvas, 0, 0, width, height);
+
+			// Bake video fade to black (server applied fade= in Pass 1; there is no Pass 1 here)
+			const T = i / fps;
+			let black = 0;
+			if (opts.videoFadeIn > 0 && T < opts.videoFadeIn) black = 1 - T / opts.videoFadeIn;
+			if (opts.videoFadeOut > 0 && T >= fadeOutStart) {
+				black = Math.max(black, Math.min(1, (T - fadeOutStart) / opts.videoFadeOut));
+			}
+			if (black > 0) {
+				ctx.fillStyle = `rgba(0,0,0,${black.toFixed(4)})`;
+				ctx.fillRect(0, 0, width, height);
+			}
+
+			const frame = new VideoFrame(outCanvas, {
+				timestamp: Math.round((i * 1e6) / fps),
+				duration: frameMicros
+			});
+			encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+			frame.close();
+
+			// Backpressure — don't let the encode queue outrun the hardware encoder
+			while (encoder.encodeQueueSize > 8) {
+				await new Promise((r) => setTimeout(r, 4));
+			}
+		},
+
+		async finalize() {
+			if (encodeError) throw encodeError;
+			opts.progressCallback?.(72, 'Finalizing video encode...');
+			await encoder.flush();
+			if (encodeError) throw encodeError;
+			muxer.finalize();
+
+			const blob = new Blob([muxer.target.buffer], { type: 'video/mp4' });
+			console.log(`📤 Uploading pre-encoded mp4 — ${(blob.size / 1048576).toFixed(2)}MB (single file)`);
+			opts.progressCallback?.(80, 'Uploading video...');
+
+			const formData = new FormData();
+			formData.append('sessionId', opts.sessionId);
+			formData.append('video', blob, 'capture.mp4');
+			const response = await fetch('/api/uploadCapturedVideo', { method: 'POST', body: formData });
+			console.log(`📤 Video upload response: ${response.status} ${response.ok ? '✅' : '❌'}`);
+			if (!response.ok) {
+				throw new Error(`Captured video upload failed with status ${response.status}`);
+			}
+		},
+
+		dispose() {
+			try {
+				if (encoder.state !== 'closed') encoder.close();
+			} catch {
+				// already closed
+			}
+		}
+	};
+}
+
+interface JpegSinkOptions {
+	sourceCanvas: HTMLCanvasElement;
+	width: number; // physical pixels — server downscales
+	height: number;
+	sessionId: string;
+	totalFrames: number;
+	progressCallback?: (progress: number, message: string) => void;
+}
+
+// Legacy path: JPEG per frame, batches of 30, each upload awaited before the
+// next batch captures — slower than firing them in parallel, but a failed
+// batch aborts the capture immediately instead of surfacing after the fact.
+function createJpegSink(opts: JpegSinkOptions): CaptureSink {
+	const totalBatches = Math.ceil(opts.totalFrames / BATCH_SIZE);
+
+	// Single reusable 2D canvas for JPEG conversion — created once, reused per frame.
+	// This avoids raw RGBA uploads (~88MB/batch) by compressing to JPEG (~3-5MB/batch).
+	const jpegCanvas = document.createElement('canvas');
+	jpegCanvas.width = opts.width;
+	jpegCanvas.height = opts.height;
+	const jpegCtx = jpegCanvas.getContext('2d')!;
+
+	let batchFrames: Blob[] = [];
+	let batchNumber = 0;
+	let startFrame = 0;
+
+	const flushBatch = async () => {
+		const batchSizeKB = batchFrames.reduce((sum, b) => sum + b.size, 0) / 1024;
+		console.log(
+			`📤 Uploading batch ${batchNumber} of ${totalBatches - 1} — ${(batchSizeKB / 1024).toFixed(2)}MB (JPEG)`
+		);
+		opts.progressCallback?.(
+			70 + (batchNumber / totalBatches) * 25,
+			`Uploading batch ${batchNumber + 1} of ${totalBatches}...`
+		);
+
+		const formData = new FormData();
+		formData.append('sessionId', opts.sessionId);
+		formData.append('batchNumber', String(batchNumber));
+		formData.append('startFrame', String(startFrame));
+		formData.append('frameCount', String(batchFrames.length));
+		// Each frame is a named JPEG entry — server writes them as frame-XXXXXX.jpg
+		batchFrames.forEach((blob, idx) => {
+			formData.append(`frame_${idx}`, blob, 'f.jpg');
+		});
+
+		const response = await fetch('/api/uploadFrameBatch', { method: 'POST', body: formData });
+		console.log(`📤 Batch ${batchNumber} response: ${response.status} ${response.ok ? '✅' : '❌'}`);
+		if (!response.ok)
+			throw new Error(`Batch ${batchNumber} upload failed with status ${response.status}`);
+		console.log(`✅ Batch ${batchNumber} confirmed saved`);
+
+		startFrame += batchFrames.length;
+		batchFrames = [];
+		batchNumber++;
+	};
+
+	return {
+		async addFrame() {
+			// drawImage from a WebGL canvas (preserveDrawingBuffer: true) copies GPU-side,
+			// already top-left oriented — replaces readPixels + CPU Y-flip, which stalled
+			// the pipeline and allocated ~16MB of scratch buffers per frame.
+			jpegCtx.drawImage(opts.sourceCanvas, 0, 0);
+			const jpegBlob = await new Promise<Blob>((resolve) =>
+				jpegCanvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
+			);
+			batchFrames.push(jpegBlob);
+			if (batchFrames.length >= BATCH_SIZE) await flushBatch();
+		},
+
+		async finalize() {
+			if (batchFrames.length > 0) await flushBatch();
+			console.log(`✅ All ${totalBatches} batches uploaded`);
+		},
+
+		dispose() {}
+	};
+}
 
 export async function captureThreeJsVideo(
 	progressCallback?: (progress: number, message: string) => void
@@ -58,22 +290,22 @@ export async function captureThreeJsVideo(
 	};
 
 	const fps = 30;
-	// Physical pixel dimensions — what gl.readPixels actually reads.
+	// Physical pixel dimensions — what the WebGL drawing buffer actually holds.
 	const width = canvas.width;
 	const height = canvas.height;
 	// Logical (CSS) pixel dimensions — target output resolution.
-	// On a 2× DPR display, canvas.width = clientWidth * 2. We down-scale on the server
-	// so the encoded video is at a sane resolution, not 4× larger than the display size.
-	const outWidth = canvas.clientWidth;
-	const outHeight = canvas.clientHeight;
+	// On a 2× DPR display, canvas.width = clientWidth * 2. The WebCodecs path
+	// down-scales in the browser; the JPEG path ships physical pixels and the
+	// server down-scales, so the encoded video isn't 4× larger than display size.
+	const outWidth = Math.floor(canvas.clientWidth / 2) * 2; // H.264 needs even dims
+	const outHeight = Math.floor(canvas.clientHeight / 2) * 2;
 	console.log(`🖼️ Canvas size: ${width}x${height}`);
 	console.log(`🖼️ Canvas client size: ${canvas.clientWidth}x${canvas.clientHeight}`);
 	const totalFrames = Math.ceil(timelineEnd * fps);
-	const totalBatches = Math.ceil(totalFrames / BATCH_SIZE);
 
 	// Read audioSessionId from store — will be null if video had no audio
 	// or if extraction was skipped/failed. Server handles null gracefully.
-	const audioSessionId = get(audioSessionStore); // NEW
+	const audioSessionId = get(audioSessionStore);
 	const audioStudio = get(audioStudioStore);
 	const suppressOriginalAudio =
 		audioStudio.originalMuted ||
@@ -132,6 +364,31 @@ export async function captureThreeJsVideo(
 		}
 	}
 
+	// ── Music/voiceover clips — ALL timeline music tracks ────────────────
+	// The legacy path exports only the single active musicSessionId; every other
+	// music entry (second track, voiceover) played in preview but silently
+	// vanished from the file. Describe every unmuted music clip and mix
+	// server-side with trim + delay, exactly like clipAudios.
+	const musicClips: ClipAudio[] = [];
+	for (const tr of timeline.tracks) {
+		if (tr.type !== 'music' || tr.muted || !tr.assetSessionId) continue;
+		const entry = audioStudio.musicEntries[tr.assetSessionId];
+		for (const c of tr.clips) {
+			musicClips.push({
+				sessionId: tr.assetSessionId,
+				timelineStart: c.startTime,
+				sourceStart: c.sourceStart,
+				duration: c.endTime - c.startTime,
+				volume: entry?.volume ?? 0.3,
+				fadeIn: entry?.fadeIn ?? 0,
+				fadeOut: entry?.fadeOut ?? 0
+			});
+		}
+	}
+	if (musicClips.length > 0) {
+		console.log(`🎵 Exporting ${musicClips.length} music/voiceover clip(s) across all tracks`);
+	}
+
 	progressCallback?.(0, 'Starting capture...');
 
 	videoElement.pause();
@@ -141,129 +398,121 @@ export async function captureThreeJsVideo(
 		const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
 		if (!gl) throw new Error('Failed to get WebGL context');
 
-		console.log(
-			`📹 Capturing ${totalFrames} frames at ${width}x${height} in ${totalBatches} batches of ${BATCH_SIZE}`
-		);
+		const sessionId = Date.now().toString();
+
+		// ── Deterministic frame preparation ─────────────────────────────────
+		// Identical for both sinks: seek media to T = i/fps, publish the timeline
+		// clock, composite, render, gl.finish(). Nothing here knows or cares how
+		// the pixels leave the machine.
+		const prepareFrame = async (i: number) => {
+			const T = i / fps; // timeline time for this output frame
+
+			// Seek the main video only where a main-track clip covers this moment —
+			// the compositor's coverage check hides it elsewhere. Skip no-op seeks
+			// (an unchanged currentTime never fires 'seeked'). Capture is offline, so
+			// the timeout is generous — a seek that outruns it leaves the element with
+			// readyState < 2, the compositor drops the layer, and the exported frame
+			// blanks (seen as flicker when decode is slow, e.g. iGPU contention with
+			// the WebCodecs hardware encoder).
+			const srcT = mainSourceAt(T);
+			if (srcT !== null && Math.abs(videoElement.currentTime - srcT) > 1 / (fps * 2)) {
+				await new Promise<void>((resolve) => {
+					const timeout = setTimeout(() => {
+						console.warn(`⚠️ Main video seek to ${srcT.toFixed(2)}s timed out at frame ${i} — frame may render blank`);
+						resolve();
+					}, 5000);
+					videoElement.addEventListener(
+						'seeked',
+						() => { clearTimeout(timeout); resolve(); },
+						{ once: true }
+					);
+					videoElement.currentTime = srcT;
+				});
+			}
+
+			// Publish the timeline clock — the compositor's layer selection and the
+			// scene animations key off it (the editor's own publisher pauses during
+			// capture so this value wins).
+			(window as any).__timelineEditTime = T;
+
+			// Bring secondary clips (split/PiP layouts) to the same time before compositing.
+			const seekSecondaries = (window as any).__threeJsSeekSecondaries;
+			if (seekSecondaries) await seekSecondaries(T);
+
+			// Draw the current video frame into the composite canvas — animate() no-ops
+			// during capture, so this is the only thing that gets the seeked frame onto
+			// the CanvasTexture. It also sets needsUpdate on the texture.
+			const drawComposite = (window as any).__threeJsDrawComposite;
+			if (drawComposite) {
+				drawComposite();
+			} else {
+				// Legacy VideoTexture path — force the GPU slot dirty after a manual seek.
+				const mainVideoTexture = (window as any).__threeJsVideoTexture;
+				if (mainVideoTexture) mainVideoTexture.needsUpdate = true;
+			}
+
+			const textMesh = (window as any).__textMesh;
+			if (textMesh?._videoTexture) {
+				textMesh._videoTexture.needsUpdate = true;
+			}
+
+			const updateScene = (window as any).__threeJsUpdateScene;
+			if (updateScene) updateScene(T);
+
+			threeRenderer.render(threeScene, threeCamera);
+			gl.finish();
+		};
+
+		const runCaptureLoop = async (sink: CaptureSink) => {
+			for (let i = 0; i < totalFrames; i++) {
+				await prepareFrame(i);
+				await sink.addFrame(i);
+				progressCallback?.((i / totalFrames) * 70, `Capturing frame ${i + 1}/${totalFrames}`);
+			}
+			await sink.finalize();
+		};
+
 		if (audioSessionId) {
 			console.log(`🎵 Audio session attached — will mux audio-${audioSessionId}.aac after encode`);
 		}
 
-		const sessionId = Date.now().toString();
-		let batchNumber = 0;
-		// Uploads run in the background while the next batch captures — over a real
-		// network (VPS) the awaited-per-batch pattern stalled the whole capture on
-		// every ~4MB upload. Failures surface at the Promise.all before encode.
-		const uploadPromises: Promise<void>[] = [];
+		// ── Capture: WebCodecs first, JPEG batches as fallback ──────────────
+		let preEncoded = false;
+		const webCodecsSink = await createWebCodecsSink({
+			sourceCanvas: canvas,
+			width: outWidth,
+			height: outHeight,
+			fps,
+			duration: timelineEnd,
+			videoFadeIn: audioStudio.videoFadeIn,
+			videoFadeOut: audioStudio.videoFadeOut,
+			sessionId,
+			progressCallback
+		});
 
-		// Single reusable 2D canvas for JPEG conversion — created once, reused per frame.
-		// This avoids raw RGBA uploads (~88MB/batch) by compressing to JPEG (~3-5MB/batch).
-		const jpegCanvas = document.createElement('canvas');
-		jpegCanvas.width = width;
-		jpegCanvas.height = height;
-		const jpegCtx = jpegCanvas.getContext('2d')!;
-
-		for (let startFrame = 0; startFrame < totalFrames; startFrame += BATCH_SIZE) {
-			const endFrame = Math.min(startFrame + BATCH_SIZE, totalFrames);
-			const batchFrames: Blob[] = [];
-
-			for (let i = startFrame; i < endFrame; i++) {
-				const T = i / fps; // timeline time for this output frame
-
-				// Seek the main video only where a main-track clip covers this moment —
-				// the compositor's coverage check hides it elsewhere. Skip no-op seeks
-				// (an unchanged currentTime never fires 'seeked'); the timeout covers
-				// stalled seeks so the capture can't hang.
-				const srcT = mainSourceAt(T);
-				if (srcT !== null && Math.abs(videoElement.currentTime - srcT) > 1 / (fps * 2)) {
-					await new Promise<void>((resolve) => {
-						const timeout = setTimeout(resolve, 1000);
-						videoElement.addEventListener(
-							'seeked',
-							() => { clearTimeout(timeout); resolve(); },
-							{ once: true }
-						);
-						videoElement.currentTime = srcT;
-					});
-				}
-
-				// Publish the timeline clock — the compositor's layer selection and the
-				// scene animations key off it (the editor's own publisher pauses during
-				// capture so this value wins).
-				(window as any).__timelineEditTime = T;
-
-				// Bring secondary clips (split/PiP layouts) to the same time before compositing.
-				const seekSecondaries = (window as any).__threeJsSeekSecondaries;
-				if (seekSecondaries) await seekSecondaries(T);
-
-				// Draw the current video frame into the composite canvas — animate() no-ops
-				// during capture, so this is the only thing that gets the seeked frame onto
-				// the CanvasTexture. It also sets needsUpdate on the texture.
-				const drawComposite = (window as any).__threeJsDrawComposite;
-				if (drawComposite) {
-					drawComposite();
-				} else {
-					// Legacy VideoTexture path — force the GPU slot dirty after a manual seek.
-					const mainVideoTexture = (window as any).__threeJsVideoTexture;
-					if (mainVideoTexture) mainVideoTexture.needsUpdate = true;
-				}
-
-				const textMesh = (window as any).__textMesh;
-				if (textMesh?._videoTexture) {
-					textMesh._videoTexture.needsUpdate = true;
-				}
-
-				const updateScene = (window as any).__threeJsUpdateScene;
-				if (updateScene) updateScene(T);
-
-				threeRenderer.render(threeScene, threeCamera);
-				gl.finish();
-
-				// drawImage from a WebGL canvas (preserveDrawingBuffer: true) copies GPU-side,
-				// already top-left oriented — replaces readPixels + CPU Y-flip, which stalled
-				// the pipeline and allocated ~16MB of scratch buffers per frame.
-				jpegCtx.drawImage(canvas, 0, 0);
-				const jpegBlob = await new Promise<Blob>((resolve) =>
-					jpegCanvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
-				);
-				batchFrames.push(jpegBlob);
-
-				const progress = (i / totalFrames) * 70;
-				progressCallback?.(progress, `Capturing frame ${i + 1}/${totalFrames}`);
+		if (webCodecsSink) {
+			console.log(`📹 Capturing ${totalFrames} frames at ${outWidth}x${outHeight} via WebCodecs`);
+			try {
+				await runCaptureLoop(webCodecsSink);
+				preEncoded = true;
+			} catch (wcError) {
+				console.warn('⚠️ WebCodecs capture failed — falling back to JPEG batches:', wcError);
+			} finally {
+				webCodecsSink.dispose();
 			}
-
-			const batchSizeKB = batchFrames.reduce((sum, b) => sum + b.size, 0) / 1024;
-			console.log(`📤 Uploading batch ${batchNumber} of ${totalBatches - 1} — ${(batchSizeKB / 1024).toFixed(2)}MB (JPEG)`);
-
-			progressCallback?.(
-				70 + (batchNumber / totalBatches) * 25,
-				`Uploading batch ${batchNumber + 1} of ${totalBatches}...`
-			);
-
-			const formData = new FormData();
-			formData.append('sessionId', sessionId);
-			formData.append('batchNumber', String(batchNumber));
-			formData.append('startFrame', String(startFrame));
-			formData.append('frameCount', String(batchFrames.length));
-			// Each frame is a named JPEG entry — server writes them as frame-XXXXXX.jpg
-			batchFrames.forEach((blob, idx) => {
-				formData.append(`frame_${idx}`, blob, 'f.jpg');
-			});
-
-			const batchIdx = batchNumber;
-			uploadPromises.push(
-				fetch('/api/uploadFrameBatch', { method: 'POST', body: formData }).then((response) => {
-					console.log(`📤 Batch ${batchIdx} response: ${response.status} ${response.ok ? '✅' : '❌'}`);
-					if (!response.ok)
-						throw new Error(`Batch ${batchIdx} upload failed with status ${response.status}`);
-				})
-			);
-			batchNumber++;
 		}
 
-		progressCallback?.(96, 'Finishing uploads...');
-		await Promise.all(uploadPromises);
+		if (!preEncoded) {
+			const totalBatches = Math.ceil(totalFrames / BATCH_SIZE);
+			console.log(
+				`📹 Capturing ${totalFrames} frames at ${width}x${height} in ${totalBatches} batches of ${BATCH_SIZE}`
+			);
+			await runCaptureLoop(
+				createJpegSink({ sourceCanvas: canvas, width, height, sessionId, totalFrames, progressCallback })
+			);
+		}
 
-		console.log(`✅ All ${totalBatches} batches uploaded — kicking off background encode...`);
+		console.log(`✅ Capture uploaded (${preEncoded ? 'pre-encoded mp4' : 'JPEG batches'}) — kicking off background encode...`);
 
 		// Kick off background encode — returns immediately with jobId
 		progressCallback?.(97, 'Starting background encode...');
@@ -276,18 +525,23 @@ export async function captureThreeJsVideo(
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				sessionId,
+				preEncoded,
 				totalFrames,
 				fps,
 				suppressOriginalAudio,
-				width,
-				height,
+				// preEncoded: dims/scaling/fades already baked into the mp4 — server must not re-filter
+				width: preEncoded ? outWidth : width,
+				height: preEncoded ? outHeight : height,
 				outWidth,
 				outHeight,
 				userId,
 				audioSessionId: legacyAudioSessionId,
 				clipAudios,
+				musicClips,
 				sfxSessionId: audioStudio.sfxSessionId,
-				musicSessionId: audioStudio.musicSessionId,
+				// musicClips supersedes the single-track legacy path — sending both would
+				// mux the active music track twice
+				musicSessionId: musicClips.length > 0 ? null : audioStudio.musicSessionId,
 				sfxVolume: audioStudio.sfxVolume,
 				musicVolume: audioStudio.musicVolume,
 				sfxInstances: audioStudio.sfxInstances,
@@ -299,8 +553,8 @@ export async function captureThreeJsVideo(
 				musicFadeOut: audioStudio.musicFadeOut,
 				originalFadeIn: audioStudio.originalFadeIn,
 				originalFadeOut: audioStudio.originalFadeOut,
-				videoFadeIn: audioStudio.videoFadeIn,
-				videoFadeOut: audioStudio.videoFadeOut
+				videoFadeIn: preEncoded ? 0 : audioStudio.videoFadeIn,
+				videoFadeOut: preEncoded ? 0 : audioStudio.videoFadeOut
 			})
 		});
 

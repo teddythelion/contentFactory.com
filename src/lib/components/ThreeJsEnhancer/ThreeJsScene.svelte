@@ -238,10 +238,39 @@
 				canvas.removeEventListener('touchstart', onTouchStart);
 				canvas.removeEventListener('touchmove', onTouchMove);
 				canvas.removeEventListener('touchend', onTouchEnd);
+				canvas.removeEventListener('webglcontextlost', onContextLost);
+				canvas.removeEventListener('webglcontextrestored', onContextRestored);
 			}
 			window.removeEventListener('resize', handleResize);
 		};
 	});
+
+	let contextRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function onContextLost(e: Event) {
+		// Without preventDefault the browser never attempts a restore — the canvas
+		// would stay dead (white) until a full page reload.
+		e.preventDefault();
+		console.warn('⚠️ WebGL context lost (GPU driver reset?) — waiting for browser restore...');
+		contextRestoreTimer = setTimeout(() => {
+			console.error('❌ WebGL context not restored after 10s — reload the page to recover the preview.');
+		}, 10_000);
+	}
+
+	function onContextRestored() {
+		if (contextRestoreTimer) { clearTimeout(contextRestoreTimer); contextRestoreTimer = null; }
+		console.log('✅ WebGL context restored — recovering preview');
+		try {
+			// Three re-creates GPU buffers on the next render; CPU-side canvas/video
+			// textures need an explicit dirty flag to re-upload their pixels.
+			if (compositeTexture) compositeTexture.needsUpdate = true;
+			if (videoTexture) videoTexture.needsUpdate = true;
+			updateCompositeFrame();
+			if (renderer && scene && camera) renderer.render(scene, camera);
+		} catch (err) {
+			console.error('WebGL restore recovery failed — reload the page:', err);
+		}
+	}
 
 	function initThreeJS() {
 		if (!videoUrl) { console.error('Cannot initialize Three.js: videoUrl is null'); return; }
@@ -255,6 +284,14 @@
 		renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 		renderer.setPixelRatio(window.devicePixelRatio);
 		renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+
+		// GPU driver resets (Windows TDR — monitor blinks, driver restarts) kill the
+		// WebGL context and leave the canvas permanently white. preventDefault on
+		// contextlost is what allows the browser to restore the context at all;
+		// on restore, re-upload the CPU-side textures and render one frame so the
+		// preview comes back without a page reload.
+		canvas.addEventListener('webglcontextlost', onContextLost, false);
+		canvas.addEventListener('webglcontextrestored', onContextRestored, false);
 
 		(window as any).__threeJsCanvas = canvas;
 		(window as any).__threeJsRenderer = renderer;
@@ -286,7 +323,13 @@
 				if (Math.abs(el.currentTime - target) < 0.001) continue;
 				waits.push(
 					new Promise<void>((resolve) => {
-						const timeout = setTimeout(resolve, 500);
+						// Generous timeout — capture is offline, and a seek that isn't done
+						// leaves readyState < 2, which drops the layer from the composite
+						// for that frame (exported flicker/blanking).
+						const timeout = setTimeout(() => {
+							console.warn(`⚠️ Secondary clip seek to ${target.toFixed(2)}s timed out at t=${t.toFixed(2)}s — frame may render blank`);
+							resolve();
+						}, 5000);
 						el.addEventListener(
 							'seeked',
 							() => { clearTimeout(timeout); resolve(); },
@@ -600,6 +643,10 @@
 		el.crossOrigin = '';
 		el.loop = false;
 		el.muted = muted;
+		// Detached elements with the default preload=metadata can park at
+		// readyState 1 forever — the timeline tick then never starts them, which
+		// shows as a secondary clip with picture (per-tick reseek) but no audio.
+		el.preload = 'auto';
 		el.setAttribute('playsinline', '');
 		el.setAttribute('webkit-playsinline', '');
 		el.src = url.startsWith('https://storage.googleapis.com')
@@ -650,8 +697,9 @@
 					.then((r) => (r.ok ? r.json() : null))
 					.then((d) => {
 						if (d?.audioSessionId) mediaBinStore.updateAsset(assetId, { sessionId: d.audioSessionId });
+						else console.warn(`🔇 Audio extraction returned no session for "${name}" — this clip will EXPORT silent (preview audio unaffected)`);
 					})
-					.catch(() => {});
+					.catch((e) => console.warn(`🔇 Audio extraction failed for "${name}" — this clip will EXPORT silent (preview audio unaffected):`, e));
 			};
 		};
 		input.click();

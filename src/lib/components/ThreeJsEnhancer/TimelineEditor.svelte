@@ -30,6 +30,10 @@
 	let manualPlayMs    = $state(0);       // wall-clock ms when manual play started
 	let manualPlayStart = $state(0);       // editTime value when manual play started
 
+	// Secondary elements with a play() promise in flight — prevents the rAF tick
+	// from firing overlapping play() calls while the browser is still starting one.
+	const pendingPlay = new Set<HTMLVideoElement>();
+
 	// Segment playback state — which clip is currently being played (used by playback engine only)
 	let activeVideoClipId = $state<string | null>(null);
 	let inVideoGap        = $state(false);   // true while traversing a gap between clips
@@ -61,9 +65,21 @@
 					const clip = tr.clips.find(c => t >= c.startTime && t < c.endTime);
 					if (clip && effectivePlaying) {
 						const target = clip.sourceStart + (t - clip.startTime);
-						if (el.paused && el.readyState >= 2) {
-							el.currentTime = target;
-							el.play().catch(() => {});
+						// No readyState gate — play() buffers and starts on its own; gating on
+						// readyState >= 2 left preload-stalled clips permanently unstarted
+						// (picture via the reseek below, zero audio). pendingPlay stops the
+						// tick from stacking a play() per frame while one is in flight.
+						if (el.paused) {
+							if (!pendingPlay.has(el)) {
+								pendingPlay.add(el);
+								if (el.readyState >= 1) el.currentTime = target;
+								el.play()
+									.then(() => pendingPlay.delete(el))
+									.catch((err) => {
+										pendingPlay.delete(el);
+										console.warn(`🔇 Secondary clip "${tr.name}" play failed — no audio for this clip:`, err?.name, err?.message);
+									});
+							}
 						} else if (!el.seeking && Math.abs(el.currentTime - target) > 0.3) {
 							el.currentTime = target; // drifted — resync to the timeline
 						}
@@ -119,7 +135,11 @@
 			const clip = track.clips.find(c => t >= c.startTime && t < c.endTime);
 			if (clip) {
 				el.currentTime = clip.sourceStart + (t - clip.startTime);
-				if (play) el.play().catch(() => {});
+				if (play) {
+					el.play().catch((err) =>
+						console.warn(`🔇 Secondary clip "${track.name}" play failed — no audio for this clip:`, err?.name, err?.message)
+					);
+				}
 			} else {
 				el.pause();
 			}

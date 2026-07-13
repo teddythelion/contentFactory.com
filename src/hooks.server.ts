@@ -1,5 +1,10 @@
 import { adminAuth } from '$lib/firebase/admin';
+import { startTempSweeper } from '$lib/server/tempSweeper';
 import type { Handle } from '@sveltejs/kit';
+
+// Reap orphaned capture temp files (RAM-backed /dev/shm on the VPS) — starts
+// once at boot, then hourly.
+startTempSweeper();
 
 const SESSION_14_DAYS = 60 * 60 * 24 * 14 * 1000;
 const REFRESH_THRESHOLD = 60 * 60 * 24 * 2 * 1000; // Refresh if less than 2 days left

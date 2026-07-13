@@ -76,10 +76,14 @@ async function runEncode(
 	originalFadeOut: number,
 	videoFadeIn: number,
 	videoFadeOut: number,
-	clipAudios: ClipAudio[]
+	clipAudios: ClipAudio[],
+	musicClips: ClipAudio[],
+	preEncoded: boolean
 ) {
 	const baseTemp = getTempBase();
 	const sessionDir = path.join(baseTemp, `session-${sessionId}`);
+	// WebCodecs path — browser already encoded H.264; uploaded by /api/uploadCapturedVideo
+	const capturePath = path.join(baseTemp, `capture-${sessionId}.mp4`);
 	const silentOutputPath = path.join(baseTemp, `silent-${sessionId}.mp4`); // NEW — renamed
 	const finalOutputPath = path.join(baseTemp, `output-${sessionId}.mp4`); // NEW — final (with or without audio)
 	const audioPath = audioSessionId
@@ -87,54 +91,50 @@ async function runEncode(
 		: null;
 
 	try {
-		console.log(`🎬 Encoding ${totalFrames} JPEG frames from session ${sessionId}`);
 		if (audioSessionId) {
 			console.log(`🎵 Audio session found — will mux audio-${audioSessionId}.aac after encode`);
 		}
 
 		const audioDir = path.join(getTempBase(), 'audio');
 
-		// ── Frame continuity check ───────────────────────────────────────────
-		// FFmpeg's image2 demuxer stops at the first numbering gap, silently
-		// truncating the video while full-length audio muxes over it. Fail loudly
-		// instead so a broken upload is visible, not a mystery blank video.
-		const present = new Set(await readdir(sessionDir).catch(() => [] as string[]));
-		const missing: number[] = [];
-		for (let i = 0; i < totalFrames; i++) {
-			if (!present.has(`frame-${String(i).padStart(6, '0')}.jpg`)) missing.push(i);
-		}
-		if (missing.length > 0) {
-			throw new Error(
-				`Frame gap: ${missing.length}/${totalFrames} frames missing (first at ${missing[0]} ≈ ${(missing[0] / fps).toFixed(1)}s). Upload incomplete — capture again.`
-			);
-		}
+		if (preEncoded) {
+			// ── PASS 1 SKIPPED: browser delivered a finished H.264 mp4 ──────────
+			// Scaling and video fades were baked client-side; the VPS never decodes
+			// or re-encodes pixels on this path — Pass 2 runs with -c:v copy.
+			console.log(`🎬 Pre-encoded capture for session ${sessionId} — skipping Pass 1`);
+			if (!existsSync(capturePath)) {
+				throw new Error('Pre-encoded capture missing — upload may have failed. Capture again.');
+			}
+			await rename(capturePath, silentOutputPath);
+		} else {
+			console.log(`🎬 Encoding ${totalFrames} JPEG frames from session ${sessionId}`);
+			// ── PASS 1: Encode frames to silent MP4 ──────────────────────────────
+			const outDuration = totalFrames / fps;
+			const vfFilters: string[] = [`scale=trunc(${outWidth}/2)*2:trunc(${outHeight}/2)*2`];
+			if (videoFadeIn > 0) vfFilters.push(`fade=t=in:st=0:d=${videoFadeIn}`);
+			if (videoFadeOut > 0) {
+				const fadeOutStart = Math.max(0, outDuration - videoFadeOut);
+				vfFilters.push(`fade=t=out:st=${fadeOutStart.toFixed(3)}:d=${videoFadeOut}`);
+			}
+			const encodeCommand = [
+				`"${FFMPEG_PATH}"`,
+				`-framerate ${fps}`,
+				`-i "${path.join(sessionDir, 'frame-%06d.jpg')}"`,
+				`-vf "${vfFilters.join(',')}"`,
+				`-c:v libx264`,
+				`-preset veryfast`,
+				`-crf 23`,
+				`-b:v 5M`,
+				`-pix_fmt yuv420p`,
+				`-movflags +faststart`,
+				`-y`,
+				`"${silentOutputPath}"`
+			].join(' ');
 
-		// ── PASS 1: Encode frames to silent MP4 ──────────────────────────────
-		const outDuration = totalFrames / fps;
-		const vfFilters: string[] = [`scale=trunc(${outWidth}/2)*2:trunc(${outHeight}/2)*2`];
-		if (videoFadeIn > 0) vfFilters.push(`fade=t=in:st=0:d=${videoFadeIn}`);
-		if (videoFadeOut > 0) {
-			const fadeOutStart = Math.max(0, outDuration - videoFadeOut);
-			vfFilters.push(`fade=t=out:st=${fadeOutStart.toFixed(3)}:d=${videoFadeOut}`);
+			console.log('🎬 Pass 1 — encoding frames to silent MP4...');
+			await execAsync(encodeCommand, { maxBuffer: 50 * 1024 * 1024 });
+			console.log('✅ Pass 1 complete — silent MP4 ready');
 		}
-		const encodeCommand = [
-			`"${FFMPEG_PATH}"`,
-			`-framerate ${fps}`,
-			`-i "${path.join(sessionDir, 'frame-%06d.jpg')}"`,
-			`-vf "${vfFilters.join(',')}"`,
-			`-c:v libx264`,
-			`-preset veryfast`,
-			`-crf 23`,
-			`-b:v 5M`,
-			`-pix_fmt yuv420p`,
-			`-movflags +faststart`,
-			`-y`,
-			`"${silentOutputPath}"`
-		].join(' ');
-
-		console.log('🎬 Pass 1 — encoding frames to silent MP4...');
-		await execAsync(encodeCommand, { maxBuffer: 50 * 1024 * 1024 });
-		console.log('✅ Pass 1 complete — silent MP4 ready');
 
 		// ── PASS 2: Mux audio back in (only if audio session exists) ─────────
 		const audioFile = path.join(audioDir, `audio-${audioSessionId}.aac`);
@@ -158,8 +158,19 @@ async function runEncode(
 			}
 		}
 
+		// Music/voiceover clips — every timeline music track, not just the active one
+		const validMusicClips: ClipAudio[] = [];
+		for (const mc of musicClips) {
+			if (mc?.sessionId && await validFile(path.join(audioDir, `music-${mc.sessionId}.mp3`))) {
+				validMusicClips.push(mc);
+			} else if (mc?.sessionId) {
+				console.warn(`🔇 music-${mc.sessionId}.mp3 missing on disk — that track will be silent in the export`);
+			}
+		}
+
 		const hasAnyAudioOutput =
-			(hasAudio && !suppressOriginalAudio) || hasSfx || hasMusic || validClipAudios.length > 0;
+			(hasAudio && !suppressOriginalAudio) || hasSfx || hasMusic ||
+			validClipAudios.length > 0 || validMusicClips.length > 0;
 
 		if (hasAnyAudioOutput) {
 			console.log(`🎚️ Muxing audio — original:${hasAudio} sfx:${hasSfx} music:${hasMusic} clips:${validClipAudios.length}`);
@@ -201,8 +212,12 @@ async function runEncode(
 					const inLabel = `[${inputIndex}:a]`;
 					const outLabel = `[sfx${i}]`;
 					const delayMs = Math.round(inst.startTime * 1000);
+					// aformat pins the channel count so the per-channel delay list below is
+					// exhaustive — adelay's all=1 shorthand needs FFmpeg ≥4.2 (VPS has it,
+					// the bundled @ffmpeg-installer Windows build is 4.1 and errors on it).
 					const filters: string[] = [
-						`adelay=${delayMs}:all=1`,
+						`aformat=channel_layouts=stereo`,
+						`adelay=${delayMs}|${delayMs}`,
 						`volume=${sfxVolume}`
 					];
 					if (sfxFadeIn > 0) filters.push(`afade=t=in:st=${inst.startTime}:d=${sfxFadeIn}`);
@@ -240,7 +255,10 @@ async function runEncode(
 			// delay into the clip's timeline slot before mixing.
 			validClipAudios.forEach((ca, i) => {
 				inputs.push(`-i "${path.join(audioDir, `audio-${ca.sessionId}.aac`)}"`);
+				// aformat: see the SFX block — keeps adelay's per-channel form exhaustive
+				const clipDelayMs = Math.round(ca.timelineStart * 1000);
 				const filters: string[] = [
+					`aformat=channel_layouts=stereo`,
 					`atrim=start=${ca.sourceStart.toFixed(3)}:end=${(ca.sourceStart + ca.duration).toFixed(3)}`,
 					`asetpts=PTS-STARTPTS`,
 					`volume=${ca.volume}`
@@ -249,8 +267,29 @@ async function runEncode(
 				if (ca.fadeOut > 0) {
 					filters.push(`afade=t=out:st=${Math.max(0, ca.duration - ca.fadeOut).toFixed(3)}:d=${ca.fadeOut}`);
 				}
-				filters.push(`adelay=${Math.round(ca.timelineStart * 1000)}:all=1`);
+				filters.push(`adelay=${clipDelayMs}|${clipDelayMs}`);
 				const outLabel = `[clip${i}]`;
+				filterParts.push(`[${inputIndex}:a]${filters.join(',')}${outLabel}`);
+				mixLabels.push(outLabel);
+				inputIndex++;
+			});
+
+			// Music/voiceover clip segments — same chain as clipAudios, mp3 sources
+			validMusicClips.forEach((mc, i) => {
+				inputs.push(`-i "${path.join(audioDir, `music-${mc.sessionId}.mp3`)}"`);
+				const delayMs = Math.round(mc.timelineStart * 1000);
+				const filters: string[] = [
+					`aformat=channel_layouts=stereo`,
+					`atrim=start=${mc.sourceStart.toFixed(3)}:end=${(mc.sourceStart + mc.duration).toFixed(3)}`,
+					`asetpts=PTS-STARTPTS`,
+					`volume=${mc.volume}`
+				];
+				if (mc.fadeIn > 0) filters.push(`afade=t=in:st=0:d=${mc.fadeIn}`);
+				if (mc.fadeOut > 0) {
+					filters.push(`afade=t=out:st=${Math.max(0, mc.duration - mc.fadeOut).toFixed(3)}:d=${mc.fadeOut}`);
+				}
+				filters.push(`adelay=${delayMs}|${delayMs}`);
+				const outLabel = `[mus${i}]`;
 				filterParts.push(`[${inputIndex}:a]${filters.join(',')}${outLabel}`);
 				mixLabels.push(outLabel);
 				inputIndex++;
@@ -382,6 +421,7 @@ async function runEncode(
 		for (const f of files) await unlink(path.join(sessionDir, f)).catch(() => {});
 		await rmdir(sessionDir).catch(() => {});
 		await unlink(finalOutputPath).catch(() => {});
+		if (existsSync(capturePath)) await unlink(capturePath).catch(() => {});
 
 		encodeJobs.set(sessionId, {
 			status: 'complete',
@@ -401,6 +441,7 @@ async function runEncode(
 		}
 		if (existsSync(silentOutputPath)) await unlink(silentOutputPath).catch(() => {});
 		if (existsSync(finalOutputPath)) await unlink(finalOutputPath).catch(() => {});
+		if (existsSync(capturePath)) await unlink(capturePath).catch(() => {});
 
 		// Clean up audio file on error too
 		if (audioPath && existsSync(audioPath)) await unlink(audioPath).catch(() => {});
@@ -441,7 +482,9 @@ export const POST: RequestHandler = async ({ request }) => {
 		originalFadeOut = 0,
 		videoFadeIn = 0,
 		videoFadeOut = 0,
-		clipAudios = [] as ClipAudio[]
+		clipAudios = [] as ClipAudio[],
+		musicClips = [] as ClipAudio[],
+		preEncoded = false
 	} = body;
 
 	if (!userId) {
@@ -478,7 +521,9 @@ export const POST: RequestHandler = async ({ request }) => {
 		originalFadeOut,
 		videoFadeIn,
 		videoFadeOut,
-		clipAudios
+		clipAudios,
+		musicClips,
+		preEncoded
 	);
 
 	return new Response(JSON.stringify({ success: true, jobId: sessionId }), {
