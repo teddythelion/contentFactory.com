@@ -3,8 +3,22 @@
 // Owns clip positions. Components read from here and sync to audioStudio for playback.
 
 import { writable } from 'svelte/store';
+import type { TransitionType } from '$lib/utils/clipTransitions';
 
 export type TrackType = 'video' | 'music' | 'sfx' | 'voice';
+
+// Per-clip 2D transform for IMAGE clips only — applied by the compositor when the
+// image is drawn over the frame. x/y are the image center in % of frame (50/50 =
+// centered), scale is relative to contain-fit (1 = fills frame), rotation in radians.
+export interface ClipTransform {
+	x: number;
+	y: number;
+	scale: number;
+	rotation: number;
+	opacity: number;
+}
+
+export const DEFAULT_CLIP_TRANSFORM: ClipTransform = { x: 50, y: 50, scale: 1, rotation: 0, opacity: 1 };
 
 export interface TimelineClip {
 	id: string;
@@ -13,6 +27,11 @@ export interface TimelineClip {
 	endTime: number;
 	sourceStart: number; // trim in within the source asset
 	sourceEnd: number;   // trim out
+	fadeIn?: number;     // seconds — duration of the IN transition (and export audio fade)
+	fadeOut?: number;    // seconds — duration of the OUT transition
+	transitionIn?: TransitionType;  // visual style of the IN window (default 'fade')
+	transitionOut?: TransitionType; // visual style of the OUT window
+	transform?: ClipTransform; // image clips only
 }
 
 export interface TimelineTrack {
@@ -31,6 +50,8 @@ export interface TimelineTrack {
 interface TimelineState {
 	tracks: TimelineTrack[];
 	activeTrackId: string | null;
+	// The focused clip — the ControlsPanel's "Selected Clip" section edits this one only
+	activeClipId: string | null;
 }
 
 export const TRACK_COLORS: Record<TrackType, string> = {
@@ -45,7 +66,8 @@ function makeId() { return Math.random().toString(36).slice(2, 9); }
 function createTimelineStore() {
 	const { subscribe, update } = writable<TimelineState>({
 		tracks: [],
-		activeTrackId: null
+		activeTrackId: null,
+		activeClipId: null
 	});
 
 	function addTrack(track: Omit<TimelineTrack, 'id'>): string {
@@ -133,15 +155,25 @@ function createTimelineStore() {
 
 		// ── TRACK MANAGEMENT ─────────────────────────────────────────────
 		removeTrack(trackId: string) {
-			update((s) => ({
-				...s,
-				tracks: s.tracks.filter((t) => t.id !== trackId),
-				activeTrackId: s.activeTrackId === trackId ? null : s.activeTrackId
-			}));
+			update((s) => {
+				const removed = s.tracks.find((t) => t.id === trackId);
+				const clipGone = removed?.clips.some((c) => c.id === s.activeClipId) ?? false;
+				return {
+					...s,
+					tracks: s.tracks.filter((t) => t.id !== trackId),
+					activeTrackId: s.activeTrackId === trackId ? null : s.activeTrackId,
+					activeClipId: clipGone ? null : s.activeClipId
+				};
+			});
 		},
 
 		setActiveTrack(trackId: string | null) {
 			update((s) => ({ ...s, activeTrackId: trackId }));
+		},
+
+		// Focus a clip (and its track). Pass nulls to clear focus.
+		setActiveClip(trackId: string | null, clipId: string | null) {
+			update((s) => ({ ...s, activeTrackId: trackId, activeClipId: clipId }));
 		},
 
 		setTrackVolume(trackId: string, volume: number) {
@@ -253,11 +285,15 @@ function createTimelineStore() {
 				if (splitAt <= clip.startTime + 0.1 || splitAt >= clip.endTime - 0.1) return s;
 
 				const sourceSplit = clip.sourceStart + (splitAt - clip.startTime);
-				const clipA: TimelineClip = { ...clip, endTime: splitAt, sourceEnd: sourceSplit };
+				// Fades stay at the outer edges: A keeps the fade-in, B keeps the fade-out
+				const clipA: TimelineClip = { ...clip, endTime: splitAt, sourceEnd: sourceSplit, fadeOut: 0 };
 				const clipB: TimelineClip = {
 					id: makeId(), assetId: clip.assetId,
 					startTime: splitAt, endTime: clip.endTime,
-					sourceStart: sourceSplit, sourceEnd: clip.sourceEnd
+					sourceStart: sourceSplit, sourceEnd: clip.sourceEnd,
+					fadeIn: 0, fadeOut: clip.fadeOut,
+					transitionIn: clip.transitionIn, transitionOut: clip.transitionOut,
+					transform: clip.transform
 				};
 
 				return {
@@ -290,16 +326,19 @@ function createTimelineStore() {
 				const track = s.tracks.find(t => t.id === trackId);
 				if (!track) return s;
 				const remaining = track.clips.filter(c => c.id !== clipId);
+				const activeClipId = s.activeClipId === clipId ? null : s.activeClipId;
 				if (remaining.length === 0) {
 					return {
 						...s,
 						tracks: s.tracks.filter(t => t.id !== trackId),
-						activeTrackId: s.activeTrackId === trackId ? null : s.activeTrackId
+						activeTrackId: s.activeTrackId === trackId ? null : s.activeTrackId,
+						activeClipId
 					};
 				}
 				return {
 					...s,
-					tracks: s.tracks.map(t => t.id !== trackId ? t : { ...t, clips: remaining })
+					tracks: s.tracks.map(t => t.id !== trackId ? t : { ...t, clips: remaining }),
+					activeClipId
 				};
 			});
 		},
@@ -339,7 +378,13 @@ function createTimelineStore() {
 		},
 
 		clearAll() {
-			update(() => ({ tracks: [], activeTrackId: null }));
+			update(() => ({ tracks: [], activeTrackId: null, activeClipId: null }));
+		},
+
+		// Wholesale state swap — used only by editHistory undo/redo. Clip focus is
+		// cleared so the ControlsPanel can't point at a clip that no longer exists.
+		restoreState(tracks: TimelineTrack[], activeTrackId: string | null) {
+			update(() => ({ tracks, activeTrackId, activeClipId: null }));
 		}
 	};
 }

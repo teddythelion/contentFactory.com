@@ -12,7 +12,10 @@
 	import LogoUpload from './LogoUpload.svelte';
 	import { logoState } from '$lib/stores/logo.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
-	
+	import { timelineStore, DEFAULT_CLIP_TRANSFORM, type TimelineClip, type ClipTransform } from '$lib/stores/timeline.store';
+	import { mediaBinStore } from '$lib/stores/mediaBin.store';
+	import { TRANSITIONS } from '$lib/utils/clipTransitions';
+
 	function resetAll() {
 		(window as any).__threeJsVideo?.pause();
 		videoState.setIsPlaying(false);
@@ -33,7 +36,7 @@
 	let musicToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Mobile tab state — tracks which group is active on mobile
-	let activeMobileTab = 'shape';
+	let activeMobileTab = $state('shape');
 
 	//$: logoValues = $logoState;
 	//$: textValues = $text3DState;
@@ -41,7 +44,74 @@
 	//$: isSavingEnhanced = $enhancedContentState.isSaving;
 	let audioStudio = $derived($audioStudioStore);
 	let videoDuration = $derived($videoState.videoDuration || 8);
-	let musicMaxTime = $derived(videoDuration);
+	let timeline = $derived($timelineStore);
+	// Full timeline length (last clip end on ANY track) — the real ceiling for every
+	// time-based control. The main video's duration alone under-reports whenever
+	// clips extend past it, and hardcoded maxes (600s) way over-report.
+	let timelineDuration = $derived.by(() => {
+		let max = videoDuration;
+		for (const t of timeline.tracks) for (const c of t.clips) max = Math.max(max, c.endTime);
+		return Math.ceil(max * 10) / 10;
+	});
+	let musicMaxTime = $derived(timelineDuration);
+
+	// ── FOCUSED CLIP (Selected Clip panel) ────────────────────────────
+	// The timeline publishes which bar is focused; these controls edit that clip only.
+	let focusedClipInfo = $derived.by(() => {
+		if (!timeline.activeClipId) return null;
+		for (const tr of timeline.tracks) {
+			if (tr.type !== 'video') continue;
+			const clip = tr.clips.find((c) => c.id === timeline.activeClipId);
+			if (clip) {
+				const asset = $mediaBinStore.assets.find((a) => a.id === tr.assetId);
+				return { track: tr, clip, isImage: asset?.type === 'image', srcDuration: asset?.duration ?? null };
+			}
+		}
+		return null;
+	});
+
+	function patchFocusedClip(patch: Partial<TimelineClip>) {
+		const f = focusedClipInfo;
+		if (!f) return;
+		timelineStore.updateClip(f.track.id, f.clip.id, patch);
+	}
+
+	function patchFocusedTransform(patch: Partial<ClipTransform>) {
+		const f = focusedClipInfo;
+		if (!f) return;
+		timelineStore.updateClip(f.track.id, f.clip.id, {
+			transform: { ...DEFAULT_CLIP_TRANSFORM, ...(f.clip.transform ?? {}), ...patch }
+		});
+	}
+
+	// Moves the clip (duration preserved)
+	function setFocusedClipStart(v: number) {
+		const f = focusedClipInfo;
+		if (!f || !isFinite(v)) return;
+		const dur = f.clip.endTime - f.clip.startTime;
+		const s = Math.max(0, v);
+		timelineStore.updateClip(f.track.id, f.clip.id, { startTime: s, endTime: s + dur });
+	}
+
+	// Resizes the clip end — bounded by the source media (images extend freely)
+	function setFocusedClipEnd(v: number) {
+		const f = focusedClipInfo;
+		if (!f || !isFinite(v)) return;
+		let newEnd = Math.max(f.clip.startTime + 0.1, v);
+		let newSrcEnd = f.clip.sourceEnd + (newEnd - f.clip.endTime);
+		if (f.isImage) {
+			newSrcEnd = newEnd - f.clip.startTime;
+		} else if (f.srcDuration !== null && newSrcEnd > f.srcDuration) {
+			newEnd -= newSrcEnd - f.srcDuration;
+			newSrcEnd = f.srcDuration;
+		}
+		timelineStore.updateClip(f.track.id, f.clip.id, { endTime: newEnd, sourceEnd: newSrcEnd });
+	}
+
+	// If clip focus clears while the mobile Clip tab is open, fall back to Shape
+	$effect(() => {
+		if (!focusedClipInfo && activeMobileTab === 'clip') activeMobileTab = 'shape';
+	});
 	// Always read music controls from the active entry so switching bars instantly updates the panel
 	let activeMusicEntry = $derived(
 		audioStudio.activeMusicSessionId
@@ -164,7 +234,9 @@
 		}
 	}
 
-	let controlGroups = $derived.by(() => [	
+	let controlGroups = $derived.by(() => [
+		// Selected Clip — custom template rendering below, only while a bar is focused
+		...(focusedClipInfo ? [{ id: 'clip', title: `🎞️ Selected Clip — ${focusedClipInfo.track.name}`, items: [] }] : []),
 		{
 			id: 'shape',
 			title: 'Shape & Transform',
@@ -352,8 +424,8 @@
 				{ label: 'Video Texture Position X', type: 'range', min: -2, max: 2, step: 0.1 },
 				{ label: 'Video Texture Position Y', type: 'range', min: -2, max: 2, step: 0.1 },
 				{ label: '⏱️ Timing', type: 'section' },
-				{ label: 'Appear At (s)', type: 'range', min: 0, max: 600, step: 0.5 },
-				{ label: 'Disappear At (s)', type: 'range', min: 0.5, max: 600, step: 0.5 },
+				{ label: 'Appear At (s)', type: 'range', min: 0, max: timelineDuration, step: 0.1 },
+				{ label: 'Disappear At (s)', type: 'range', min: 0.1, max: timelineDuration, step: 0.1 },
 				{ label: 'Text Fade In', type: 'range', min: 0, max: 10, step: 0.1 },
 				{ label: 'Text Fade Out', type: 'range', min: 0, max: 10, step: 0.1 },
 				{ label: '💡 Bold Title Preset', type: 'button', action: () => text3DState.presets.title() },
@@ -378,8 +450,8 @@
 				{ label: 'Rotation Z', type: 'range', min: -3.14, max: 3.14, step: 0.01 },
 				{ label: 'Auto Rotate Logo', type: 'toggle' },
 				{ label: 'Auto Rotate Speed', type: 'range', min: 0.001, max: 0.1, step: 0.001 },
-				{ label: 'Start Time', type: 'range', min: 0, max: videoDuration, step: 0.1 },
-				{ label: 'End Time', type: 'range', min: 0, max: videoDuration, step: 0.1 },
+				{ label: 'Start Time', type: 'range', min: 0, max: timelineDuration, step: 0.1 },
+				{ label: 'End Time', type: 'range', min: 0, max: timelineDuration, step: 0.1 },
 				{ label: 'Fade In Duration', type: 'range', min: 0, max: 2, step: 0.1 },
 				{ label: 'Fade Out Duration', type: 'range', min: 0, max: 2, step: 0.1 },
 				{
@@ -437,7 +509,7 @@
 				case 'Video Texture Position Y': return $text3DState.videoTextureOffset.y;
 				case 'True 3D Font': return $text3DState.true3dFontFile;
 				case 'Appear At (s)': return $text3DState.textStartTime;
-				case 'Disappear At (s)': return $text3DState.textEndTime === 9999 ? 600 : $text3DState.textEndTime;
+				case 'Disappear At (s)': return $text3DState.textEndTime >= 9999 ? timelineDuration : Math.min($text3DState.textEndTime, timelineDuration);
 				case 'Text Fade In': return $text3DState.textFadeIn;
 				case 'Text Fade Out': return $text3DState.textFadeOut;
 			}
@@ -629,6 +701,7 @@
 
 	// Short display labels for mobile pill tabs
 	const mobileTabLabels: Record<string, string> = {
+		clip:      'Clip',
 		shape:     'Shape',
 		rotation:  'Rotate',
 		lighting:  'Light',
@@ -646,6 +719,143 @@
 	progress={captureProgress}
 	message={captureMessage}
 />
+
+<!-- ── SELECTED CLIP PANEL — shared by mobile + desktop layouts ── -->
+{#snippet clipPanel()}
+	{#if focusedClipInfo}
+		{@const f = focusedClipInfo}
+		{@const clipDur = f.clip.endTime - f.clip.startTime}
+		{@const xf = { ...DEFAULT_CLIP_TRANSFORM, ...(f.clip.transform ?? {}) }}
+		{@const fadeMax = Math.min(6, Math.max(0.5, clipDur))}
+		<div class="flex flex-col gap-3 p-3">
+			<div class="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+				<p class="text-sm font-semibold text-yellow-300">{f.isImage ? '🖼️' : '🎬'} {f.track.name}</p>
+				<p class="mt-0.5 text-xs text-gray-400">{f.clip.startTime.toFixed(1)}s – {f.clip.endTime.toFixed(1)}s &middot; {clipDur.toFixed(1)}s long</p>
+				<p class="mt-1 text-xs text-gray-500">Edits apply to this clip only — focus another bar on the timeline to switch.</p>
+			</div>
+
+			<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
+				<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Position on Timeline</p>
+				<div class="grid grid-cols-2 gap-2">
+					<div>
+						<span class="text-xs text-white">Start (s)</span>
+						<input type="number" min="0" step="0.1"
+							value={Number(f.clip.startTime.toFixed(2))}
+							onchange={(e) => setFocusedClipStart(parseFloat(e.currentTarget.value))}
+							class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white outline-none focus:border-white/20" />
+					</div>
+					<div>
+						<span class="text-xs text-white">End (s)</span>
+						<input type="number" min="0" step="0.1"
+							value={Number(f.clip.endTime.toFixed(2))}
+							onchange={(e) => setFocusedClipEnd(parseFloat(e.currentTarget.value))}
+							class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white outline-none focus:border-white/20" />
+					</div>
+				</div>
+			</div>
+
+			<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
+				<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Fades / Transitions</p>
+
+				<!-- IN -->
+				<div class="mb-1 flex items-center justify-between">
+					<span class="text-sm text-white">Fade / Duration In</span>
+					<span class="text-xs text-gray-400">{(f.clip.fadeIn ?? 0).toFixed(1)}s</span>
+				</div>
+				<input type="range" min="0" max={fadeMax} step="0.1"
+					value={f.clip.fadeIn ?? 0}
+					oninput={(e) => patchFocusedClip({ fadeIn: parseFloat(e.currentTarget.value) })}
+					class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-yellow-500" />
+				<div class="mt-1.5 flex gap-1.5 overflow-x-auto pb-1">
+					{#each TRANSITIONS as tr (tr.id)}
+						{@const sel = (f.clip.transitionIn ?? 'fade') === tr.id}
+						<button
+							onclick={() => patchFocusedClip({ transitionIn: tr.id })}
+							class="flex shrink-0 flex-col items-center gap-0.5"
+							title="{tr.label}{tr.glyph ? ' ' + tr.glyph : ''} (in)"
+						>
+							<div class="flex h-8 w-12 items-center justify-center rounded border text-[11px] font-bold text-white {sel ? 'border-yellow-400 ring-1 ring-yellow-400/50' : 'border-white/15'}"
+								style="background:{tr.tile};background-color:rgba(17,24,39,0.8);text-shadow:0 1px 2px rgba(0,0,0,0.8);">{tr.glyph ?? ''}</div>
+							<span class="max-w-12 truncate text-[8px] {sel ? 'text-yellow-300' : 'text-gray-500'}">{tr.label}</span>
+						</button>
+					{/each}
+				</div>
+
+				<!-- OUT -->
+				<div class="mt-3 mb-1 flex items-center justify-between">
+					<span class="text-sm text-white">Fade / Duration Out</span>
+					<span class="text-xs text-gray-400">{(f.clip.fadeOut ?? 0).toFixed(1)}s</span>
+				</div>
+				<input type="range" min="0" max={fadeMax} step="0.1"
+					value={f.clip.fadeOut ?? 0}
+					oninput={(e) => patchFocusedClip({ fadeOut: parseFloat(e.currentTarget.value) })}
+					class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-yellow-500" />
+				<div class="mt-1.5 flex gap-1.5 overflow-x-auto pb-1">
+					{#each TRANSITIONS as tr (tr.id)}
+						{@const sel = (f.clip.transitionOut ?? 'fade') === tr.id}
+						<button
+							onclick={() => patchFocusedClip({ transitionOut: tr.id })}
+							class="flex shrink-0 flex-col items-center gap-0.5"
+							title="{tr.label}{tr.glyph ? ' ' + tr.glyph : ''} (out)"
+						>
+							<div class="flex h-8 w-12 items-center justify-center rounded border text-[11px] font-bold text-white {sel ? 'border-yellow-400 ring-1 ring-yellow-400/50' : 'border-white/15'}"
+								style="background:{tr.tile};background-color:rgba(17,24,39,0.8);text-shadow:0 1px 2px rgba(0,0,0,0.8);">{tr.glyph ?? ''}</div>
+							<span class="max-w-12 truncate text-[8px] {sel ? 'text-yellow-300' : 'text-gray-500'}">{tr.label}</span>
+						</button>
+					{/each}
+				</div>
+
+				<p class="mt-2 text-xs text-gray-500">Duration = how long the transition runs; the tiles pick its style. Fade one clip out and the next one in — overlap the clips on two tracks and the transition dissolves into the clip beneath.</p>
+			</div>
+
+			{#if f.isImage}
+				<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
+					<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Image Transform</p>
+					<div class="mb-1 flex items-center justify-between">
+						<span class="text-sm text-white">Scale</span>
+						<span class="text-xs text-gray-400">{xf.scale.toFixed(2)}</span>
+					</div>
+					<input type="range" min="0.05" max="3" step="0.01"
+						value={xf.scale}
+						oninput={(e) => patchFocusedTransform({ scale: parseFloat(e.currentTarget.value) })}
+						class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+					<div class="mt-3 mb-1 flex items-center justify-between">
+						<span class="text-sm text-white">Opacity</span>
+						<span class="text-xs text-gray-400">{Math.round(xf.opacity * 100)}%</span>
+					</div>
+					<input type="range" min="0" max="1" step="0.05"
+						value={xf.opacity}
+						oninput={(e) => patchFocusedTransform({ opacity: parseFloat(e.currentTarget.value) })}
+						class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+					<div class="mt-3 mb-1 flex items-center justify-between">
+						<span class="text-sm text-white">Position X</span>
+						<span class="text-xs text-gray-400">{Math.round(xf.x)}%</span>
+					</div>
+					<input type="range" min="0" max="100" step="1"
+						value={xf.x}
+						oninput={(e) => patchFocusedTransform({ x: parseFloat(e.currentTarget.value) })}
+						class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+					<div class="mt-3 mb-1 flex items-center justify-between">
+						<span class="text-sm text-white">Position Y</span>
+						<span class="text-xs text-gray-400">{Math.round(xf.y)}%</span>
+					</div>
+					<input type="range" min="0" max="100" step="1"
+						value={xf.y}
+						oninput={(e) => patchFocusedTransform({ y: parseFloat(e.currentTarget.value) })}
+						class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+					<div class="mt-3 mb-1 flex items-center justify-between">
+						<span class="text-sm text-white">Rotation</span>
+						<span class="text-xs text-gray-400">{xf.rotation.toFixed(2)}</span>
+					</div>
+					<input type="range" min="-3.14" max="3.14" step="0.01"
+						value={xf.rotation}
+						oninput={(e) => patchFocusedTransform({ rotation: parseFloat(e.currentTarget.value) })}
+						class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-blue-500" />
+				</div>
+			{/if}
+		</div>
+	{/if}
+{/snippet}
 
 <!-- ╔══════════════════════════════════════════════════════════╗ -->
 <!-- ║  MOBILE LAYOUT — pill tabs + single-panel content       ║ -->
@@ -671,7 +881,10 @@
 		{#each controlGroups as group (group.id)}
 			{#if group.id === activeMobileTab}
 
-				{#if group.id === 'sfx'}
+				{#if group.id === 'clip'}
+					{@render clipPanel()}
+
+				{:else if group.id === 'sfx'}
 					<!-- ── SOUND EFFECTS (mobile) ── -->
 					<div class="flex flex-col gap-3">
 						<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
@@ -1045,8 +1258,8 @@
 <div class="hidden lg:flex w-full flex-col gap-3 overflow-y-auto lg:w-96">
 	<div class="flex flex-col gap-2 overflow-y-auto pr-2" style="max-height: calc(100vh - 200px);">
 		{#each controlGroups as group (group.id)}
-			<div class="rounded-lg border border-white/10 bg-gray-800/50">
-				<details class="group">
+			<div class="rounded-lg border border-white/10 bg-gray-800/50 {group.id === 'clip' ? 'border-yellow-500/40' : ''}">
+				<details class="group" open={group.id === 'clip'}>
 					<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
 						<span>{group.title}</span>
 						<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180">
@@ -1056,7 +1269,10 @@
 
 					<div class="px-2 pb-2">
 
-					{#if group.id === 'sfx'}
+					{#if group.id === 'clip'}
+						{@render clipPanel()}
+
+					{:else if group.id === 'sfx'}
 						<!-- ── SOUND EFFECTS ─────────────────────────────── -->
 						<div class="flex flex-col gap-3 p-3">
 

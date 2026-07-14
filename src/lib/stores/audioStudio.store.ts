@@ -571,6 +571,26 @@ function createAudioStudioStore() {
 			});
 		},
 
+		// Used only by editHistory undo/redo. Re-adds mixer players for entries that
+		// were removed since the snapshot (deleted music track being undone) and
+		// stops players for entries the snapshot doesn't have (added track undone).
+		restoreForHistory: (entries: Record<string, MusicEntry>, sfxInstances: SfxInstance[]) => {
+			const current = get({ subscribe }).musicEntries;
+			for (const [sid, e] of Object.entries(entries)) {
+				if (!current[sid]) audioMixer.loadMusic(sid, e.previewUrl);
+			}
+			for (const sid of Object.keys(current)) {
+				if (!entries[sid]) audioMixer.stopMusic(sid);
+			}
+			update((s) => ({
+				...s,
+				musicEntries: entries,
+				sfxInstances,
+				activeMusicSessionId:
+					s.activeMusicSessionId && entries[s.activeMusicSessionId] ? s.activeMusicSessionId : null
+			}));
+		},
+
 		stopAll: () => { audioMixer.stopAll(); },
 
 		reset: () => {

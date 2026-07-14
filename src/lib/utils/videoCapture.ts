@@ -327,19 +327,26 @@ export async function captureThreeJsVideo(
 		mainClips.length === 1 &&
 		Math.abs(mainClips[0].startTime) < 0.01 &&
 		Math.abs(mainClips[0].sourceStart) < 0.01 &&
-		Math.abs(mainClips[0].sourceEnd - videoElement.duration) < 0.05;
+		Math.abs(mainClips[0].sourceEnd - videoElement.duration) < 0.05 &&
+		// Per-clip fades need the per-clip audio path — the legacy whole-file
+		// mux can't apply them, so a faded "trivial" clip isn't trivial.
+		!(mainClips[0].fadeIn || mainClips[0].fadeOut);
 
 	let legacyAudioSessionId = audioSessionId;
 	if (!mainTrivial && audioSessionId && !suppressOriginalAudio) {
 		mainClips.forEach((c, i) => {
+			// Clip fade (set in the Selected Clip panel) wins over the legacy
+			// whole-video original-audio fade so audio matches the visual fade.
+			const clipFadeIn = c.fadeIn ?? 0;
+			const clipFadeOut = c.fadeOut ?? 0;
 			clipAudios.push({
 				sessionId: audioSessionId,
 				timelineStart: c.startTime,
 				sourceStart: c.sourceStart,
 				duration: c.endTime - c.startTime,
 				volume: 1,
-				fadeIn: i === 0 ? audioStudio.originalFadeIn : 0,
-				fadeOut: i === mainClips.length - 1 ? audioStudio.originalFadeOut : 0
+				fadeIn: clipFadeIn > 0 ? clipFadeIn : (i === 0 ? audioStudio.originalFadeIn : 0),
+				fadeOut: clipFadeOut > 0 ? clipFadeOut : (i === mainClips.length - 1 ? audioStudio.originalFadeOut : 0)
 			});
 		});
 		legacyAudioSessionId = null;
@@ -358,8 +365,9 @@ export async function captureThreeJsVideo(
 				sourceStart: c.sourceStart,
 				duration: c.endTime - c.startTime,
 				volume: tr.volume ?? 1,
-				fadeIn: 0,
-				fadeOut: 0
+				// Per-clip fades so exported audio matches the baked visual fade
+				fadeIn: c.fadeIn ?? 0,
+				fadeOut: c.fadeOut ?? 0
 			});
 		}
 	}

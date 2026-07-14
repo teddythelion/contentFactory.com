@@ -3,6 +3,7 @@
 <script lang="ts">
 	import { mediaBinStore, type MediaAsset } from '$lib/stores/mediaBin.store';
 	import { timelineStore } from '$lib/stores/timeline.store';
+	import { editHistory } from '$lib/stores/editHistory.store';
 
 	let bin    = $derived($mediaBinStore);
 	let assets = $derived(bin.assets);
@@ -33,6 +34,7 @@
 
 	function placeOnNewTrack() {
 		if (!armedAsset) return;
+		editHistory.checkpoint();
 		const a = armedAsset;
 		if (a.type === 'video' || a.type === 'image') {
 			timelineStore.addVideoTrack(a.id, a.name, a.duration);

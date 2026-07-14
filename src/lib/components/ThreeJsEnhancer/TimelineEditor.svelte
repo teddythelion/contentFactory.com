@@ -5,6 +5,7 @@
 	import { timelineStore, type TimelineTrack, type TimelineClip } from '$lib/stores/timeline.store';
 	import { mediaBinStore } from '$lib/stores/mediaBin.store';
 	import { videoState } from '$lib/stores/video.store';
+	import { editHistory, editHistoryState } from '$lib/stores/editHistory.store';
 
 	interface Props {
 		videoElement?: HTMLVideoElement | null;
@@ -34,6 +35,12 @@
 	// from firing overlapping play() calls while the browser is still starting one.
 	const pendingPlay = new Set<HTMLVideoElement>();
 
+	// Last drift-resync per element. A slow seek (proxy-backed clip) leaves the
+	// element permanently ~seek-latency behind the timeline clock; without a
+	// cooldown the tick reseeks every frame it sees >0.3s drift — a seek storm
+	// that strobes the composite (every seek dips readyState).
+	const lastDriftSeek = new WeakMap<HTMLVideoElement, number>();
+
 	// Segment playback state — which clip is currently being played (used by playback engine only)
 	let activeVideoClipId = $state<string | null>(null);
 	let inVideoGap        = $state(false);   // true while traversing a gap between clips
@@ -61,8 +68,15 @@
 					if (!tr) continue;
 					// Secondary clips play their own audio — track M / vol control it
 					el.muted = tr.muted;
-					el.volume = tr.volume ?? 1;
 					const clip = tr.clips.find(c => t >= c.startTime && t < c.endTime);
+					// Per-clip fade: match preview audio to the visual fade the compositor draws
+					let fadeVol = 1;
+					if (clip) {
+						const fi = clip.fadeIn ?? 0, fo = clip.fadeOut ?? 0;
+						if (fi > 0 && t < clip.startTime + fi) fadeVol = Math.max(0, (t - clip.startTime) / fi);
+						if (fo > 0 && t > clip.endTime - fo) fadeVol = Math.min(fadeVol, Math.max(0, (clip.endTime - t) / fo));
+					}
+					el.volume = Math.min(1, Math.max(0, (tr.volume ?? 1) * fadeVol));
 					if (clip && effectivePlaying) {
 						const target = clip.sourceStart + (t - clip.startTime);
 						// No readyState gate — play() buffers and starts on its own; gating on
@@ -81,7 +95,14 @@
 									});
 							}
 						} else if (!el.seeking && Math.abs(el.currentTime - target) > 0.3) {
-							el.currentTime = target; // drifted — resync to the timeline
+							// Drifted — resync, but at most every 600ms per element so a
+							// slow-seeking clip can't loop into a strobe (see lastDriftSeek).
+							const nowMs = performance.now();
+							if (nowMs - (lastDriftSeek.get(el) ?? 0) > 600) {
+								lastDriftSeek.set(el, nowMs);
+								console.warn(`🔁 Secondary clip "${tr.name}" drifted ${(el.currentTime - target).toFixed(2)}s from timeline (t=${t.toFixed(2)}s, readyState=${el.readyState}) — resyncing`);
+								el.currentTime = target;
+							}
 						}
 					} else if (!el.paused) {
 						el.pause();
@@ -338,14 +359,25 @@
 		};
 	});
 
-	// ── SPACEBAR PLAY/PAUSE ─────────────────────────────────────────
+	// ── SPACEBAR PLAY/PAUSE + UNDO/REDO ─────────────────────────────
 	$effect(() => {
 		const onKey = (e: KeyboardEvent) => {
+			const t = e.target as HTMLElement | null;
+			const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+			if ((window as any).__threeJsCapturing) return;
+			// Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z — timeline undo/redo
+			if ((e.ctrlKey || e.metaKey) && !typing) {
+				const k = e.key.toLowerCase();
+				if (k === 'z' || k === 'y') {
+					e.preventDefault();
+					if (k === 'y' || e.shiftKey) editHistory.redo();
+					else editHistory.undo();
+					return;
+				}
+			}
 			if (e.code !== 'Space') return;
 			// Don't hijack space while typing or when a control would also react to it
-			const t = e.target as HTMLElement | null;
-			if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.tagName === 'BUTTON' || t.isContentEditable)) return;
-			if ((window as any).__threeJsCapturing) return;
+			if (typing || (t && (t.tagName === 'SELECT' || t.tagName === 'BUTTON'))) return;
 			e.preventDefault(); // stop the page from scrolling
 			togglePlay();
 		};
@@ -477,6 +509,12 @@
 		return 'touches' in e ? (e.touches[0]?.clientX ?? 0) : e.clientX;
 	}
 
+	// mousedown fires for EVERY button — right-click must not start a drag (it
+	// used to push a phantom undo checkpoint, making the menu's Undo a no-op).
+	function notLeftButton(e: MouseEvent | TouchEvent): boolean {
+		return 'button' in e && e.button !== 0;
+	}
+
 	// ── VIDEO CLIP TIME MAPPING ──────────────────────────────────────
 	// Maps a timeline position → source video time (null = in a gap, no video).
 	function timelineToSource(t: number): number | null {
@@ -563,9 +601,11 @@
 
 	// ── TRACK DRAG REORDER (video layer priority) ───────────────────
 	function startTrackDrag(e: MouseEvent | TouchEvent, track: TimelineTrack) {
+		if (notLeftButton(e)) return;
 		const y0 = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
 		const origPos = timeline.tracks.filter(t => t.type === 'video').findIndex(t => t.id === track.id);
 		if (origPos === -1) return;
+		editHistory.beginGesture();
 		timelineStore.setActiveTrack(track.id);
 		attachDrag(
 			(_x, y) => {
@@ -573,16 +613,17 @@
 				// the original position so repeated moves stay idempotent mid-drag.
 				timelineStore.moveVideoTrackTo(track.id, origPos + Math.round((y - y0) / TRACK_H));
 			},
-			() => {}
+			() => editHistory.endGesture()
 		);
 		e.stopPropagation(); e.preventDefault();
 	}
 
 	// ── MUSIC CLIP DRAG ─────────────────────────────────────────────
 	function startMusicDrag(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
+		if (notLeftButton(e)) return;
 		if (track.assetSessionId) audioStudioStore.setActiveMusicSession(track.assetSessionId);
-		activeClipId = clip.id;
-		timelineStore.setActiveTrack(track.id);
+		editHistory.beginGesture();
+		timelineStore.setActiveClip(track.id, clip.id);
 		const x0     = cx(e);
 		const start0 = clip.startTime;
 		const dur    = clip.endTime - clip.startTime;
@@ -594,12 +635,14 @@
 				timelineStore.updateClip(track.id, clip.id, { startTime: s, endTime: s + dur });
 				if (sid) audioStudioStore.updateMusicEntry(sid, { startTime: s, endTime: s + dur });
 			},
-			() => {}
+			() => editHistory.endGesture()
 		);
 		e.preventDefault();
 	}
 
 	function startMusicResizeStart(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
+		if (notLeftButton(e)) return;
+		editHistory.beginGesture();
 		const x0          = cx(e);
 		const start0      = clip.startTime;
 		const sourceStart0 = clip.sourceStart;
@@ -612,12 +655,14 @@
 				timelineStore.updateClip(track.id, clip.id, { startTime: newStart, sourceStart: newSrcStart });
 				if (sid) audioStudioStore.updateMusicEntry(sid, { startTime: newStart, trimStart: newSrcStart });
 			},
-			() => {}
+			() => editHistory.endGesture()
 		);
 		e.stopPropagation(); e.preventDefault();
 	}
 
 	function startMusicResizeEnd(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
+		if (notLeftButton(e)) return;
+		editHistory.beginGesture();
 		const x0        = cx(e);
 		const end0      = clip.endTime;
 		const sourceEnd0 = clip.sourceEnd;
@@ -629,15 +674,16 @@
 				timelineStore.updateClip(track.id, clip.id, { endTime: newEnd, sourceEnd: newSrcEnd });
 				if (sid) audioStudioStore.updateMusicEntry(sid, { endTime: newEnd });
 			},
-			() => {}
+			() => editHistory.endGesture()
 		);
 		e.stopPropagation(); e.preventDefault();
 	}
 
 	// ── VIDEO CLIP DRAG / RESIZE ────────────────────────────────────
 	function startVideoDrag(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
-		activeClipId = clip.id;
-		timelineStore.setActiveTrack(track.id);
+		if (notLeftButton(e)) return;
+		editHistory.beginGesture();
+		timelineStore.setActiveClip(track.id, clip.id);
 		const x0 = cx(e); const start0 = clip.startTime; const dur = clip.endTime - clip.startTime;
 		const y0 = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
 		const origPos = timeline.tracks.filter(t => t.type === 'video').findIndex(t => t.id === track.id);
@@ -651,12 +697,14 @@
 					timelineStore.moveVideoTrackTo(track.id, origPos + Math.round((y - y0) / TRACK_H));
 				}
 			},
-			() => {}
+			() => editHistory.endGesture()
 		);
 		e.preventDefault();
 	}
 
 	function startVideoResizeStart(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
+		if (notLeftButton(e)) return;
+		editHistory.beginGesture();
 		const x0 = cx(e); const start0 = clip.startTime; const sourceStart0 = clip.sourceStart;
 		attachDrag(
 			(x) => {
@@ -665,12 +713,14 @@
 				const newSrcStart = Math.max(0, sourceStart0 + (newStart - start0));
 				timelineStore.updateClip(track.id, clip.id, { startTime: newStart, sourceStart: newSrcStart });
 			},
-			() => {}
+			() => editHistory.endGesture()
 		);
 		e.stopPropagation(); e.preventDefault();
 	}
 
 	function startVideoResizeEnd(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
+		if (notLeftButton(e)) return;
+		editHistory.beginGesture();
 		const x0 = cx(e); const end0 = clip.endTime; const sourceEnd0 = clip.sourceEnd;
 		// Clip length is bounded by its own source media, not the main video's
 		// duration (export follows the timeline now). Images have no intrinsic
@@ -690,28 +740,32 @@
 				}
 				timelineStore.updateClip(track.id, clip.id, { endTime: newEnd, sourceEnd: newSrcEnd });
 			},
-			() => {}
+			() => editHistory.endGesture()
 		);
 		e.stopPropagation(); e.preventDefault();
 	}
 
 	// ── ACTIVE CLIP TRACKING ────────────────────────────────────────
-	let activeClipId: string | null = $state(null);
+	// Focus lives in the store so the ControlsPanel's "Selected Clip" section
+	// follows whichever bar is focused here.
+	let activeClipId = $derived(timeline.activeClipId);
 
 	function splitActiveClip() {
 		if (!activeClipId || !timeline.activeTrackId) return;
+		editHistory.checkpoint();
 		timelineStore.splitClip(timeline.activeTrackId, activeClipId, editTime);
-		activeClipId = null; // deselect after split
+		timelineStore.setActiveClip(timeline.activeTrackId, null); // deselect after split
 	}
 
 	function duplicateMusicClip(track: TimelineTrack, clip: TimelineClip) {
+		editHistory.checkpoint();
 		timelineStore.duplicateClip(track.id, clip.id);
 	}
 
 	function deleteClip(track: TimelineTrack, clipId: string) {
 		const isLast = track.clips.length === 1;
+		editHistory.checkpoint();
 		timelineStore.removeClip(track.id, clipId);
-		if (clipId === activeClipId) activeClipId = null;
 		// If last clip, auto-remove empties the track — clean up audio entry too
 		if (isLast && track.assetSessionId) audioStudioStore.stopMusic(track.assetSessionId);
 	}
@@ -731,8 +785,14 @@
 
 	function openCtxMenu(e: MouseEvent, track: TimelineTrack, clip: TimelineClip) {
 		e.preventDefault();
+		// Right-click focuses the clip too (drag handlers ignore non-left buttons now)
+		timelineStore.setActiveClip(track.id, clip.id);
 		ctxMenu = { x: e.clientX, y: e.clientY, track, clip };
 	}
+
+	// Menu height estimate for flip-up positioning — the timeline sits at the
+	// bottom of the screen, so opening downward almost always clipped the menu.
+	const CTX_MENU_H = 280;
 	function closeCtxMenu() { ctxMenu = null; }
 
 	function ctxCopy() {
@@ -744,6 +804,7 @@
 
 	function ctxPaste() {
 		if (!ctxMenu || !clipboardClip) return;
+		editHistory.checkpoint();
 		const dur = clipboardClip.sourceEnd - clipboardClip.sourceStart;
 		timelineStore.insertClip(ctxMenu.track.id, {
 			assetId: clipboardClip.assetId,
@@ -767,6 +828,9 @@
 		closeCtxMenu();
 	}
 
+	function ctxUndo() { editHistory.undo(); closeCtxMenu(); }
+	function ctxRedo() { editHistory.redo(); closeCtxMenu(); }
+
 	// ── SFX CLIP DRAG ───────────────────────────────────────────────
 	let activeSfxId: string | null = null;
 
@@ -775,6 +839,8 @@
 		inst: SfxInstance,
 		mode: 'move' | 'resizeStart' | 'resizeEnd'
 	) {
+		if (notLeftButton(e)) return;
+		editHistory.beginGesture();
 		activeSfxId = inst.id;
 		const x0  = cx(e);
 		const s0  = inst.startTime;
@@ -793,7 +859,7 @@
 					audioStudioStore.updateSfxInstance(activeSfxId, s0, Math.max(s0 + 0.1, e0 + dx));
 				}
 			},
-			() => { activeSfxId = null; }
+			() => { activeSfxId = null; editHistory.endGesture(); }
 		);
 		e.stopPropagation(); e.preventDefault();
 	}
@@ -801,21 +867,42 @@
 	// ── CLIP PLACEMENT from armed bin asset ─────────────────────────
 	function handleTrackClick(e: MouseEvent, track: TimelineTrack) {
 		const armed = $mediaBinStore.armedAssetId;
-		if (!armed || !scrollEl) return;
+		if (!armed) {
+			// Click on empty track space with nothing armed = deselect the focused
+			// clip (clip divs stop propagation, so this only fires off-clip).
+			timelineStore.setActiveClip(timeline.activeTrackId, null);
+			return;
+		}
+		if (!scrollEl) return;
 		const asset = $mediaBinStore.assets.find((a) => a.id === armed);
-		if (!asset || asset.type !== track.type) return;
+		if (!asset) return;
 		const rect = scrollEl.getBoundingClientRect();
 		const dropTime = pt(e.clientX - rect.left + scrollEl.scrollLeft);
-		// Add clip to this track
-		timelineStore.updateClip(track.id, '', {
-			startTime: dropTime,
-			endTime: dropTime + asset.duration
-		});
+		editHistory.checkpoint();
+		if (asset.id === track.assetId) {
+			// Same asset — add another clip to this track at the click position
+			timelineStore.insertClip(track.id, {
+				assetId: asset.id,
+				startTime: dropTime,
+				endTime: dropTime + asset.duration,
+				sourceStart: 0,
+				sourceEnd: asset.duration
+			});
+		} else if (asset.type === 'video' || asset.type === 'image') {
+			// Different asset — a track is bound to one source, so place on a new track
+			timelineStore.addVideoTrack(asset.id, asset.name, asset.duration, dropTime);
+		} else if (asset.type === 'music') {
+			timelineStore.addMusicTrack(asset.id, asset.name, asset.sessionId ?? asset.id, dropTime, dropTime + asset.duration);
+		} else if (asset.type === 'sfx') {
+			timelineStore.addSfxTrack(asset.id, asset.name, asset.sessionId ?? asset.id, [
+				{ id: crypto.randomUUID(), startTime: dropTime, endTime: dropTime + asset.duration }
+			]);
+		}
 		mediaBinStore.disarm();
 	}
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === 'Escape') closeCtxMenu(); }} />
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape') { closeCtxMenu(); timelineStore.setActiveClip(timeline.activeTrackId, null); } }} />
 
 <!-- ── OUTER SHELL ─────────────────────────────────────────────────── -->
 <div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:rgba(17,24,39,0.65);border:1px solid rgba(255,255,255,0.1);border-radius:8px;">
@@ -850,6 +937,11 @@
 					title="Split focused clip at playhead position"
 				>✂ Split</button>
 			{/if}
+			<!-- Undo / Redo -->
+			<div style="display:flex;align-items:center;gap:2px;">
+				<button onclick={() => editHistory.undo()} disabled={!$editHistoryState.canUndo} style="width:20px;height:20px;border-radius:4px;background:rgba(55,65,81,0.8);border:1px solid rgba(255,255,255,0.15);color:white;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;opacity:{$editHistoryState.canUndo ? 1 : 0.35};" title="Undo (Ctrl+Z)">↶</button>
+				<button onclick={() => editHistory.redo()} disabled={!$editHistoryState.canRedo} style="width:20px;height:20px;border-radius:4px;background:rgba(55,65,81,0.8);border:1px solid rgba(255,255,255,0.15);color:white;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;opacity:{$editHistoryState.canRedo ? 1 : 0.35};" title="Redo (Ctrl+Y)">↷</button>
+			</div>
 			<!-- Zoom -->
 			<div style="display:flex;align-items:center;gap:2px;">
 				<button onclick={zoomOut} style="width:20px;height:20px;border-radius:4px;background:rgba(55,65,81,0.8);border:1px solid rgba(255,255,255,0.15);color:white;cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;" title="Zoom out">−</button>
@@ -1007,12 +1099,19 @@
 									<div
 										onmousedown={(e) => startVideoDrag(e, track, clip)}
 										ontouchstart={(e) => startVideoDrag(e, track, clip)}
+										onclick={(e) => e.stopPropagation()}
 										oncontextmenu={(e) => { e.preventDefault(); openCtxMenu(e, track, clip); }}
 										style="position:absolute;top:5px;left:{tp(clip.startTime)}px;width:{cw}px;height:{TRACK_H-10}px;background:{track.color};border:2px solid {isActive ? 'rgba(250,204,21,1)' : 'rgba(107,114,128,0.5)'};border-radius:3px;cursor:move;overflow:hidden;user-select:none;{isActive ? 'box-shadow:0 0 0 1px rgba(250,204,21,0.4),0 0 8px rgba(250,204,21,0.25);' : ''}"
 									>
 										<!-- Left resize handle -->
 										<!-- svelte-ignore a11y_no_static_element_interactions -->
 										<div onmousedown={(e) => startVideoResizeStart(e, track, clip)} ontouchstart={(e) => startVideoResizeStart(e, track, clip)} style="position:absolute;left:0;top:0;bottom:0;width:10px;cursor:ew-resize;background:rgba(255,255,255,0.18);z-index:2;"></div>
+										{#if (clip.fadeIn ?? 0) > 0}
+											<div style="position:absolute;left:0;top:0;bottom:0;width:{Math.min(tp(clip.fadeIn ?? 0), cw * 0.5)}px;background:linear-gradient(to right,rgba(0,0,0,0.65),transparent);pointer-events:none;z-index:1;"></div>
+										{/if}
+										{#if (clip.fadeOut ?? 0) > 0}
+											<div style="position:absolute;right:0;top:0;bottom:0;width:{Math.min(tp(clip.fadeOut ?? 0), cw * 0.5)}px;background:linear-gradient(to left,rgba(0,0,0,0.65),transparent);pointer-events:none;z-index:1;"></div>
+										{/if}
 										{#if cw > 50}
 											<div style="padding:2px 12px;pointer-events:none;position:relative;z-index:0;">
 												<div style="font-size:9px;font-weight:600;color:rgba(209,213,219,0.9);white-space:nowrap;">🎬 {fmt(clip.endTime - clip.startTime)}</div>
@@ -1034,6 +1133,7 @@
 									<div
 										onmousedown={(e) => startMusicDrag(e, track, clip)}
 										ontouchstart={(e) => startMusicDrag(e, track, clip)}
+										onclick={(e) => e.stopPropagation()}
 										oncontextmenu={(e) => { e.preventDefault(); openCtxMenu(e, track, clip); }}
 										style="position:absolute;top:5px;left:{tp(clip.startTime)}px;width:{cw}px;height:{TRACK_H-10}px;background:{track.color};border:2px solid {isActive ? 'rgba(250,204,21,1)' : 'rgba(147,51,234,0.85)'};border-radius:3px;cursor:move;overflow:hidden;user-select:none;{isActive ? 'box-shadow:0 0 0 1px rgba(250,204,21,0.4),0 0 8px rgba(250,204,21,0.25);' : ''}"
 									>
@@ -1111,8 +1211,11 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions-->
 		<div use:portal onclick={closeCtxMenu} oncontextmenu={(e) => { e.preventDefault(); closeCtxMenu(); }} style="position:fixed;inset:0;z-index:9998;"></div>
-		<div use:portal style="position:fixed;left:{Math.min(ctxMenu.x, window.innerWidth - 160)}px;top:{Math.min(ctxMenu.y, window.innerHeight - 180)}px;z-index:9999;background:rgba(10,15,30,0.97);border:1px solid rgba(255,255,255,0.13);border-radius:8px;padding:4px 0;min-width:150px;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+		<div use:portal style="position:fixed;left:{Math.min(ctxMenu.x, window.innerWidth - 160)}px;top:{ctxMenu.y + CTX_MENU_H > window.innerHeight ? Math.max(8, ctxMenu.y - CTX_MENU_H) : ctxMenu.y}px;z-index:9999;background:rgba(10,15,30,0.97);border:1px solid rgba(255,255,255,0.13);border-radius:8px;padding:4px 0;min-width:150px;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
 			<div style="padding:4px 10px 6px;font-size:9px;font-weight:700;color:rgba(255,255,255,0.35);letter-spacing:0.08em;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,0.07);margin-bottom:3px;">Clip: {ctxMenu.track.name}</div>
+			<button onclick={ctxUndo}      disabled={!$editHistoryState.canUndo} style="display:flex;align-items:center;gap:7px;width:100%;padding:6px 12px;background:none;border:none;color:{$editHistoryState.canUndo ? 'rgba(209,213,219,1)' : 'rgba(107,114,128,0.5)'};font-size:11px;cursor:{$editHistoryState.canUndo ? 'pointer' : 'default'};text-align:left;" onmouseenter={(e)=>{ if($editHistoryState.canUndo) e.currentTarget.style.background='rgba(59,130,246,0.18)'; }} onmouseleave={(e)=>(e.currentTarget.style.background='none')}><span style="font-size:13px;">↶</span> Undo <span style="margin-left:auto;font-size:9px;color:rgba(107,114,128,0.8);">Ctrl+Z</span></button>
+			<button onclick={ctxRedo}      disabled={!$editHistoryState.canRedo} style="display:flex;align-items:center;gap:7px;width:100%;padding:6px 12px;background:none;border:none;color:{$editHistoryState.canRedo ? 'rgba(209,213,219,1)' : 'rgba(107,114,128,0.5)'};font-size:11px;cursor:{$editHistoryState.canRedo ? 'pointer' : 'default'};text-align:left;" onmouseenter={(e)=>{ if($editHistoryState.canRedo) e.currentTarget.style.background='rgba(59,130,246,0.18)'; }} onmouseleave={(e)=>(e.currentTarget.style.background='none')}><span style="font-size:13px;">↷</span> Redo <span style="margin-left:auto;font-size:9px;color:rgba(107,114,128,0.8);">Ctrl+Y</span></button>
+			<div style="border-top:1px solid rgba(255,255,255,0.07);margin:3px 0;"></div>
 			<button onclick={ctxCopy}      style="display:flex;align-items:center;gap:7px;width:100%;padding:6px 12px;background:none;border:none;color:rgba(209,213,219,1);font-size:11px;cursor:pointer;text-align:left;" onmouseenter={(e)=>(e.currentTarget.style.background='rgba(59,130,246,0.18)')} onmouseleave={(e)=>(e.currentTarget.style.background='none')}><span style="font-size:13px;">📋</span> Copy</button>
 			<button onclick={ctxPaste}     disabled={!clipboardClip} style="display:flex;align-items:center;gap:7px;width:100%;padding:6px 12px;background:none;border:none;color:{clipboardClip ? 'rgba(209,213,219,1)' : 'rgba(107,114,128,0.5)'};font-size:11px;cursor:{clipboardClip ? 'pointer' : 'default'};text-align:left;" onmouseenter={(e)=>{ if(clipboardClip) e.currentTarget.style.background='rgba(59,130,246,0.18)'; }} onmouseleave={(e)=>(e.currentTarget.style.background='none')}><span style="font-size:13px;">📌</span> Paste at cursor</button>
 			<button onclick={ctxDuplicate} style="display:flex;align-items:center;gap:7px;width:100%;padding:6px 12px;background:none;border:none;color:rgba(209,213,219,1);font-size:11px;cursor:pointer;text-align:left;" onmouseenter={(e)=>(e.currentTarget.style.background='rgba(59,130,246,0.18)')} onmouseleave={(e)=>(e.currentTarget.style.background='none')}><span style="font-size:13px;">⧉</span> Duplicate</button>

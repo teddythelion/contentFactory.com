@@ -11,7 +11,10 @@
 	import { text3DState } from '$lib/stores/text3d.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
 	import { mediaBinStore } from '$lib/stores/mediaBin.store';
-	import { timelineStore } from '$lib/stores/timeline.store';
+	import { timelineStore, DEFAULT_CLIP_TRANSFORM, type TimelineClip } from '$lib/stores/timeline.store';
+	import { clipTransitionState, computeTransitionFX } from '$lib/utils/clipTransitions';
+	import { logoState } from '$lib/stores/logo.store';
+	import { editHistory } from '$lib/stores/editHistory.store';
 	import TimelineEditor from './TimelineEditor.svelte';
 	import MediaBin from './MediaBin.svelte';
 
@@ -422,6 +425,10 @@
 			// Register video in media bin + create a video track (replace on re-load)
 			timelineStore.clearAll();
 			mediaBinStore.clearAll();
+			// Fresh session baseline: undo can't reach across videos, and the image
+			// overlay window defaults to this video's full length instead of a stale 8s.
+			editHistory.clear();
+			logoState.updateProperty('endTime', vidDuration);
 			const videoAssetId = mediaBinStore.addAsset({
 				type: 'video',
 				name: 'Main Video',
@@ -570,15 +577,125 @@
 		compositeCtx!.drawImage(src, x + (w - sw) / 2, y + (h - sh) / 2, sw, sh);
 	}
 
+	interface CompositeLayer {
+		el: HTMLVideoElement | HTMLImageElement;
+		clip: TimelineClip;
+	}
+
+	// Timeline moment of the frame being composited — set by updateCompositeFrame,
+	// read by the layer draw functions to evaluate each clip's transition window.
+	let compositeNow = 0;
+
+	// Throttle for the layer-drop warning — once a second, not once a frame
+	let lastDropLogMs = 0;
+
+	// Reused offscreen canvas for the pixelize transition (downsample → upscale)
+	let pixelizeCanvas: HTMLCanvasElement | null = null;
+
+	function drawPixelized(el: HTMLVideoElement | HTMLImageElement, strength: number, x: number, y: number, w: number, h: number) {
+		const block = 1 + strength * 40; // block size in composite px
+		const tw = Math.max(2, Math.round(w / block));
+		const th = Math.max(2, Math.round(h / block));
+		if (!pixelizeCanvas) pixelizeCanvas = document.createElement('canvas');
+		pixelizeCanvas.width = tw; // resizing also clears
+		pixelizeCanvas.height = th;
+		const tctx = pixelizeCanvas.getContext('2d');
+		if (!tctx) return;
+		const iw = (el instanceof HTMLVideoElement ? el.videoWidth : el.naturalWidth) || 1;
+		const ih = (el instanceof HTMLVideoElement ? el.videoHeight : el.naturalHeight) || 1;
+		const s = Math.min(tw / iw, th / ih);
+		tctx.drawImage(el, (tw - iw * s) / 2, (th - ih * s) / 2, iw * s, ih * s);
+		compositeCtx!.imageSmoothingEnabled = false; // hard block edges
+		compositeCtx!.drawImage(pixelizeCanvas, x, y, w, h);
+		compositeCtx!.imageSmoothingEnabled = true;
+	}
+
+	// Transition-aware contain draw for video layers. Inside the clip body this is
+	// a plain contain draw; inside the fadeIn/fadeOut window it applies the clip's
+	// chosen transition (clip path / slide offset / filter / alpha) from
+	// clipTransitions.ts. Baked into the export identically — capture drives the
+	// same draw path.
+	function drawLayer(layer: CompositeLayer | undefined | null, x: number, y: number, w: number, h: number) {
+		if (!layer) return;
+		const { p, type, phase } = clipTransitionState(layer.clip, compositeNow);
+		if (p <= 0.001) return;
+		if (p >= 0.999) {
+			drawContain(layer.el, x, y, w, h);
+			return;
+		}
+		const ctx = compositeCtx!;
+		const fx = computeTransitionFX(type, p, phase, x, y, w, h);
+		ctx.save();
+		if (fx.clipPath) ctx.clip(fx.clipPath, fx.clipRule);
+		if (fx.dx || fx.dy) {
+			// Sliding content must not spill outside its slot
+			const slot = new Path2D();
+			slot.rect(x, y, w, h);
+			ctx.clip(slot);
+			ctx.translate(fx.dx, fx.dy);
+		}
+		if (fx.filter) ctx.filter = fx.filter;
+		ctx.globalAlpha = fx.alpha;
+		if (fx.pixelize > 0) drawPixelized(layer.el, fx.pixelize, x, y, w, h);
+		else drawContain(layer.el, x, y, w, h);
+		if (fx.overlay) {
+			ctx.filter = 'none';
+			ctx.globalAlpha = fx.overlay.alpha;
+			ctx.fillStyle = fx.overlay.color;
+			ctx.fillRect(x, y, w, h);
+		}
+		ctx.restore();
+	}
+
+	// Image clips draw as positioned overlays on top of the video layers, using the
+	// clip's transform (center %, scale relative to contain-fit, rotation, opacity).
+	// Default transform = full-frame contain. Transitions apply here too (pixelize
+	// falls back to fade — the transformed draw can't route through the downsampler).
+	function drawImageClip(layer: CompositeLayer) {
+		const img = layer.el as HTMLImageElement;
+		const t = { ...DEFAULT_CLIP_TRANSFORM, ...(layer.clip.transform ?? {}) };
+		const { p, type, phase } = clipTransitionState(layer.clip, compositeNow);
+		if (p <= 0.001) return;
+		const w = compositeCanvas!.width;
+		const h = compositeCanvas!.height;
+		const fx = computeTransitionFX(type, p, phase, 0, 0, w, h);
+		const opacity = Math.min(1, Math.max(0, t.opacity * fx.alpha));
+		if (opacity <= 0.001) return;
+		const iw = img.naturalWidth || 1;
+		const ih = img.naturalHeight || 1;
+		const fit = Math.min(w / iw, h / ih) * t.scale;
+		const dw = iw * fit;
+		const dh = ih * fit;
+		const ctx = compositeCtx!;
+		ctx.save();
+		if (fx.clipPath) ctx.clip(fx.clipPath, fx.clipRule);
+		if (fx.filter) ctx.filter = fx.filter;
+		ctx.globalAlpha = opacity;
+		ctx.translate((t.x / 100) * w + fx.dx, (t.y / 100) * h + fx.dy);
+		if (t.rotation) ctx.rotate(t.rotation);
+		ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+		ctx.restore();
+	}
+
 	function updateCompositeFrame() {
 		if (!compositeCtx || !compositeCanvas || !videoElement) return;
 		const w = compositeCanvas.width;
 		const h = compositeCanvas.height;
-		compositeCtx.clearRect(0, 0, w, h);
+		// OPAQUE black base — NOT clearRect. Canvas→WebGL texture upload
+		// UN-premultiplies alpha (and the mesh material is opaque, so alpha is
+		// ignored): any pixel left with alpha < 1 comes back at full RGB
+		// brightness with quantization noise ("pixelation"), which silently
+		// destroyed per-clip fades. Over an opaque base, globalAlpha blends in
+		// RGB inside the canvas, final alpha stays 1, and fades/crossfades
+		// survive the upload — in preview and export alike.
+		compositeCtx.globalAlpha = 1;
+		compositeCtx.fillStyle = '#000';
+		compositeCtx.fillRect(0, 0, w, h);
 
 		// Timeline moment currently shown — published by TimelineEditor's rAF loop.
 		// Falls back to the main element's own time (identity mapping) if no editor.
 		const now: number = (window as any).__timelineEditTime ?? videoElement.currentTime;
+		compositeNow = now; // draw functions evaluate transition windows against this
 
 		// Track order defines layer priority: the first video track fills the primary
 		// slot, so promoting/demoting tracks reorders what supersedes what. Selection
@@ -586,54 +703,81 @@
 		// paused element holds its last decoded frame and would otherwise paint over
 		// lower layers anywhere on the timeline. Main video maps to videoElement,
 		// every other track via secondaryVideoElements; main is skipped once ended.
-		const orderedEls: Array<HTMLVideoElement | HTMLImageElement> = [];
+		// Image clips are pulled out of the slot order and drawn as overlays on top,
+		// so they can be positioned/scaled/faded like the logo overlay.
+		const videoLayers: CompositeLayer[] = [];
+		const imageLayers: CompositeLayer[] = [];
 		for (const tr of $timelineStore.tracks) {
 			if (tr.type !== 'video') continue;
-			if (!tr.clips.some((c) => now >= c.startTime - 0.05 && now < c.endTime + 0.05)) continue;
+			// End tolerance is tight (0.001) on purpose: a clip that just finished must
+			// not paint its stale last frame over the next clip's opening frames. The
+			// old ±0.05 end overlap + the ended-element skip caused a hard black cut
+			// at the main video's natural end instead of the clip's fade-out tail.
+			const clip = tr.clips.find((c) => now >= c.startTime - 0.05 && now < c.endTime + 0.001);
+			if (!clip) continue;
 			const el: HTMLVideoElement | HTMLImageElement | null | undefined =
 				tr.assetId === mainVideoAssetId
 					? videoElement
 					: secondaryVideoElements.get(tr.assetId ?? '') ?? imageElements.get(tr.assetId ?? '');
 			if (!el) continue;
+			const layer: CompositeLayer = { el, clip };
 			if (el instanceof HTMLVideoElement) {
-				if (el.readyState < 2) continue;
-				if (el === videoElement && el.ended) continue;
-			} else if (!el.complete || !el.naturalWidth) {
-				continue;
+				// A mid-seek element (readyState dips below 2 during every seek) still
+				// draws its LAST DECODED frame — dropping it painted a black frame and
+				// strobed playthrough every time the tick reseeked a secondary clip.
+				// Only skip elements that aren't seeking and have nothing decoded.
+				if (el.readyState < 2 && !el.seeking) {
+					const nowMs = performance.now();
+					if (nowMs - lastDropLogMs > 1000) {
+						lastDropLogMs = nowMs;
+						console.warn(`🫥 Video layer "${tr.name}" dropped from composite (readyState=${el.readyState}, not seeking) at t=${now.toFixed(2)}s`);
+					}
+					continue;
+				}
+				videoLayers.push(layer);
+			} else {
+				if (!el.complete || !el.naturalWidth) continue;
+				imageLayers.push(layer);
 			}
-			orderedEls.push(el);
 		}
-		const primary = orderedEls[0] ?? null;
-		const secondaries = orderedEls.slice(1);
+		const primary = videoLayers[0] ?? null;
+		const secondaries = videoLayers.slice(1);
 
 		switch (compositeLayout) {
 			case 'single':
-				if (primary) drawContain(primary, 0, 0, w, h);
-				else if (secondaries[0]) drawContain(secondaries[0], 0, 0, w, h);
+				// All covering layers stacked bottom-up (track order = priority, first
+				// track on top). One opaque layer = old behavior; when the top layer
+				// fades, the layer beneath shows through — overlapping clips on two
+				// tracks crossfade instead of dipping to black.
+				for (let i = videoLayers.length - 1; i >= 0; i--) drawLayer(videoLayers[i], 0, 0, w, h);
 				break;
 			case 'split-h':
-				if (primary) drawContain(primary, 0, 0, w / 2, h);
-				if (secondaries[0]) drawContain(secondaries[0], w / 2, 0, w / 2, h);
+				drawLayer(primary, 0, 0, w / 2, h);
+				drawLayer(secondaries[0], w / 2, 0, w / 2, h);
 				break;
 			case 'split-v':
-				if (primary) drawContain(primary, 0, 0, w, h / 2);
-				if (secondaries[0]) drawContain(secondaries[0], 0, h / 2, w, h / 2);
+				drawLayer(primary, 0, 0, w, h / 2);
+				drawLayer(secondaries[0], 0, h / 2, w, h / 2);
 				break;
 			case 'pip-tr':
-				if (primary) drawContain(primary, 0, 0, w, h);
-				if (secondaries[0]) { const pw = Math.round(w * 0.3), ph = Math.round(h * 0.3); drawContain(secondaries[0], w - pw - 16, 16, pw, ph); }
+				drawLayer(primary, 0, 0, w, h);
+				if (secondaries[0]) { const pw = Math.round(w * 0.3), ph = Math.round(h * 0.3); drawLayer(secondaries[0], w - pw - 16, 16, pw, ph); }
 				break;
 			case 'pip-bl':
-				if (primary) drawContain(primary, 0, 0, w, h);
-				if (secondaries[0]) { const pw = Math.round(w * 0.3), ph = Math.round(h * 0.3); drawContain(secondaries[0], 16, h - ph - 16, pw, ph); }
+				drawLayer(primary, 0, 0, w, h);
+				if (secondaries[0]) { const pw = Math.round(w * 0.3), ph = Math.round(h * 0.3); drawLayer(secondaries[0], 16, h - ph - 16, pw, ph); }
 				break;
 			case 'grid':
-				if (primary) drawContain(primary, 0, 0, w / 2, h / 2);
-				if (secondaries[0]) drawContain(secondaries[0], w / 2, 0, w / 2, h / 2);
-				if (secondaries[1]) drawContain(secondaries[1], 0, h / 2, w / 2, h / 2);
-				if (secondaries[2]) drawContain(secondaries[2], w / 2, h / 2, w / 2, h / 2);
+				drawLayer(primary, 0, 0, w / 2, h / 2);
+				drawLayer(secondaries[0], w / 2, 0, w / 2, h / 2);
+				drawLayer(secondaries[1], 0, h / 2, w / 2, h / 2);
+				drawLayer(secondaries[2], w / 2, h / 2, w / 2, h / 2);
 				break;
 		}
+
+		// Image overlays — track order still decides stacking among images
+		for (const layer of imageLayers) drawImageClip(layer);
+
 		if (compositeTexture) compositeTexture.needsUpdate = true;
 	}
 
@@ -670,10 +814,15 @@
 				const img = new Image();
 				img.onload = () => {
 					const duration = 4;
+					editHistory.checkpoint();
 					const assetId = mediaBinStore.addAsset({ type: 'image', name, sessionId: null, previewUrl: url, duration });
 					imageElements.set(assetId, img);
 					imageElements = new Map(imageElements);
-					timelineStore.addVideoTrack(assetId, name, duration, 0);
+					const trackId = timelineStore.addVideoTrack(assetId, name, duration, 0);
+					// Focus the new image clip so the ControlsPanel's Selected Clip
+					// section opens on it immediately — it's editable from the start.
+					const track = $timelineStore.tracks.find((t) => t.id === trackId);
+					if (track?.clips[0]) timelineStore.setActiveClip(trackId, track.clips[0].id);
 				};
 				img.src = url;
 				return;
@@ -683,6 +832,7 @@
 			probe.src = url;
 			probe.onloadedmetadata = () => {
 				const duration = probe.duration;
+				editHistory.checkpoint();
 				const assetId = mediaBinStore.addAsset({ type: 'video', name, sessionId: null, previewUrl: url, duration });
 				const el = makeVideoElement(url, true);
 				secondaryVideoElements.set(assetId, el);

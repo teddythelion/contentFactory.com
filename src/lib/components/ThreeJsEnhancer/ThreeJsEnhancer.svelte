@@ -10,6 +10,8 @@
 	import { audioSessionStore } from '$lib/stores/audioSession.store';
 	import { audioStudioStore } from '$lib/stores/audioStudio.store';
 	import { text3DState } from '$lib/stores/text3d.store';
+	import { logoState } from '$lib/stores/logo.store';
+	import { editHistory } from '$lib/stores/editHistory.store';
 	
 	export let videoUrl: string;
 	export let onClose: () => void;
@@ -61,11 +63,16 @@
 		mq.removeEventListener('change', mqHandler);
 		isSceneReady = false;
 		sceneMounted = false;
-		// Reset all tool state so the next session starts fresh
+		// Reset ALL tool state so the next session starts fresh — logoState was
+		// missing here, which left the last video's uploaded image + timing values
+		// staring at you when the next video opened. audioStudio now fully resets
+		// (fades, prompts, volumes) instead of just stopping playback.
 		audioSessionStore.clear();
-		audioStudioStore.stopAll();
+		audioStudioStore.reset();
 		threeJsState.reset();
 		text3DState.reset();
+		logoState.reset();
+		editHistory.clear();
 	};
 	});
 
