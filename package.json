@@ -3,6 +3,9 @@
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
+	"pnpm": {
+		"onlyBuiltDependencies": ["sharp"]
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
@@ -67,7 +70,7 @@
 		"google-auth-library": "^10.5.0",
 		"mp4-muxer": "^5.2.2",
 		"openai": "^6.9.1",
-		"sharp": "^0.34.5",
+		"sharp": "^0.32.6",
 		"stripe": "^20.3.1",
 		"three": "^0.181.2",
 		"tone": "^15.1.22",
