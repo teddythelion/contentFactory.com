@@ -1,12 +1,17 @@
 // src/lib/stores/text3d.store.ts
 // Professional 3D Text Store for Troika Three.js Text
+//
+// MULTI-INSTANCE (7-14-2026): the styling params live per-INSTANCE in `entries`
+// (keyed by entryId). The flat fields remain the ControlsPanel's editing surface
+// and always mirror the ACTIVE entry — every mutation through this store patches
+// entries[activeEntryId] automatically. Timing/fades are NOT here: each instance
+// has a timeline bar (mediaBin asset type 'text3d' → video-lane clip) and
+// ThreeJsText reads visibility + fade from that clip.
 
 import { writable } from 'svelte/store';
 
-export interface Text3DState {
-	// Enable/Disable
-	enabled: boolean;
-	use3D: boolean; // Legacy - always true now, kept for compatibility
+// Per-instance styling params — everything the accordion edits
+export interface Text3DParams {
 	// TEXT MODE: Troika (Google Fonts, SDF pseudo-3D) vs True 3D (TextGeometry, real geometry)
 	textMode: 'troika' | 'true3d';
 	true3dFontFile: string; // typeface.json filename from static/fonts/
@@ -44,11 +49,6 @@ export interface Text3DState {
 	colorCycling: boolean;
 	colorCycleSpeed: number;
 
-	// Fog Effect
-	fogEnabled: boolean;
-	fogColor: string;
-	fogNear: number;
-	fogFar: number;
 	// Material Properties
 	materialType: 'standard' | 'phong' | 'basic' | 'normal';
 	materialColor: string; // Hex color
@@ -65,12 +65,6 @@ export interface Text3DState {
 	bevelSize: number; // Not used in Troika
 	bevelSegments: number; // Not used in Troika
 	curveSegments: number; // Not used in Troika
-
-	// Timing & Fade
-	textStartTime: number;  // video time (seconds) when text appears
-	textEndTime: number;    // video time (seconds) when text disappears (9999 = until end)
-	textFadeIn: number;     // fade-in duration (seconds)
-	textFadeOut: number;    // fade-out duration (seconds)
 
 	// Animation
 	autoRotate: boolean;
@@ -89,6 +83,44 @@ export interface Text3DState {
 		| 'glitch'
 		| 'orbit'
 		| 'wobble';
+}
+
+export interface Text3DState extends Text3DParams {
+	// Enable/Disable (legacy single-text flag — instances render via entries)
+	enabled: boolean;
+	use3D: boolean; // Legacy - always true now, kept for compatibility
+
+	// Fog Effect (scene-global, not per instance)
+	fogEnabled: boolean;
+	fogColor: string;
+	fogNear: number;
+	fogFar: number;
+
+	// Timing & Fade — LEGACY single-text fields; instances take timing from
+	// their timeline clip instead.
+	textStartTime: number;
+	textEndTime: number;
+	textFadeIn: number;
+	textFadeOut: number;
+
+	// Multi-instance
+	entries: Record<string, Text3DParams>;
+	activeEntryId: string | null;
+}
+
+const PARAM_KEYS: (keyof Text3DParams)[] = [
+	'textMode', 'true3dFontFile', 'useVideoTexture', 'videoTextureScale', 'videoTextureOffset',
+	'text', 'fontFamily', 'fontUrl', 'fontSize', 'scale3D', 'position3D', 'rotation3D',
+	'letterSpacing', 'curveRadius', 'colorCycling', 'colorCycleSpeed',
+	'materialType', 'materialColor', 'metalness', 'roughness', 'emissive', 'emissiveIntensity', 'wireframe',
+	'extrudeDepth', 'bevelEnabled', 'bevelThickness', 'bevelSize', 'bevelSegments', 'curveSegments',
+	'autoRotate', 'autoRotateSpeed', 'animationType'
+];
+
+function pickParams(s: Text3DState): Text3DParams {
+	const p = {} as Record<string, unknown>;
+	for (const k of PARAM_KEYS) p[k] = s[k];
+	return structuredClone(p) as unknown as Text3DParams;
 }
 
 const initialState: Text3DState = {
@@ -152,16 +184,61 @@ const initialState: Text3DState = {
 	bevelThickness: 0.05, // ✅ Increased from 0.03 for better visibility
 	bevelSize: 0.05, // ✅ Increased from 0.02
 	bevelSegments: 3,
-	curveSegments: 12
+	curveSegments: 12,
+
+	// Multi-instance
+	entries: {},
+	activeEntryId: null
 };
 
 function createText3DStore() {
-	const { subscribe, set, update } = writable<Text3DState>(initialState);
+	const { subscribe, set, update: rawUpdate } = writable<Text3DState>(initialState);
+
+	// Every flat-field mutation mirrors into the active entry, so the accordion
+	// always edits "the focused instance" without any call-site changes.
+	function update(fn: (s: Text3DState) => Text3DState) {
+		rawUpdate((s) => {
+			const next = fn(s);
+			if (!next.activeEntryId || !next.entries[next.activeEntryId]) return next;
+			return {
+				...next,
+				entries: { ...next.entries, [next.activeEntryId]: pickParams(next) }
+			};
+		});
+	}
 
 	return {
 		subscribe,
 		set,
 		update,
+
+		// ── MULTI-INSTANCE ───────────────────────────────────────────────
+		// New instance = snapshot of the CURRENT flat params (style once, stamp many)
+		addEntry: (id: string) => {
+			rawUpdate((s) => ({
+				...s,
+				entries: { ...s.entries, [id]: pickParams(s) },
+				activeEntryId: id
+			}));
+		},
+
+		// Load an entry into the flat editing surface and make it active
+		setActiveEntry: (id: string | null) => {
+			rawUpdate((s) => {
+				if (!id) return { ...s, activeEntryId: null };
+				const entry = s.entries[id];
+				if (!entry) return { ...s, activeEntryId: id };
+				return { ...s, ...structuredClone(entry), activeEntryId: id };
+			});
+		},
+
+		removeEntry: (id: string) => {
+			rawUpdate((s) => {
+				const entries = { ...s.entries };
+				delete entries[id];
+				return { ...s, entries, activeEntryId: s.activeEntryId === id ? null : s.activeEntryId };
+			});
+		},
 
 		// Update any property dynamically (for generic control panel use)
 		updateProperty: <K extends keyof Text3DState>(key: K, value: Text3DState[K]) => {

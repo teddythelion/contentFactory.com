@@ -1,107 +1,189 @@
 <!-- src/lib/components/ThreeJsEnhancer/ThreeJsText.svelte -->
 <!-- 3D TEXT RENDERER - DUAL MODE: Troika (Google Fonts 2.5-D) + Three.js TextGeometry (True 3D) -->
+<!-- MULTI-INSTANCE (7-14-2026): renders one mesh per text3DState.entries entry. -->
+<!-- Each instance's visibility window + fade comes from ITS TIMELINE BAR (the -->
+<!-- media-bin 'text3d' asset carrying the entry id) — not from store timing. -->
 
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as THREE from 'three';
+	import { get } from 'svelte/store';
 	import { Text } from 'troika-three-text';
 	import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 	import { FontLoader } from 'three/addons/loaders/FontLoader.js';
-	import { text3DState } from '$lib/stores/text3d.store';
+	import { text3DState, type Text3DParams } from '$lib/stores/text3d.store';
+	import { timelineStore } from '$lib/stores/timeline.store';
+	import { mediaBinStore } from '$lib/stores/mediaBin.store';
+	import { clipTransitionState } from '$lib/utils/clipTransitions';
 
 	export let scene: THREE.Scene | undefined;
+
+	interface TextInstance {
+		params: Text3DParams;
+		lastSpec: string; // JSON of params — skip untouched instances on store churn
+		troika: any | null;
+		true3d: THREE.Mesh | null;
+		fontLoadToken: number;
+		// true3d rebuild cache
+		loadedFontFile: string;
+		loadedText: string;
+		loadedFontSize: number;
+		loadedExtrudeDepth: number;
+		loadedBevelEnabled: boolean;
+		loadedBevelThickness: number;
+		loadedBevelSize: number;
+	}
+
+	const instances = new Map<string, TextInstance>();
 	let colorCycleFrame: number;
-	let textMesh: any = null;         // Troika Text mesh
-	let trueTextMesh: THREE.Mesh | null = null; // True 3D TextGeometry mesh
 	let isInitialized = false;
-	let loadedFontFile = '';
-	let loadedText = '';
-	let loadedFontSize = 0;
-	let loadedExtrudeDepth = -1;
-	let loadedBevelEnabled = false;
-	let loadedBevelThickness = -1;
-	let loadedBevelSize = -1;
-	let fontLoader = new FontLoader();
-	let fontLoadToken = 0; // incremented each rebuild; stale callbacks check against this
+	const fontLoader = new FontLoader();
+
+	const defaultRobotoUrl =
+		'https://fonts.gstatic.com/s/roboto/v50/KFOMCnqEu92Fr1ME7kSn66aGLdTylUAMQXC89YmC2DPNWubEbWmTggvWl0Qn.ttf';
 
 	$: textState = $text3DState;
 
 	// React to scene becoming available
 	$: if (scene && !isInitialized) {
-		createTextMesh();
 		isInitialized = true;
 	}
 
-	// React to all text state changes — routes to the active renderer
+	// Rebuild/update meshes whenever entries change (only touched instances re-sync)
 	$: if (isInitialized && textState) {
-		if (textState.textMode === 'troika') {
-			// Ensure True 3D mesh is gone
-			if (trueTextMesh) disposeTrueTextMesh();
-			// Ensure Troika mesh exists
-			if (!textMesh) createTextMesh();
-			else if (textState.enabled) updateTextProperties();
-			else hideText();
-		} else {
-			// Ensure Troika mesh is gone
-			if (textMesh) disposeTroikaMesh();
-			// Build or update True 3D mesh
-			if (textState.enabled) createOrUpdateTrueTextMesh();
-			else hideTrueText();
-		}
+		syncInstances(textState.entries);
 	}
+
 	onMount(() => {
 		function animateColor() {
-			if (textState.colorCycling && textMesh && !textState.useVideoTexture) {
-				const time = Date.now() * 0.001 * textState.colorCycleSpeed;
-				const r = Math.sin(time) * 0.5 + 0.5;
-				const g = Math.sin(time + 2) * 0.5 + 0.5;
-				const b = Math.sin(time + 4) * 0.5 + 0.5;
-				textMesh.color = `rgb(${r * 255}, ${g * 255}, ${b * 255})`;
-				textMesh.sync();
+			for (const inst of instances.values()) {
+				if (inst.params.colorCycling && inst.troika && !inst.params.useVideoTexture) {
+					const time = Date.now() * 0.001 * inst.params.colorCycleSpeed;
+					const r = Math.sin(time) * 0.5 + 0.5;
+					const g = Math.sin(time + 2) * 0.5 + 0.5;
+					const b = Math.sin(time + 4) * 0.5 + 0.5;
+					inst.troika.color = `rgb(${r * 255}, ${g * 255}, ${b * 255})`;
+					inst.troika.sync();
+				}
 			}
 			colorCycleFrame = requestAnimationFrame(animateColor);
 		}
 		animateColor();
 		return () => {
 			cancelAnimationFrame(colorCycleFrame);
-			disposeTroikaMesh();
-			disposeTrueTextMesh();
+			for (const inst of instances.values()) disposeInstance(inst);
+			instances.clear();
+			(window as any).__textMeshes = null;
+			(window as any).__textMesh = null;
 			isInitialized = false;
 		};
 	});
 
-	function disposeTroikaMesh() {
-		if (textMesh && scene) {
-			scene.remove(textMesh);
-			textMesh.dispose();
-			textMesh = null;
-		}
+	function makeInstance(params: Text3DParams): TextInstance {
+		return {
+			params,
+			lastSpec: '',
+			troika: null,
+			true3d: null,
+			fontLoadToken: 0,
+			loadedFontFile: '',
+			loadedText: '',
+			loadedFontSize: 0,
+			loadedExtrudeDepth: -1,
+			loadedBevelEnabled: false,
+			loadedBevelThickness: -1,
+			loadedBevelSize: -1
+		};
 	}
 
-	function disposeTrueTextMesh() {
-		if (trueTextMesh && scene) {
-			scene.remove(trueTextMesh);
-			if (trueTextMesh.geometry) trueTextMesh.geometry.dispose();
-			if ((trueTextMesh as any)._videoTexture) {
-				(trueTextMesh as any)._videoTexture.dispose();
-				(trueTextMesh as any)._videoTexture = null;
+	function syncInstances(entries: Record<string, Text3DParams>) {
+		if (!scene) return;
+		// Dispose removed instances
+		for (const [id, inst] of instances) {
+			if (!entries[id]) {
+				disposeInstance(inst);
+				instances.delete(id);
 			}
-			trueTextMesh = null;
-			loadedFontFile = '';
-			loadedText = '';
-			loadedFontSize = 0;
-			loadedExtrudeDepth = -1;
-			loadedBevelEnabled = false;
-			loadedBevelThickness = -1;
-			loadedBevelSize = -1;
+		}
+		// Create/update the rest — only when their params actually changed
+		for (const [id, params] of Object.entries(entries)) {
+			let inst = instances.get(id);
+			if (!inst) {
+				inst = makeInstance(params);
+				instances.set(id, inst);
+			}
+			const spec = JSON.stringify(params);
+			if (inst.lastSpec === spec) continue;
+			inst.lastSpec = spec;
+			inst.params = params;
+			if (params.textMode === 'troika') {
+				if (inst.true3d) disposeTrueTextMesh(inst);
+				if (!inst.troika) createTroikaMesh(inst);
+				updateTroikaProperties(inst);
+			} else {
+				if (inst.troika) disposeTroikaMesh(inst);
+				createOrUpdateTrueTextMesh(inst);
+			}
+		}
+		publishTextMeshes();
+	}
+
+	// Capture pokes _videoTexture.needsUpdate on these each frame
+	function publishTextMeshes() {
+		const meshes: any[] = [];
+		for (const inst of instances.values()) {
+			const m = inst.params.textMode === 'troika' ? inst.troika : inst.true3d;
+			if (m) meshes.push(m);
+		}
+		(window as any).__textMeshes = meshes;
+		const activeId = get(text3DState).activeEntryId;
+		const active = activeId ? instances.get(activeId) : null;
+		(window as any).__textMesh = active
+			? (active.params.textMode === 'troika' ? active.troika : active.true3d)
+			: meshes[0] ?? null;
+	}
+
+	function disposeInstance(inst: TextInstance) {
+		disposeTroikaMesh(inst);
+		disposeTrueTextMesh(inst);
+	}
+
+	function disposeTroikaMesh(inst: TextInstance) {
+		if (inst.troika && scene) {
+			scene.remove(inst.troika);
+			if (inst.troika._videoTexture) {
+				inst.troika._videoTexture.dispose();
+				inst.troika._videoTexture = null;
+			}
+			inst.troika.dispose();
+			inst.troika = null;
 		}
 	}
 
-	function applyVideoTextureToMesh(mesh: THREE.Mesh) {
+	function disposeTrueTextMesh(inst: TextInstance) {
+		if (inst.true3d && scene) {
+			scene.remove(inst.true3d);
+			if (inst.true3d.geometry) inst.true3d.geometry.dispose();
+			if ((inst.true3d as any)._videoTexture) {
+				(inst.true3d as any)._videoTexture.dispose();
+				(inst.true3d as any)._videoTexture = null;
+			}
+			inst.true3d = null;
+			inst.loadedFontFile = '';
+			inst.loadedText = '';
+			inst.loadedFontSize = 0;
+			inst.loadedExtrudeDepth = -1;
+			inst.loadedBevelEnabled = false;
+			inst.loadedBevelThickness = -1;
+			inst.loadedBevelSize = -1;
+		}
+	}
+
+	function applyVideoTextureToMesh(mesh: THREE.Mesh, p: Text3DParams) {
 		const videoElement = (window as any).__threeJsVideo as HTMLVideoElement;
 		if (!videoElement) return;
-		const { x, y } = textState.videoTextureOffset;
-		const scale = textState.videoTextureScale;
+		const { x, y } = p.videoTextureOffset;
+		const scale = p.videoTextureScale;
 		if (!(mesh as any)._videoTexture) {
 			(mesh as any)._videoTexture = new THREE.VideoTexture(videoElement);
 			(mesh as any)._videoTexture.colorSpace = THREE.SRGBColorSpace;
@@ -113,304 +195,252 @@
 		mesh.material = new THREE.MeshStandardMaterial({
 			map: vt,
 			side: THREE.DoubleSide,
-			metalness: textState.metalness,
-			roughness: textState.roughness
+			metalness: p.metalness,
+			roughness: p.roughness
 		});
 	}
 
-	function applyStandardMaterialToMesh(mesh: THREE.Mesh) {
+	function applyStandardMaterialToMesh(mesh: THREE.Mesh, p: Text3DParams) {
 		if ((mesh as any)._videoTexture) {
 			(mesh as any)._videoTexture.dispose();
 			(mesh as any)._videoTexture = null;
 		}
 		mesh.material = new THREE.MeshStandardMaterial({
-			color: new THREE.Color(textState.materialColor),
-			metalness: textState.metalness,
-			roughness: textState.roughness,
-			emissive: new THREE.Color(textState.emissive),
-			emissiveIntensity: textState.emissiveIntensity,
+			color: new THREE.Color(p.materialColor),
+			metalness: p.metalness,
+			roughness: p.roughness,
+			emissive: new THREE.Color(p.emissive),
+			emissiveIntensity: p.emissiveIntensity,
 			side: THREE.DoubleSide
 		});
 	}
 
-	function createOrUpdateTrueTextMesh() {
+	function createOrUpdateTrueTextMesh(inst: TextInstance) {
 		if (!scene) return;
-		const fontFile = textState.true3dFontFile;
-		const currentText = textState.text || 'Sample Text';
+		const p = inst.params;
+		const fontFile = p.true3dFontFile;
+		const currentText = p.text || 'Sample Text';
 		const fontUrl = `/fonts/${fontFile}`;
 		const needsRebuild =
-			!trueTextMesh ||
-			fontFile !== loadedFontFile ||
-			currentText !== loadedText ||
-			textState.fontSize !== loadedFontSize ||
-			textState.extrudeDepth !== loadedExtrudeDepth ||
-			textState.bevelEnabled !== loadedBevelEnabled ||
-			textState.bevelThickness !== loadedBevelThickness ||
-			textState.bevelSize !== loadedBevelSize;
+			!inst.true3d ||
+			fontFile !== inst.loadedFontFile ||
+			currentText !== inst.loadedText ||
+			p.fontSize !== inst.loadedFontSize ||
+			p.extrudeDepth !== inst.loadedExtrudeDepth ||
+			p.bevelEnabled !== inst.loadedBevelEnabled ||
+			p.bevelThickness !== inst.loadedBevelThickness ||
+			p.bevelSize !== inst.loadedBevelSize;
 
 		if (needsRebuild) {
-			disposeTrueTextMesh();
-			loadedFontFile = fontFile;
-			loadedText = currentText;
-			loadedFontSize = textState.fontSize;
-			loadedExtrudeDepth = textState.extrudeDepth;
-			loadedBevelEnabled = textState.bevelEnabled;
-			loadedBevelThickness = textState.bevelThickness;
-			loadedBevelSize = textState.bevelSize;
+			disposeTrueTextMesh(inst);
+			inst.loadedFontFile = fontFile;
+			inst.loadedText = currentText;
+			inst.loadedFontSize = p.fontSize;
+			inst.loadedExtrudeDepth = p.extrudeDepth;
+			inst.loadedBevelEnabled = p.bevelEnabled;
+			inst.loadedBevelThickness = p.bevelThickness;
+			inst.loadedBevelSize = p.bevelSize;
 
-			const token = ++fontLoadToken;
-		fontLoader.load(fontUrl, (font) => {
+			const token = ++inst.fontLoadToken;
+			fontLoader.load(fontUrl, (font) => {
 				// Abort if a newer rebuild started while this was loading
-				if (token !== fontLoadToken || !scene) return;
+				if (token !== inst.fontLoadToken || !scene) return;
 
 				// Remove any orphaned mesh from a previous in-flight load
-				if (trueTextMesh) {
-					scene.remove(trueTextMesh);
-					if (trueTextMesh.geometry) trueTextMesh.geometry.dispose();
-					trueTextMesh = null;
+				if (inst.true3d) {
+					scene.remove(inst.true3d);
+					if (inst.true3d.geometry) inst.true3d.geometry.dispose();
+					inst.true3d = null;
 				}
 
 				const geo = new TextGeometry(currentText, {
 					font,
-					size: textState.fontSize / 50,
-					depth: textState.extrudeDepth,
+					size: p.fontSize / 50,
+					depth: p.extrudeDepth,
 					curveSegments: 6,
-					bevelEnabled: textState.bevelEnabled,
-					bevelThickness: textState.bevelThickness,
-					bevelSize: textState.bevelSize * 0.5,
+					bevelEnabled: p.bevelEnabled,
+					bevelThickness: p.bevelThickness,
+					bevelSize: p.bevelSize * 0.5,
 					bevelSegments: 3
 				});
 				geo.computeBoundingBox();
 				geo.center();
 
-				trueTextMesh = new THREE.Mesh(geo);
-				if (textState.useVideoTexture) {
-					applyVideoTextureToMesh(trueTextMesh);
-				} else {
-					applyStandardMaterialToMesh(trueTextMesh);
-				}
-				trueTextMesh.scale.setScalar(textState.scale3D);
-				trueTextMesh.position.set(
-					textState.position3D.x,
-					textState.position3D.y,
-					textState.position3D.z
-				);
-				trueTextMesh.rotation.set(
-					textState.rotation3D.x,
-					textState.rotation3D.y,
-					textState.rotation3D.z
-				);
-				trueTextMesh.visible = textState.enabled;
-				scene.add(trueTextMesh);
-				(window as any).__textMesh = trueTextMesh;
+				const mesh = new THREE.Mesh(geo);
+				if (p.useVideoTexture) applyVideoTextureToMesh(mesh, p);
+				else applyStandardMaterialToMesh(mesh, p);
+				mesh.scale.setScalar(p.scale3D);
+				mesh.position.set(p.position3D.x, p.position3D.y, p.position3D.z);
+				mesh.rotation.set(p.rotation3D.x, p.rotation3D.y, p.rotation3D.z);
+				mesh.visible = false; // updateAnimation decides per frame
+				inst.true3d = mesh;
+				scene.add(mesh);
+				publishTextMeshes();
 			});
-		} else if (trueTextMesh) {
-			updateTrueTextProperties();
+		} else if (inst.true3d) {
+			updateTrueTextProperties(inst);
 		}
 	}
 
-	function updateTrueTextProperties() {
-		if (!trueTextMesh || !scene) return;
-		if (textState.useVideoTexture) {
-			applyVideoTextureToMesh(trueTextMesh);
-		} else {
-			applyStandardMaterialToMesh(trueTextMesh);
-		}
-		trueTextMesh.scale.setScalar(textState.scale3D);
-		trueTextMesh.position.set(
-			textState.position3D.x,
-			textState.position3D.y,
-			textState.position3D.z
-		);
-		trueTextMesh.rotation.set(
-			textState.rotation3D.x,
-			textState.rotation3D.y,
-			textState.rotation3D.z
-		);
-		trueTextMesh.visible = textState.enabled;
+	function updateTrueTextProperties(inst: TextInstance) {
+		const mesh = inst.true3d;
+		if (!mesh || !scene) return;
+		const p = inst.params;
+		if (p.useVideoTexture) applyVideoTextureToMesh(mesh, p);
+		else applyStandardMaterialToMesh(mesh, p);
+		mesh.scale.setScalar(p.scale3D);
+		mesh.position.set(p.position3D.x, p.position3D.y, p.position3D.z);
+		mesh.rotation.set(p.rotation3D.x, p.rotation3D.y, p.rotation3D.z);
 	}
 
-	function hideTrueText() {
-		if (trueTextMesh) trueTextMesh.visible = false;
-	}
-
-	function createTextMesh() {
-		if (!scene) {
-			return;
-		}
-		textMesh = new Text();
-		textMesh.text = textState.text || 'Sample Text';
-		textMesh.fontSize = textState.fontSize / 50;
-		textMesh.color = textState.materialColor;
-		textMesh.anchorX = 'center';
-		textMesh.anchorY = 'middle';
-		textMesh.letterSpacing = textState.letterSpacing;
-		textMesh.curveRadius = textState.curveRadius;
+	function createTroikaMesh(inst: TextInstance) {
+		if (!scene) return;
+		const p = inst.params;
+		// Troika's typings miss several runtime props (curveRadius, fillOpacity…)
+		const mesh: any = new Text();
+		mesh.text = p.text || 'Sample Text';
+		mesh.fontSize = p.fontSize / 50;
+		mesh.color = p.materialColor;
+		mesh.anchorX = 'center';
+		mesh.anchorY = 'middle';
+		mesh.letterSpacing = p.letterSpacing;
+		mesh.curveRadius = p.curveRadius;
 		// Use font URL with default Roboto .ttf fallback (Troika needs TTF, not WOFF2!)
-		const defaultRobotoUrl =
-			'https://fonts.gstatic.com/s/roboto/v50/KFOMCnqEu92Fr1ME7kSn66aGLdTylUAMQXC89YmC2DPNWubEbWmTggvWl0Qn.ttf';
-		textMesh.font = textState.fontUrl || defaultRobotoUrl;
-
-		scene.add(textMesh);
-		(window as any).__textMesh = textMesh;
-		textMesh.sync();
+		mesh.font = p.fontUrl || defaultRobotoUrl;
+		mesh.visible = false;
+		inst.troika = mesh;
+		scene.add(mesh);
+		mesh.sync();
 	}
-	function updateTextProperties() {
-		if (!textMesh) return;
-		// Text content
-		const newText = textState.text || 'Sample Text';
-		// Use font URL if available, otherwise use a default Roboto .ttf URL
+
+	function updateTroikaProperties(inst: TextInstance) {
+		if (!inst.troika) return;
+		const p = inst.params;
+		const newText = p.text || 'Sample Text';
 		// CRITICAL: Troika needs TTF files, NOT woff2!
-		const defaultRobotoUrl =
-			'https://fonts.gstatic.com/s/roboto/v50/KFOMCnqEu92Fr1ME7kSn66aGLdTylUAMQXC89YmC2DPNWubEbWmTggvWl0Qn.ttf';
-		const newFont = textState.fontUrl || defaultRobotoUrl;
-		// Check if font changed - if so, force full recreation
-		const fontChanged = textMesh.font !== newFont;
-		if (fontChanged) {
-			// Dispose old text mesh
-			if (scene) {
-				scene.remove(textMesh);
-			}
-			textMesh.dispose();
-			// Create new text mesh with new font
-			textMesh = new Text();
-			textMesh.font = newFont; // This is now a URL!
-			textMesh.text = newText;
-			textMesh.fontSize = textState.fontSize / 50;
-			textMesh.anchorX = 'center';
-			textMesh.anchorY = 'middle';
-			if (scene) {
-				scene.add(textMesh);
-			}
-		} else {
-			// Font didn't change, just update text
-			textMesh.text = newText;
+		const newFont = p.fontUrl || defaultRobotoUrl;
+		// Font change forces full recreation
+		if (inst.troika.font !== newFont) {
+			disposeTroikaMesh(inst);
+			createTroikaMesh(inst);
 		}
-		// Set font URL
-		textMesh.font = newFont;
-		// Size and scale
-		textMesh.fontSize = textState.fontSize / 50;
-		textMesh.scale.setScalar(textState.scale3D);
+		const mesh = inst.troika;
+		if (!mesh) return;
+		mesh.text = newText;
+		mesh.font = newFont;
+		mesh.fontSize = p.fontSize / 50;
+		mesh.scale.setScalar(p.scale3D);
+		mesh.letterSpacing = p.letterSpacing;
+		mesh.curveRadius = p.curveRadius;
 		// VIDEO TEXTURE ON TEXT (INSANE FEATURE!)
-		if (textState.useVideoTexture && (window as any).__threeJsVideo) {
+		if (p.useVideoTexture && (window as any).__threeJsVideo) {
 			const videoElement = (window as any).__threeJsVideo as HTMLVideoElement;
-			const { x, y } = textState.videoTextureOffset;
-			const scale = textState.videoTextureScale;
-
-			// Create video texture if not exists
-			if (!textMesh._videoTexture) {
-				textMesh._videoTexture = new THREE.VideoTexture(videoElement);
-				textMesh._videoTexture.colorSpace = THREE.SRGBColorSpace;
-				textMesh._videoTexture.needsUpdate = true;
+			if (!mesh._videoTexture) {
+				mesh._videoTexture = new THREE.VideoTexture(videoElement);
+				mesh._videoTexture.colorSpace = THREE.SRGBColorSpace;
+				mesh._videoTexture.needsUpdate = true;
 			}
-
-			// Apply custom material with video texture
-			textMesh.material = new THREE.MeshBasicMaterial({
-				map: textMesh._videoTexture,
+			mesh.material = new THREE.MeshBasicMaterial({
+				map: mesh._videoTexture,
 				side: THREE.DoubleSide,
 				transparent: true
 			});
-
-			// Scale/offset video on letters
-			textMesh._videoTexture.repeat.set(scale, scale);
-			textMesh._videoTexture.offset.set(x, y);
-			textMesh._videoTexture.needsUpdate = true; // ✅ HERE!
+			mesh._videoTexture.repeat.set(p.videoTextureScale, p.videoTextureScale);
+			mesh._videoTexture.offset.set(p.videoTextureOffset.x, p.videoTextureOffset.y);
+			mesh._videoTexture.needsUpdate = true;
 		} else {
-			// ✅ ELSE block - when video texture is disabled
-			textMesh.color = new THREE.Color(textState.materialColor);
-
-			// Clean up video texture if it exists
-			if (textMesh._videoTexture) {
-				textMesh._videoTexture.dispose();
-				textMesh._videoTexture = null;
+			mesh.color = new THREE.Color(p.materialColor);
+			if (mesh._videoTexture) {
+				mesh._videoTexture.dispose();
+				mesh._videoTexture = null;
 			}
 		}
-		// Color
-		textMesh.color = new THREE.Color(textState.materialColor);
-		// Position
-		textMesh.position.set(textState.position3D.x, textState.position3D.y, textState.position3D.z);
-		// Rotation
-		textMesh.rotation.set(textState.rotation3D.x, textState.rotation3D.y, textState.rotation3D.z);
-		// Opacity
-		textMesh.fillOpacity = 1.0;
+		mesh.color = new THREE.Color(p.materialColor);
+		mesh.position.set(p.position3D.x, p.position3D.y, p.position3D.z);
+		mesh.rotation.set(p.rotation3D.x, p.rotation3D.y, p.rotation3D.z);
+		mesh.fillOpacity = 1.0;
 		// Outline (bevel effect)
-		if (textState.bevelEnabled) {
-			textMesh.outlineWidth = textState.bevelThickness * 0.5;
-			textMesh.outlineColor = new THREE.Color(textState.materialColor).multiplyScalar(0.5);
-			textMesh.outlineOpacity = 1.0;
+		if (p.bevelEnabled) {
+			mesh.outlineWidth = p.bevelThickness * 0.5;
+			mesh.outlineColor = new THREE.Color(p.materialColor).multiplyScalar(0.5);
+			mesh.outlineOpacity = 1.0;
 		} else {
-			textMesh.outlineWidth = 0;
+			mesh.outlineWidth = 0;
 		}
 		// Emissive glow
-		if (textState.emissiveIntensity > 0) {
-			textMesh.outlineWidth = 0.1;
-			textMesh.outlineColor = new THREE.Color(textState.emissive);
-			textMesh.outlineOpacity = textState.emissiveIntensity;
-			textMesh.outlineBlur = 0.3;
+		if (p.emissiveIntensity > 0) {
+			mesh.outlineWidth = 0.1;
+			mesh.outlineColor = new THREE.Color(p.emissive);
+			mesh.outlineOpacity = p.emissiveIntensity;
+			mesh.outlineBlur = 0.3;
 		}
 		// Stroke (depth effect)
-		if (textState.extrudeDepth > 0) {
-			textMesh.strokeWidth = textState.extrudeDepth * 0.15;
-			textMesh.strokeColor = new THREE.Color(textState.materialColor).multiplyScalar(0.3);
-			textMesh.strokeOpacity = 0.9;
+		if (p.extrudeDepth > 0) {
+			mesh.strokeWidth = p.extrudeDepth * 0.15;
+			mesh.strokeColor = new THREE.Color(p.materialColor).multiplyScalar(0.3);
+			mesh.strokeOpacity = 0.9;
 		} else {
-			textMesh.strokeWidth = 0;
+			mesh.strokeWidth = 0;
 		}
 		// Metalness effect
-		if (textState.metalness > 0.5) {
-			textMesh.color = new THREE.Color(textState.materialColor).multiplyScalar(
-				1 - textState.metalness * 0.3
-			);
+		if (p.metalness > 0.5) {
+			mesh.color = new THREE.Color(p.materialColor).multiplyScalar(1 - p.metalness * 0.3);
 		}
-		// Alignment
-		textMesh.anchorX = 'center';
-		textMesh.anchorY = 'middle';
-		textMesh.textAlign = 'center';
-		textMesh.maxWidth = 20;
-		textMesh.whiteSpace = 'normal';
-		textMesh.visible = true;
-		// Sync to apply all changes
-		textMesh.sync();
+		mesh.anchorX = 'center';
+		mesh.anchorY = 'middle';
+		mesh.textAlign = 'center';
+		mesh.maxWidth = 20;
+		mesh.whiteSpace = 'normal';
+		mesh.sync();
 	}
-	function hideText() {
-		if (textMesh) {
-			textMesh.visible = false;
-			textMesh.sync();
-		}
-	}
+
+	// Per-frame: visibility + fade come from each instance's TIMELINE BAR.
+	// Called by ThreeJsScene's animate() (live) and __threeJsUpdateScene (capture).
 	export function updateAnimation(animationTime: number, videoTime?: number) {
-		const vt = videoTime ?? animationTime;
-		const opacity = computeTextOpacity(vt);
+		if (instances.size === 0) return;
+		const now: number =
+			(window as any).__timelineEditTime ?? videoTime ?? animationTime;
+		// entryId lookup for clip assets — tiny maps, rebuilt per frame
+		const assets = get(mediaBinStore).assets;
+		const assetEntry = new Map<string, string>();
+		for (const a of assets) if (a.text3dId) assetEntry.set(a.id, a.text3dId);
+		const tl = get(timelineStore);
 
-		if (textState.textMode === 'true3d') {
-			if (!trueTextMesh || !textState.enabled || !trueTextMesh.visible) return;
-			applyTrueTextOpacity(trueTextMesh, opacity);
-			if (opacity > 0) animateMesh(trueTextMesh, animationTime, false);
-			return;
+		for (const [id, inst] of instances) {
+			const isTroika = inst.params.textMode === 'troika';
+			const mesh = isTroika ? inst.troika : inst.true3d;
+			if (!mesh) continue;
+			// Find a covering clip for this instance on any video lane (an instance
+			// can have several bars = same styled text at multiple intervals)
+			let opacity = 0;
+			outer: for (const tr of tl.tracks) {
+				if (tr.type !== 'video') continue;
+				for (const c of tr.clips) {
+					if (assetEntry.get(c.assetId) !== id) continue;
+					if (now >= c.startTime && now < c.endTime) {
+						opacity = clipTransitionState(c, now).p; // fade alpha (3D text can't wipe)
+						break outer;
+					}
+				}
+			}
+			if (opacity <= 0) {
+				if (mesh.visible) {
+					mesh.visible = false;
+					if (isTroika) mesh.sync?.();
+				}
+				continue;
+			}
+			mesh.visible = true;
+			if (isTroika) {
+				mesh.fillOpacity = opacity;
+				mesh.outlineOpacity = opacity;
+				if ('strokeOpacity' in mesh) (mesh as Record<string, unknown>).strokeOpacity = opacity;
+				mesh.sync?.();
+			} else {
+				applyTrueTextOpacity(mesh, opacity);
+			}
+			animateMesh(mesh, animationTime, inst.params, isTroika);
 		}
-		if (!textMesh || !textState.enabled) return;
-		if (opacity === 0) {
-			textMesh.visible = false;
-			textMesh.sync?.();
-			return;
-		}
-		textMesh.visible = true;
-		textMesh.fillOpacity = opacity;
-		textMesh.outlineOpacity = opacity;
-		if ('strokeOpacity' in textMesh) (textMesh as Record<string, unknown>).strokeOpacity = opacity;
-		textMesh.sync?.();
-		animateMesh(textMesh, animationTime, true);
-	}
-
-	function computeTextOpacity(videoTime: number): number {
-		const { textStartTime, textEndTime, textFadeIn, textFadeOut } = textState;
-		if (videoTime < textStartTime || videoTime >= textEndTime) return 0;
-		let opacity = 1;
-		const sinceStart = videoTime - textStartTime;
-		if (textFadeIn > 0 && sinceStart < textFadeIn) opacity = Math.min(opacity, sinceStart / textFadeIn);
-		const untilEnd = textEndTime - videoTime;
-		if (textFadeOut > 0 && untilEnd < textFadeOut) opacity = Math.min(opacity, untilEnd / textFadeOut);
-		return Math.max(0, Math.min(1, opacity));
 	}
 
 	function applyTrueTextOpacity(mesh: THREE.Mesh, opacity: number) {
@@ -421,46 +451,45 @@
 		}
 	}
 
-	function animateMesh(mesh: any, animationTime: number, isTroika: boolean) {
-
+	function animateMesh(mesh: any, animationTime: number, p: Text3DParams, isTroika: boolean) {
 		// Calculate base rotation (includes autoRotate)
-		let rotX = textState.rotation3D.x;
-		let rotY = textState.rotation3D.y;
-		let rotZ = textState.rotation3D.z;
+		let rotX = p.rotation3D.x;
+		let rotY = p.rotation3D.y;
+		let rotZ = p.rotation3D.z;
 
-		if (textState.autoRotate) {
-			rotY += animationTime * textState.autoRotateSpeed;
+		if (p.autoRotate) {
+			rotY += animationTime * p.autoRotateSpeed;
 		}
 
 		const sync = () => { if (isTroika && mesh.sync) mesh.sync(); };
 
-		switch (textState.animationType) {
+		switch (p.animationType) {
 			case 'spin':
 				rotY += animationTime * 0.02;
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
 			case 'wave':
-				mesh.position.y = textState.position3D.y + Math.sin(animationTime) * 0.5;
+				mesh.position.y = p.position3D.y + Math.sin(animationTime) * 0.5;
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
 			case 'float':
-				mesh.position.y = textState.position3D.y + Math.sin(animationTime * 2) * 0.3;
+				mesh.position.y = p.position3D.y + Math.sin(animationTime * 2) * 0.3;
 				rotY += animationTime * 0.005;
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
 			case 'bounce': {
 				const bounceHeight = Math.abs(Math.sin(animationTime * 3)) * 0.8;
-				mesh.position.y = textState.position3D.y + bounceHeight;
+				mesh.position.y = p.position3D.y + bounceHeight;
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
 			}
 			case 'pulse': {
 				const pulseScale = 1 + Math.sin(animationTime * 2) * 0.15;
-				mesh.scale.setScalar(textState.scale3D * pulseScale);
+				mesh.scale.setScalar(p.scale3D * pulseScale);
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
@@ -474,41 +503,41 @@
 			case 'jitter': {
 				const jitterX = (Math.random() - 0.5) * 0.05;
 				const jitterY = (Math.random() - 0.5) * 0.05;
-				mesh.position.x = textState.position3D.x + jitterX;
-				mesh.position.y = textState.position3D.y + jitterY;
+				mesh.position.x = p.position3D.x + jitterX;
+				mesh.position.y = p.position3D.y + jitterY;
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
 			}
 			case 'spiral':
 				rotY += animationTime * 0.03;
-				mesh.position.y = textState.position3D.y + Math.sin(animationTime * 2) * 0.6;
+				mesh.position.y = p.position3D.y + Math.sin(animationTime * 2) * 0.6;
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
 			case 'elastic': {
 				const elasticScale =
 					1 + Math.sin(animationTime * 4) * Math.exp(-animationTime * 0.001) * 0.3;
-				mesh.scale.setScalar(textState.scale3D * elasticScale);
+				mesh.scale.setScalar(p.scale3D * elasticScale);
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
 			}
 			case 'glitch':
 				if (Math.random() > 0.95) {
-					mesh.position.x = textState.position3D.x + (Math.random() - 0.5) * 0.2;
-					mesh.position.y = textState.position3D.y + (Math.random() - 0.5) * 0.2;
+					mesh.position.x = p.position3D.x + (Math.random() - 0.5) * 0.2;
+					mesh.position.y = p.position3D.y + (Math.random() - 0.5) * 0.2;
 				} else {
-					mesh.position.x = textState.position3D.x;
-					mesh.position.y = textState.position3D.y;
+					mesh.position.x = p.position3D.x;
+					mesh.position.y = p.position3D.y;
 				}
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;
 			case 'orbit': {
 				const orbitRadius = 0.5;
-				mesh.position.x = textState.position3D.x + Math.cos(animationTime) * orbitRadius;
-				mesh.position.z = textState.position3D.z + Math.sin(animationTime) * orbitRadius;
+				mesh.position.x = p.position3D.x + Math.cos(animationTime) * orbitRadius;
+				mesh.position.z = p.position3D.z + Math.sin(animationTime) * orbitRadius;
 				mesh.rotation.set(rotX, rotY, rotZ);
 				sync();
 				break;

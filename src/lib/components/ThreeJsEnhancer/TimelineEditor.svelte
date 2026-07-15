@@ -64,11 +64,21 @@
 				(window as any).__timelineEditTime = editTime;
 				const t = editTime;
 				for (const [assetId, el] of secondaryVideoElements) {
-					const tr = timeline.tracks.find(k => k.type === 'video' && k.assetId === assetId);
-					if (!tr) continue;
+					// Lanes host clips from any asset — find this element's covering
+					// clip across ALL video tracks (the owning track supplies M/vol).
+					let tr: TimelineTrack | undefined;
+					let clip: TimelineClip | undefined;
+					for (const k of timeline.tracks) {
+						if (k.type !== 'video') continue;
+						const c = k.clips.find(c => c.assetId === assetId && t >= c.startTime && t < c.endTime);
+						if (c) { tr = k; clip = c; break; }
+					}
+					if (!tr) {
+						if (!el.paused) el.pause();
+						continue;
+					}
 					// Secondary clips play their own audio — track M / vol control it
 					el.muted = tr.muted;
-					const clip = tr.clips.find(c => t >= c.startTime && t < c.endTime);
 					// Per-clip fade: match preview audio to the visual fade the compositor draws
 					let fadeVol = 1;
 					if (clip) {
@@ -134,8 +144,13 @@
 	let editTime        = $derived(manualCursor !== null ? manualCursor : (sourceToTimeline(currentTime) ?? currentTime));
 	let effectivePlaying = $derived(isPlaying || manualPlaying);
 
-	// When video plays normally, exit manual/gap modes
-	$effect(() => { if (isPlaying) { manualCursor = null; manualPlaying = false; } });
+	// When video plays normally, exit manual/gap modes. manualCursor is NOT
+	// released here — play often follows a seek, and the element still reports
+	// its stale pre-seek position until 'seeked' lands. Releasing immediately
+	// snapped the playhead to that stale spot (random jumps on spacebar/rewind).
+	// The rAF tick releases it once the element is playing and not seeking,
+	// right after sampling a fresh liveTime.
+	$effect(() => { if (isPlaying) { manualPlaying = false; inVideoGap = false; } });
 
 	// Sync gap state to video store so ThreeJsScene can show black overlay
 	$effect(() => { videoState.setInVideoGap(inVideoGap); });
@@ -151,14 +166,19 @@
 	function syncSecondaries(play: boolean) {
 		const t = editTime;
 		for (const [assetId, el] of secondaryVideoElements) {
-			const track = timeline.tracks.find(tr => tr.type === 'video' && tr.assetId === assetId);
-			if (!track) continue;
-			const clip = track.clips.find(c => t >= c.startTime && t < c.endTime);
+			// Per-clip asset resolution — lanes can host clips from any source
+			let clip: TimelineClip | undefined;
+			let trackName = '';
+			for (const k of timeline.tracks) {
+				if (k.type !== 'video') continue;
+				const c = k.clips.find(c => c.assetId === assetId && t >= c.startTime && t < c.endTime);
+				if (c) { clip = c; trackName = k.name; break; }
+			}
 			if (clip) {
 				el.currentTime = clip.sourceStart + (t - clip.startTime);
 				if (play) {
 					el.play().catch((err) =>
-						console.warn(`🔇 Secondary clip "${track.name}" play failed — no audio for this clip:`, err?.name, err?.message)
+						console.warn(`🔇 Secondary clip "${trackName}" play failed — no audio for this clip:`, err?.name, err?.message)
 					);
 				}
 			} else {
@@ -360,6 +380,7 @@
 	});
 
 	// ── SPACEBAR PLAY/PAUSE + UNDO/REDO ─────────────────────────────
+	let lastSpaceMs = 0;
 	$effect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			const t = e.target as HTMLElement | null;
@@ -376,9 +397,22 @@
 				}
 			}
 			if (e.code !== 'Space') return;
-			// Don't hijack space while typing or when a control would also react to it
-			if (typing || (t && (t.tagName === 'SELECT' || t.tagName === 'BUTTON'))) return;
-			e.preventDefault(); // stop the page from scrolling
+			// Don't hijack space while typing. Buttons deliberately do NOT block it:
+			// after clicking any button, focus stays on it and space used to do
+			// nothing — the transport owns space everywhere outside text entry.
+			if (typing || (t && t.tagName === 'SELECT')) return;
+			e.preventDefault(); // stop page scroll AND focused-button activation
+			const nowMs = performance.now();
+			if (nowMs - lastSpaceMs < 350) {
+				// Double-tap: stop and rewind to the head of the timeline
+				lastSpaceMs = 0;
+				if (videoElement && !videoElement.paused) videoElement.pause();
+				manualPlaying = false;
+				inVideoGap = false;
+				seekTo(0);
+				return;
+			}
+			lastSpaceMs = nowMs;
 			togglePlay();
 		};
 		window.addEventListener('keydown', onKey);
@@ -686,20 +720,45 @@
 		timelineStore.setActiveClip(track.id, clip.id);
 		const x0 = cx(e); const start0 = clip.startTime; const dur = clip.endTime - clip.startTime;
 		const y0 = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
-		const origPos = timeline.tracks.filter(t => t.type === 'video').findIndex(t => t.id === track.id);
+		let lastY = y0;
 		attachDrag(
 			(x, y) => {
+				lastY = y;
 				const s = Math.max(0, start0 + (x - x0) / pixelsPerSecond);
 				timelineStore.updateClip(track.id, clip.id, { startTime: s, endTime: s + dur });
-				// Vertical drag across rows re-layers the track (standard NLE behavior).
-				// Anchored to the original position so live reordering stays idempotent.
-				if (origPos !== -1) {
-					timelineStore.moveVideoTrackTo(track.id, origPos + Math.round((y - y0) / TRACK_H));
-				}
 			},
-			() => editHistory.endGesture()
+			() => {
+				// Vertical intent resolves at DROP: blank space on another lane moves
+				// just this clip there; occupied space re-layers tracks (old behavior).
+				finishVideoClipDrop(track, clip.id, Math.round((lastY - y0) / TRACK_H));
+				editHistory.endGesture();
+			}
 		);
 		e.preventDefault();
+	}
+
+	// Lane-sharing rules: clips carry their own asset, so any non-main clip can sit
+	// on any non-main video lane as long as its time window is free there. The main
+	// video's clips stay on the main track (the playback transport maps time through
+	// that track's clips) and the main lane never hosts foreign clips.
+	function finishVideoClipDrop(track: TimelineTrack, clipId: string, rowDelta: number) {
+		if (rowDelta === 0) return;
+		const vids = timeline.tracks.filter(t => t.type === 'video');
+		const fromPos = vids.findIndex(t => t.id === track.id);
+		if (fromPos === -1) return;
+		const targetPos = Math.max(0, Math.min(vids.length - 1, fromPos + rowDelta));
+		if (targetPos === fromPos) return;
+		const target = vids[targetPos];
+		const clip = timeline.tracks.find(t => t.id === track.id)?.clips.find(c => c.id === clipId);
+		if (!clip) return;
+		const isMainClip = clip.assetId === mainVideoAssetId;
+		const targetIsMain = target.assetId === mainVideoAssetId;
+		if (!isMainClip && !targetIsMain &&
+			timelineStore.moveClipToTrack(track.id, clipId, target.id, clip.startTime)) {
+			return; // moved into blank space on the target lane
+		}
+		// Occupied window (or main track involved) — re-layer track priority instead
+		timelineStore.moveVideoTrackTo(track.id, targetPos);
 	}
 
 	function startVideoResizeStart(e: MouseEvent | TouchEvent, track: TimelineTrack, clip: TimelineClip) {
@@ -723,10 +782,10 @@
 		editHistory.beginGesture();
 		const x0 = cx(e); const end0 = clip.endTime; const sourceEnd0 = clip.sourceEnd;
 		// Clip length is bounded by its own source media, not the main video's
-		// duration (export follows the timeline now). Images have no intrinsic
-		// length — they extend freely.
-		const asset = $mediaBinStore.assets.find(a => a.id === track.assetId);
-		const isImage = asset?.type === 'image';
+		// duration (export follows the timeline now). Images and 3D text have no
+		// intrinsic length — they extend freely. Asset resolved per CLIP (shared lanes).
+		const asset = $mediaBinStore.assets.find(a => a.id === clip.assetId);
+		const isImage = asset?.type === 'image' || asset?.type === 'text3d';
 		const srcDuration = asset?.duration ?? videoDuration;
 		attachDrag(
 			(x) => {
@@ -879,8 +938,12 @@
 		const rect = scrollEl.getBoundingClientRect();
 		const dropTime = pt(e.clientX - rect.left + scrollEl.scrollLeft);
 		editHistory.checkpoint();
-		if (asset.id === track.assetId) {
-			// Same asset — add another clip to this track at the click position
+		const canShareLane =
+			track.type === 'video' &&
+			(asset.type === 'video' || asset.type === 'image' || asset.type === 'text3d') &&
+			(asset.id === track.assetId || track.assetId !== mainVideoAssetId);
+		if (canShareLane) {
+			// Clips carry their own assetId — any non-main video lane can host it
 			timelineStore.insertClip(track.id, {
 				assetId: asset.id,
 				startTime: dropTime,
@@ -888,8 +951,8 @@
 				sourceStart: 0,
 				sourceEnd: asset.duration
 			});
-		} else if (asset.type === 'video' || asset.type === 'image') {
-			// Different asset — a track is bound to one source, so place on a new track
+		} else if (asset.type === 'video' || asset.type === 'image' || asset.type === 'text3d') {
+			// Main lane stays exclusive to the main video — place on a new track
 			timelineStore.addVideoTrack(asset.id, asset.name, asset.duration, dropTime);
 		} else if (asset.type === 'music') {
 			timelineStore.addMusicTrack(asset.id, asset.name, asset.sessionId ?? asset.id, dropTime, dropTime + asset.duration);
@@ -1059,7 +1122,7 @@
 
 				<!-- VIDEO-END MARKER -->
 				<div style="position:absolute;top:0;bottom:0;left:{tp(videoDuration)}px;width:2px;background:rgba(251,191,36,0.3);pointer-events:none;z-index:3;">
-					<span style="position:absolute;top:2px;left:3px;font-size:8px;font-weight:700;color:rgba(251,191,36,0.8);background:rgba(0,0,0,0.7);padding:1px 3px;border-radius:2px;white-space:nowrap;">End</span>
+					<span style="position:absolute;top:2px;left:3px;font-size:8px;font-weight:700;color:rgba(251,191,36,0.8);background:rgba(0,0,0,0.7);padding:1px 3px;border-radius:2px;white-space:nowrap;" title="Where the MAIN video's source ends — clips can extend past it">Main End</span>
 				</div>
 
 				<!-- PLAYHEAD -->

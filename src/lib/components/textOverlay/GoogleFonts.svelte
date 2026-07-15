@@ -24,6 +24,20 @@
 	let showDropdown = false;
 	let fontLoadErrors: Set<string> = new Set();
 
+	// Curated display fonts pinned at the top of the dropdown — the popularity
+	// sort alone surfaces body-text fonts that look weak as video titles.
+	const RECOMMENDED = [
+		'Bebas Neue', 'Anton', 'Oswald', 'Archivo Black', 'Montserrat', 'Poppins',
+		'Bangers', 'Luckiest Guy', 'Permanent Marker', 'Righteous', 'Alfa Slab One',
+		'Titan One', 'Passion One', 'Abril Fatface', 'Lobster', 'Pacifico', 'Caveat',
+		'Shadows Into Light', 'Russo One', 'Black Ops One'
+	];
+	$: recommendedFonts = searchQuery.length === 0
+		? RECOMMENDED
+			.map((name) => fonts.find((f) => f.family === name))
+			.filter((f): f is GoogleFont => !!f)
+		: [];
+
 	onMount(async () => {
 		await fetchGoogleFonts();
 	});
@@ -45,8 +59,9 @@
 				filteredFonts = fonts;
 				console.log(`✅ Loaded ${fonts.length} Google Fonts`);
 
-				// Preload top 20 most popular fonts
+				// Preload top 20 most popular fonts + the recommended display set
 				loadFontVariants(fonts.slice(0, 20));
+				loadFontVariants(fonts.filter((f) => RECOMMENDED.includes(f.family)));
 			} else {
 				throw new Error(data.error || 'Failed to load fonts');
 			}
@@ -154,6 +169,25 @@
 			<div
 				class="absolute top-full z-50 mt-1 max-h-64 w-full overflow-y-auto rounded border border-white/10 bg-gray-900 shadow-lg"
 			>
+				{#if recommendedFonts.length > 0}
+					<div class="bg-gray-800 px-2 py-1 text-xs font-semibold text-yellow-400">★ Recommended for video</div>
+					{#each recommendedFonts as font (`rec-${font.family}`)}
+						<button
+							on:click={() => selectFont(font)}
+							class="flex w-full items-center justify-between border-b border-white/5 px-3 py-2 text-left hover:bg-white/10"
+						>
+							<div>
+								<div class="text-sm font-medium text-white" style="font-family: '{font.family}', sans-serif;">
+									{font.family}
+								</div>
+								<div class="text-xs text-gray-500">{font.category}</div>
+							</div>
+							{#if selectedFont === font.family}
+								<span class="text-green-400">✓</span>
+							{/if}
+						</button>
+					{/each}
+				{/if}
 				{#if filteredFonts.length > 0}
 					<div class="sticky top-0 bg-gray-800 px-2 py-1 text-xs text-gray-400">
 						Showing {filteredFonts.length} of {fonts.length} fonts

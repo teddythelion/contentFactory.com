@@ -230,6 +230,39 @@ function createTimelineStore() {
 			}));
 		},
 
+		// Move a clip to another track (lane) at a given start time — clips carry
+		// their own assetId, so lanes can host clips from different sources.
+		// Refuses (returns false) if the target window is occupied; the caller
+		// falls back to track re-layering in that case. Empty source lanes are
+		// auto-removed, same as removeClip.
+		moveClipToTrack(fromTrackId: string, clipId: string, toTrackId: string, newStart: number): boolean {
+			let moved = false;
+			update((s) => {
+				const from = s.tracks.find((t) => t.id === fromTrackId);
+				const to = s.tracks.find((t) => t.id === toTrackId);
+				if (!from || !to || from.id === to.id) return s;
+				const clip = from.clips.find((c) => c.id === clipId);
+				if (!clip) return s;
+				const dur = clip.endTime - clip.startTime;
+				const start = Math.max(0, newStart);
+				const end = start + dur;
+				if (to.clips.some((c) => start < c.endTime && end > c.startTime)) return s;
+				moved = true;
+				const movedClip: TimelineClip = { ...clip, startTime: start, endTime: end };
+				const fromClips = from.clips.filter((c) => c.id !== clipId);
+				let tracks = s.tracks.map((t) =>
+					t.id === to.id
+						? { ...t, clips: [...t.clips, movedClip].sort((a, b) => a.startTime - b.startTime) }
+						: t.id === from.id
+							? { ...t, clips: fromClips }
+							: t
+				);
+				if (fromClips.length === 0) tracks = tracks.filter((t) => t.id !== from.id);
+				return { ...s, tracks, activeTrackId: to.id, activeClipId: clipId };
+			});
+			return moved;
+		},
+
 		// Keeps duration constant — just shifts position
 		moveClip(trackId: string, clipId: string, newStart: number) {
 			update((s) => ({

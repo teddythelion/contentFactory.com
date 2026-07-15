@@ -15,6 +15,8 @@
 	import { timelineStore, DEFAULT_CLIP_TRANSFORM, type TimelineClip, type ClipTransform } from '$lib/stores/timeline.store';
 	import { mediaBinStore } from '$lib/stores/mediaBin.store';
 	import { TRANSITIONS } from '$lib/utils/clipTransitions';
+	import { TEXT_FONTS, type TextClipSpec } from '$lib/utils/textClipRender';
+	import { addText3DInstance } from '$lib/utils/text3dClips';
 
 	function resetAll() {
 		(window as any).__threeJsVideo?.pause();
@@ -63,8 +65,9 @@
 			if (tr.type !== 'video') continue;
 			const clip = tr.clips.find((c) => c.id === timeline.activeClipId);
 			if (clip) {
-				const asset = $mediaBinStore.assets.find((a) => a.id === tr.assetId);
-				return { track: tr, clip, isImage: asset?.type === 'image', srcDuration: asset?.duration ?? null };
+				// Clips carry their own assetId (lanes can host mixed sources)
+				const asset = $mediaBinStore.assets.find((a) => a.id === clip.assetId);
+				return { track: tr, clip, asset: asset ?? null, isImage: asset?.type === 'image', srcDuration: asset?.duration ?? null };
 			}
 		}
 		return null;
@@ -108,9 +111,43 @@
 		timelineStore.updateClip(f.track.id, f.clip.id, { endTime: newEnd, sourceEnd: newSrcEnd });
 	}
 
+	// Text clips: edits re-render the image via ThreeJsScene.syncTextImages
+	function patchFocusedText(patch: Partial<TextClipSpec>) {
+		const f = focusedClipInfo;
+		if (!f?.asset?.text) return;
+		const text = { ...f.asset.text, ...patch };
+		mediaBinStore.updateAsset(f.asset.id, { text, name: '🔤 ' + (text.content.slice(0, 24) || 'Text') });
+		if (patch.content !== undefined) {
+			timelineStore.renameTrack(f.track.id, text.content.split('\n')[0].slice(0, 24) || 'Text');
+		}
+	}
+
+	// Focusing a 3D text bar makes the ✨ 3D Text accordion edit THAT instance
+	$effect(() => {
+		const id = focusedClipInfo?.asset?.text3dId;
+		if (id && $text3DState.activeEntryId !== id) text3DState.setActiveEntry(id);
+	});
+
 	// If clip focus clears while the mobile Clip tab is open, fall back to Shape
 	$effect(() => {
 		if (!focusedClipInfo && activeMobileTab === 'clip') activeMobileTab = 'shape';
+	});
+
+	// Selected Clip card visibility. A native <details> keeps whatever open state
+	// the user last left it in — once collapsed, focusing clips never re-opened it
+	// ("the card stopped popping up"). Force it open and scroll the panel to the
+	// top every time a different clip gets focused; on mobile jump to the Clip tab.
+	let clipDetailsOpen = $state(true);
+	let desktopScrollEl = $state<HTMLDivElement | null>(null);
+	let lastFocusedClipId: string | null = null;
+	$effect(() => {
+		const id = timeline.activeClipId;
+		if (id === lastFocusedClipId) return; // drags retrigger this effect — only act on focus CHANGE
+		lastFocusedClipId = id;
+		if (!id) return;
+		clipDetailsOpen = true;
+		desktopScrollEl?.scrollTo({ top: 0, behavior: 'smooth' });
+		activeMobileTab = 'clip';
 	});
 	// Always read music controls from the active entry so switching bars instantly updates the panel
 	let activeMusicEntry = $derived(
@@ -350,9 +387,9 @@
 		},
 		{
 			id: 'text3d',
-			title: '✨ 3D Text & Typography',
+			title: `✨ 3D Text & Typography${$text3DState.activeEntryId ? ' — editing instance' : ''}`,
 			items: [
-				{ label: 'Enable 3D Text', type: 'toggle' },
+				{ label: '➕ Add 3D Text at Playhead', type: 'button', action: () => addText3DInstance() },
 				{ label: 'Text Content', type: 'text' },
 				{ label: 'Text Mode', type: 'text-mode-toggle' },
 				...($text3DState.textMode === 'troika' ? [
@@ -423,11 +460,6 @@
 				{ label: 'Video Texture Scale', type: 'range', min: 0.1, max: 5, step: 0.1 },
 				{ label: 'Video Texture Position X', type: 'range', min: -2, max: 2, step: 0.1 },
 				{ label: 'Video Texture Position Y', type: 'range', min: -2, max: 2, step: 0.1 },
-				{ label: '⏱️ Timing', type: 'section' },
-				{ label: 'Appear At (s)', type: 'range', min: 0, max: timelineDuration, step: 0.1 },
-				{ label: 'Disappear At (s)', type: 'range', min: 0.1, max: timelineDuration, step: 0.1 },
-				{ label: 'Text Fade In', type: 'range', min: 0, max: 10, step: 0.1 },
-				{ label: 'Text Fade Out', type: 'range', min: 0, max: 10, step: 0.1 },
 				{ label: '💡 Bold Title Preset', type: 'button', action: () => text3DState.presets.title() },
 				{ label: '✨ Subtle Subtitle Preset', type: 'button', action: () => text3DState.presets.subtitle() },
 				{ label: '🌟 Neon Glow Preset', type: 'button', action: () => text3DState.presets.neon() },
@@ -482,7 +514,6 @@
 	function getControlValue(groupId: string, label: string): number | string | boolean {
 		if (groupId === 'text3d') {
 			switch (label) {
-				case 'Enable 3D Text': return $text3DState.enabled;
 				case 'Text Content': return $text3DState.text;
 				case 'Font Size': return $text3DState.fontSize;
 				case 'Text Scale': return $text3DState.scale3D;
@@ -508,10 +539,6 @@
 				case 'Video Texture Position X': return $text3DState.videoTextureOffset.x;
 				case 'Video Texture Position Y': return $text3DState.videoTextureOffset.y;
 				case 'True 3D Font': return $text3DState.true3dFontFile;
-				case 'Appear At (s)': return $text3DState.textStartTime;
-				case 'Disappear At (s)': return $text3DState.textEndTime >= 9999 ? timelineDuration : Math.min($text3DState.textEndTime, timelineDuration);
-				case 'Text Fade In': return $text3DState.textFadeIn;
-				case 'Text Fade Out': return $text3DState.textFadeOut;
 			}
 		}
 		if (groupId === 'logo') {
@@ -604,7 +631,6 @@
 		}
 		if (groupId === 'text3d') {
 			switch (label) {
-				case 'Enable 3D Text': text3DState.updateProperty('enabled', value); break;
 				case 'Text Content': text3DState.setText(value); break;
 				case 'Font Size': text3DState.setFontSize(value); break;
 				case 'Text Scale': text3DState.setScale(value); break;
@@ -630,10 +656,6 @@
 				case 'Video Texture Position X': text3DState.updateProperty('videoTextureOffset', { ...$text3DState.videoTextureOffset, x: value }); break;
 				case 'Video Texture Position Y': text3DState.updateProperty('videoTextureOffset', { ...$text3DState.videoTextureOffset, y: value }); break;
 				case 'True 3D Font': text3DState.setTrue3dFont(value as string); break;
-				case 'Appear At (s)': text3DState.setTextStartTime(value); break;
-				case 'Disappear At (s)': text3DState.setTextEndTime(value); break;
-				case 'Text Fade In': text3DState.setTextFadeIn(value); break;
-				case 'Text Fade Out': text3DState.setTextFadeOut(value); break;
 			}
 			return;
 		}
@@ -729,7 +751,7 @@
 		{@const fadeMax = Math.min(6, Math.max(0.5, clipDur))}
 		<div class="flex flex-col gap-3 p-3">
 			<div class="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
-				<p class="text-sm font-semibold text-yellow-300">{f.isImage ? '🖼️' : '🎬'} {f.track.name}</p>
+				<p class="text-sm font-semibold text-yellow-300">{f.asset?.text3dId ? '✨' : f.asset?.text ? '🔤' : f.isImage ? '🖼️' : '🎬'} {f.track.name}</p>
 				<p class="mt-0.5 text-xs text-gray-400">{f.clip.startTime.toFixed(1)}s – {f.clip.endTime.toFixed(1)}s &middot; {clipDur.toFixed(1)}s long</p>
 				<p class="mt-1 text-xs text-gray-500">Edits apply to this clip only — focus another bar on the timeline to switch.</p>
 			</div>
@@ -807,6 +829,65 @@
 
 				<p class="mt-2 text-xs text-gray-500">Duration = how long the transition runs; the tiles pick its style. Fade one clip out and the next one in — overlap the clips on two tracks and the transition dissolves into the clip beneath.</p>
 			</div>
+
+			{#if f.asset?.text3dId}
+				<div class="rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/10 p-3">
+					<p class="text-xs text-fuchsia-200">✨ 3D text instance — this bar sets WHEN it shows; style it (content, font, materials, video texture, animation) in the <strong>✨ 3D Text &amp; Typography</strong> panel below, which now edits this instance. Fade sliders above fade it in/out (other transition styles act as fade on 3D text).</p>
+				</div>
+			{/if}
+
+			{#if f.asset?.text}
+				{@const txt = f.asset.text}
+				<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
+					<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Text</p>
+					<textarea
+						value={txt.content}
+						oninput={(e) => patchFocusedText({ content: e.currentTarget.value })}
+						rows="2"
+						placeholder="Your text (Enter = new line)"
+						class="w-full resize-none rounded border border-white/10 bg-gray-700 px-2 py-1 text-sm text-white outline-none focus:border-white/20"
+					></textarea>
+					<div class="mt-2 grid grid-cols-2 gap-2">
+						<div>
+							<span class="text-xs text-white">Font</span>
+							<select
+								value={txt.font}
+								onchange={(e) => patchFocusedText({ font: e.currentTarget.value })}
+								class="mt-1 w-full rounded border border-white/10 bg-gray-700 px-2 py-1 text-xs text-white outline-none focus:border-white/20"
+							>
+								{#each TEXT_FONTS as font (font)}
+									<option value={font}>{font}</option>
+								{/each}
+							</select>
+						</div>
+						<div>
+							<span class="text-xs text-white">Color</span>
+							<input type="color"
+								value={txt.color}
+								oninput={(e) => patchFocusedText({ color: e.currentTarget.value })}
+								class="mt-1 h-7 w-full cursor-pointer rounded border border-white/10" />
+						</div>
+					</div>
+					<div class="mt-3 mb-1 flex items-center justify-between">
+						<span class="text-sm text-white">Text Size</span>
+						<span class="text-xs text-gray-400">{txt.size}px</span>
+					</div>
+					<input type="range" min="24" max="300" step="2"
+						value={txt.size}
+						oninput={(e) => patchFocusedText({ size: parseInt(e.currentTarget.value) })}
+						class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700 accent-yellow-500" />
+					<div class="mt-3 flex items-center justify-between">
+						<span class="text-sm text-white">Bold</span>
+						<label class="relative inline-flex cursor-pointer items-center">
+							<input type="checkbox" checked={txt.bold}
+								onchange={(e) => patchFocusedText({ bold: e.currentTarget.checked })}
+								class="peer sr-only" />
+							<div class="peer h-6 w-11 rounded-full bg-gray-700 peer-checked:bg-yellow-600 after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+						</label>
+					</div>
+					<p class="mt-2 text-xs text-gray-500">Position and size on screen via Image Transform below; timing and fades above — same as any clip.</p>
+				</div>
+			{/if}
 
 			{#if f.isImage}
 				<div class="rounded-lg border border-white/10 bg-gray-700/50 p-3">
@@ -1256,10 +1337,28 @@
 <!-- ║  DESKTOP LAYOUT — original accordions, untouched        ║ -->
 <!-- ╚══════════════════════════════════════════════════════════╝ -->
 <div class="hidden lg:flex w-full flex-col gap-3 overflow-y-auto lg:w-96">
-	<div class="flex flex-col gap-2 overflow-y-auto pr-2" style="max-height: calc(100vh - 200px);">
-		{#each controlGroups as group (group.id)}
-			<div class="rounded-lg border border-white/10 bg-gray-800/50 {group.id === 'clip' ? 'border-yellow-500/40' : ''}">
-				<details class="group" open={group.id === 'clip'}>
+	<div bind:this={desktopScrollEl} class="flex flex-col gap-2 overflow-y-auto pr-2" style="max-height: calc(100vh - 200px);">
+		<!-- Selected Clip card — standalone so its open state is controlled without
+		     binding `open` on the other accordions (a bound open re-applies on every
+		     store change and slammed shut the accordion you were typing in) -->
+		{#if focusedClipInfo}
+			<div class="rounded-lg border border-yellow-500/40 bg-gray-800/50">
+				<details class="group" open={clipDetailsOpen} ontoggle={(e) => { clipDetailsOpen = e.currentTarget.open; }}>
+					<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
+						<span>🎞️ Selected Clip — {focusedClipInfo.track.name}</span>
+						<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180">
+							<path d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" fill-rule="evenodd" />
+						</svg>
+					</summary>
+					<div class="px-2 pb-2">
+						{@render clipPanel()}
+					</div>
+				</details>
+			</div>
+		{/if}
+		{#each controlGroups.filter((g) => g.id !== 'clip') as group (group.id)}
+			<div class="rounded-lg border border-white/10 bg-gray-800/50">
+				<details class="group">
 					<summary class="flex cursor-pointer items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white hover:bg-white/5">
 						<span>{group.title}</span>
 						<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" class="size-5 flex-none text-gray-500 transition-transform group-open:rotate-180">
@@ -1269,10 +1368,7 @@
 
 					<div class="px-2 pb-2">
 
-					{#if group.id === 'clip'}
-						{@render clipPanel()}
-
-					{:else if group.id === 'sfx'}
+					{#if group.id === 'sfx'}
 						<!-- ── SOUND EFFECTS ─────────────────────────────── -->
 						<div class="flex flex-col gap-3 p-3">
 

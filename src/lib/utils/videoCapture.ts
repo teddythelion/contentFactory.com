@@ -352,13 +352,15 @@ export async function captureThreeJsVideo(
 		legacyAudioSessionId = null;
 	}
 
-	// Secondary video clips — audio extracted when the clip was added (asset.sessionId)
+	// Secondary video clips — audio extracted when the clip was added (asset.sessionId).
+	// Resolved per CLIP, not per track: lanes can host clips from mixed sources.
 	const binAssets = get(mediaBinStore).assets;
 	for (const tr of timeline.tracks) {
-		if (tr.type !== 'video' || tr.assetId === mainAssetId || tr.muted) continue;
-		const asset = binAssets.find((a) => a.id === tr.assetId);
-		if (!asset?.sessionId || asset.type !== 'video') continue;
+		if (tr.type !== 'video' || tr.muted) continue;
 		for (const c of tr.clips) {
+			if (c.assetId === mainAssetId) continue; // main audio handled above
+			const asset = binAssets.find((a) => a.id === c.assetId);
+			if (!asset?.sessionId || asset.type !== 'video') continue;
 			clipAudios.push({
 				sessionId: asset.sessionId,
 				timelineStart: c.startTime,
@@ -459,9 +461,12 @@ export async function captureThreeJsVideo(
 				if (mainVideoTexture) mainVideoTexture.needsUpdate = true;
 			}
 
-			const textMesh = (window as any).__textMesh;
-			if (textMesh?._videoTexture) {
-				textMesh._videoTexture.needsUpdate = true;
+			// All 3D text instances — video-textured letters need their GPU slot
+			// marked dirty after the manual seek (multi-instance since 7-14-2026)
+			const textMeshes: any[] =
+				((window as any).__textMeshes as any[] | null) ?? [(window as any).__textMesh];
+			for (const tm of textMeshes) {
+				if (tm?._videoTexture) tm._videoTexture.needsUpdate = true;
 			}
 
 			const updateScene = (window as any).__threeJsUpdateScene;

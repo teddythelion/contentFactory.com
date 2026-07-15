@@ -3,8 +3,9 @@
 // armedAssetId = the clip tapped in the bin and ready to be placed on the timeline.
 
 import { writable } from 'svelte/store';
+import type { TextClipSpec } from '$lib/utils/textClipRender';
 
-export type AssetType = 'video' | 'image' | 'music' | 'sfx' | 'voice';
+export type AssetType = 'video' | 'image' | 'music' | 'sfx' | 'voice' | 'text3d';
 
 export interface MediaAsset {
 	id: string;
@@ -15,6 +16,12 @@ export interface MediaAsset {
 	duration: number;          // seconds
 	thumbnailUrl?: string;
 	createdAt: number;
+	// Text clips are image-type assets rendered from this spec — editing it
+	// re-renders the image (ThreeJsScene.syncTextImages)
+	text?: TextClipSpec;
+	// 3D text instances: the text3DState.entries key this asset's clips control.
+	// The clip's bar = the instance's visible window; ThreeJsText reads it.
+	text3dId?: string;
 }
 
 interface MediaBinState {

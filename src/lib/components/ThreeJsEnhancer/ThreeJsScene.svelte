@@ -13,6 +13,9 @@
 	import { mediaBinStore } from '$lib/stores/mediaBin.store';
 	import { timelineStore, DEFAULT_CLIP_TRANSFORM, type TimelineClip } from '$lib/stores/timeline.store';
 	import { clipTransitionState, computeTransitionFX } from '$lib/utils/clipTransitions';
+	import { renderTextClipImage, DEFAULT_TEXT_SPEC } from '$lib/utils/textClipRender';
+	import { addText3DInstance } from '$lib/utils/text3dClips';
+	import type { MediaAsset } from '$lib/stores/mediaBin.store';
 	import { logoState } from '$lib/stores/logo.store';
 	import { editHistory } from '$lib/stores/editHistory.store';
 	import TimelineEditor from './TimelineEditor.svelte';
@@ -312,17 +315,20 @@
 		// they were paused on. Assigning an unchanged currentTime never fires 'seeked',
 		// hence the diff check; the timeout covers stalled decodes so capture can't hang.
 		(window as any).__threeJsSeekSecondaries = async (t: number) => {
-			const tracks = $timelineStore.tracks.filter(
-				(tr) => tr.type === 'video' && tr.assetId !== mainVideoAssetId
-			);
-			const waits: Promise<void>[] = [];
-			for (const tr of tracks) {
-				const el = secondaryVideoElements.get(tr.assetId ?? '');
-				if (!el || el.readyState < 1) continue;
-				if (!el.paused) el.pause();
+			// Per-clip asset resolution (lanes host mixed sources); dedupe per
+			// element so one video never gets two competing seeks in a frame.
+			const seekTargets = new Map<HTMLVideoElement, number>();
+			for (const tr of $timelineStore.tracks) {
+				if (tr.type !== 'video') continue;
 				const clip = tr.clips.find((c) => t >= c.startTime && t < c.endTime);
-				if (!clip) continue;
-				const target = clip.sourceStart + (t - clip.startTime);
+				if (!clip || clip.assetId === mainVideoAssetId) continue;
+				const el = secondaryVideoElements.get(clip.assetId);
+				if (!el || el.readyState < 1 || seekTargets.has(el)) continue;
+				seekTargets.set(el, clip.sourceStart + (t - clip.startTime));
+			}
+			const waits: Promise<void>[] = [];
+			for (const [el, target] of seekTargets) {
+				if (!el.paused) el.pause();
 				if (Math.abs(el.currentTime - target) < 0.001) continue;
 				waits.push(
 					new Promise<void>((resolve) => {
@@ -715,10 +721,11 @@
 			// at the main video's natural end instead of the clip's fade-out tail.
 			const clip = tr.clips.find((c) => now >= c.startTime - 0.05 && now < c.endTime + 0.001);
 			if (!clip) continue;
+			// Clips carry their own assetId — lanes can host clips from any source
 			const el: HTMLVideoElement | HTMLImageElement | null | undefined =
-				tr.assetId === mainVideoAssetId
+				clip.assetId === mainVideoAssetId
 					? videoElement
-					: secondaryVideoElements.get(tr.assetId ?? '') ?? imageElements.get(tr.assetId ?? '');
+					: secondaryVideoElements.get(clip.assetId) ?? imageElements.get(clip.assetId);
 			if (!el) continue;
 			const layer: CompositeLayer = { el, clip };
 			if (el instanceof HTMLVideoElement) {
@@ -853,6 +860,55 @@
 			};
 		};
 		input.click();
+	}
+
+	// ── TEXT CLIPS ────────────────────────────────────────────────────
+	// A text clip is an image clip whose image is rendered from asset.text.
+	// Editing the spec (ControlsPanel) updates the asset; this sync re-renders
+	// the image so the compositor (and export) always draw the current text.
+	const renderedTextSpecs = new Map<string, string>();
+
+	function syncTextImages(assets: MediaAsset[]) {
+		for (const a of assets) {
+			if (!a.text) continue;
+			const spec = JSON.stringify(a.text);
+			if (renderedTextSpecs.get(a.id) === spec) continue;
+			renderedTextSpecs.set(a.id, spec);
+			const img = new Image();
+			img.onload = () => {
+				imageElements.set(a.id, img);
+				imageElements = new Map(imageElements);
+			};
+			img.src = renderTextClipImage(a.text);
+		}
+	}
+	$: syncTextImages($mediaBinStore.assets);
+
+	// ── + TEXT dropdown — one button, three text flavors ─────────────
+	let showTextMenu = false;
+
+	function addText3D(mode: 'troika' | 'true3d') {
+		text3DState.setTextMode(mode);
+		addText3DInstance();
+		showTextMenu = false;
+	}
+
+	function addTextClip() {
+		const spec = { ...DEFAULT_TEXT_SPEC };
+		const start = ((window as any).__timelineEditTime as number | null) ?? 0;
+		editHistory.checkpoint();
+		const assetId = mediaBinStore.addAsset({
+			type: 'image',
+			name: '🔤 ' + spec.content,
+			sessionId: null,
+			previewUrl: null,
+			duration: 4,
+			text: spec
+		});
+		const trackId = timelineStore.addVideoTrack(assetId, spec.content, 4, start);
+		// Focus it so the Selected Clip panel opens with the text controls
+		const track = $timelineStore.tracks.find((t) => t.id === trackId);
+		if (track?.clips[0]) timelineStore.setActiveClip(trackId, track.clips[0].id);
 	}
 
 	function createParticleTexture(shape: string): THREE.CanvasTexture {
@@ -1227,6 +1283,32 @@
 				title="Add video or image clip from file"
 				style="height:26px;padding:0 8px;border-radius:4px;border:1px solid rgba(99,102,241,0.6);background:rgba(99,102,241,0.25);color:white;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;"
 			>+ Clip</button>
+			<div style="position:relative;">
+				<button
+					on:click={() => { showTextMenu = !showTextMenu; }}
+					title="Add text at the playhead — pick a flavor"
+					style="height:26px;padding:0 8px;border-radius:4px;border:1px solid rgba(250,204,21,0.6);background:rgba(250,204,21,0.2);color:white;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;"
+				>+ Text ▾</button>
+				{#if showTextMenu}
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div on:click={() => { showTextMenu = false; }} style="position:fixed;inset:0;z-index:29;"></div>
+					<div style="position:absolute;top:30px;right:0;z-index:30;background:rgba(10,15,30,0.97);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:4px 0;min-width:210px;box-shadow:0 8px 24px rgba(0,0,0,0.6);">
+						<button on:click={() => { addTextClip(); showTextMenu = false; }}
+							style="display:flex;align-items:center;gap:8px;width:100%;padding:7px 12px;background:none;border:none;color:rgba(229,231,235,1);font-size:11px;cursor:pointer;text-align:left;"
+							on:mouseenter={(e)=>(e.currentTarget.style.background='rgba(250,204,21,0.12)')} on:mouseleave={(e)=>(e.currentTarget.style.background='none')}
+						>🔤 <span><strong>Caption</strong> — flat, quick, web fonts</span></button>
+						<button on:click={() => addText3D('troika')}
+							style="display:flex;align-items:center;gap:8px;width:100%;padding:7px 12px;background:none;border:none;color:rgba(229,231,235,1);font-size:11px;cursor:pointer;text-align:left;"
+							on:mouseenter={(e)=>(e.currentTarget.style.background='rgba(232,121,249,0.12)')} on:mouseleave={(e)=>(e.currentTarget.style.background='none')}
+						>✨ <span><strong>2.5D</strong> — Google Fonts, glow, animation</span></button>
+						<button on:click={() => addText3D('true3d')}
+							style="display:flex;align-items:center;gap:8px;width:100%;padding:7px 12px;background:none;border:none;color:rgba(229,231,235,1);font-size:11px;cursor:pointer;text-align:left;"
+							on:mouseenter={(e)=>(e.currentTarget.style.background='rgba(232,121,249,0.12)')} on:mouseleave={(e)=>(e.currentTarget.style.background='none')}
+						>🧊 <span><strong>3D</strong> — extruded, beveled, video-texture</span></button>
+					</div>
+				{/if}
+			</div>
 		</div>
 
 		<div class="absolute bottom-0 left-0 right-0 flex flex-col gap-1 bg-black/90 backdrop-blur-sm p-1">
