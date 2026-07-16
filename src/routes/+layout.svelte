@@ -3,6 +3,7 @@
   import favicon from '$lib/assets/logometa262x275l.svg';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Footer from '$lib/components/Footer.svelte';
+  import Brandline from '$lib/components/BrandLine.svelte';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { encodeJobStore } from '$lib/stores/encodeJob.store';
@@ -169,7 +170,7 @@
 </Sidebar>
 
 <Footer />
-
+<Brandline />
 <style>
   /* Re-auth modal */
   .reauth-overlay {

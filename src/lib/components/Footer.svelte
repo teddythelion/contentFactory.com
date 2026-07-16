@@ -1,32 +1,22 @@
-<footer class="footer bg-base-200 p-10 text-base-content sm:footer-horizontal">
+<footer class="footer justify-center gap-x-24 bg-base-200 p-10 text-center text-base-content sm:footer-horizontal [&_nav]:items-center [&_form]:items-center">
 	<nav>
 		<h4 class="footer-title">We Offer</h4>
+		<a href="https://ailaboratory.site/" class="link link-hover"><h6>About Us</h6></a>
 		<a href="/services" class="link link-hover">Services</a>
 		<a href="/branding" class="link link-hover">Branding</a>
 		<a href="/marketing" class="link link-hover">Marketing</a>
 		<a href="/advertising" class="link link-hover">Advertisement</a>
 	</nav>
-	<nav>
-		<h6 class="footer-title">Company</h6>
-		<a href="/" class="link link-hover">About us</a>
-		<a href="/" class="link link-hover">Contact</a>
-		<a href="/" class="link link-hover">Jobs</a>
-		<a href="/" class="link link-hover">Press kit</a>
-	</nav>
+	
 	<nav>
 		<h6 class="footer-title">Legal</h6>
 		<a href="/terms" class="link link-hover">Terms of use</a>
 		<a href="/privacy" class="link link-hover">Privacy policy</a>
 		<a href="/cookies" class="link link-hover">Cookie policy</a>
 	</nav>
+	
 	<form>
-		<h6 class="footer-title">Newsletter</h6>
-		<fieldset class="w-80">
-			<span>Enter your email address</span>
-			<div class="join">
-				<input type="text" placeholder="username@site.com" class="input-bordered input join-item" />
-				<button class="btn join-item btn-primary">Subscribe</button>
-			</div>
-		</fieldset>
-	</form>
+		<h6 class="footer-title">Reach Out</h6>
+		<a href="https://ailaboratory.site/contact" class="link link-hover">Contact Us</a>
+	</form>   
 </footer>
