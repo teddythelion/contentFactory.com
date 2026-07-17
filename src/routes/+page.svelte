@@ -79,7 +79,7 @@
 
 	<div class="flex flex-col gap-3 sm:flex-row">
 		<a href="/create" class="btn btn-secondary btn-lg w-full sm:w-auto">
-			Start Creating — It's Free
+			Start Creating
 		</a>
 		<a href="/prompt-coach" class="btn btn-outline btn-lg w-full sm:w-auto">
 			Try Prompt Engineer 
@@ -87,7 +87,7 @@
 	</div>
 
 	<p class="mt-6 text-xs text-base-content/40">
-		No credit card required &nbsp;·&nbsp; 2 free videos per day
+		No credit card required to try it
 	</p>
 </section>
 
@@ -204,9 +204,9 @@
 		</span>
 	</h2>
 	<p class="mb-8 text-base-content/60">
-		Free tier gets you started today. No credit card. No friction.
+		Get started today. No credit card. No friction.
 	</p>
 	<a href="/create" class="btn btn-secondary btn-lg">
-		{$authStore.user ? 'Go to Studio' : 'Create Your First Video Free'}
+		{$authStore.user ? 'Go to Studio' : 'Create Your First Video'}
 	</a>
 </section>

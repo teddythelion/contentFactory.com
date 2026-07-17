@@ -12,7 +12,7 @@
 		show = false;
 	}
 
-	async function handleUpgrade(plan: 'starter' | 'pro') {
+	async function handleUpgrade(plan: 'starter' | 'pro' | 'elite') {
 		try {
 			const response = await fetch('/api/stripe/checkout', {
 				method: 'POST',
@@ -24,9 +24,13 @@
 
 			if (data.url) {
 				window.location.href = data.url;
+			} else {
+				console.error('💸 Checkout returned no URL:', data);
+				alert(`Could not start checkout: ${data.error ?? 'unknown error'}. Please try again.`);
 			}
 		} catch (error) {
-			console.error('Failed to start checkout:', error);
+			console.error('💸 Failed to start checkout:', error);
+			alert('Could not start checkout — please try again.');
 		}
 	}
 </script>
@@ -49,9 +53,9 @@
 					You've hit your {generationType} limit
 				</h2>
 				<p class="text-gray-400 mt-2 text-sm leading-relaxed">
-					You've used all your free {generationType} generations for today.
+					You've used all your included {generationType} generations for this period.
 					Each {generationType} we create uses premium AI models that cost real money to run.
-					We'd love to offer unlimited free generations, but we're not quite there yet.
+					Upgrade to keep creating without interruption.
 				</p>
 			</div>
 
@@ -101,22 +105,30 @@
 				</ul>
 			</div>
 
-			<!-- Upgrade Options -->
+			<!-- Upgrade Options — keep numbers in sync with TIER_CONFIG -->
 			<div class="space-y-3">
 				<button
-					class="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors flex items-center justify-between"
-					on:click={() => handleUpgrade('pro')}
+					class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-purple-600 hover:from-amber-400 hover:to-purple-500 text-white font-semibold transition-colors flex items-center justify-between ring-1 ring-amber-400/60"
+					on:click={() => handleUpgrade('elite')}
 				>
-					<span>pro— 100 images + 30 videos/mo</span>
-					<span class="text-blue-200">$69/mo</span>
+					<span class="text-left">Elite — 60 videos + 15 premium/extends, 100 images</span>
+					<span class="text-amber-100 whitespace-nowrap pl-2">$256/mo</span>
 				</button>
 
 				<button
 					class="w-full py-3 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold transition-colors flex items-center justify-between"
+					on:click={() => handleUpgrade('pro')}
+				>
+					<span class="text-left">Pro — 25 videos + 4 premium/extends, 60 images</span>
+					<span class="text-purple-200 whitespace-nowrap pl-2">$99/mo</span>
+				</button>
+
+				<button
+					class="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors flex items-center justify-between"
 					on:click={() => handleUpgrade('starter')}
 				>
-					<span>starter — 20 images + 10 videos/mo</span>
-					<span class="text-blue-200">$20/mo</span>
+					<span class="text-left">Starter — 10 videos, 30 images</span>
+					<span class="text-blue-200 whitespace-nowrap pl-2">$29/mo</span>
 				</button>
 			</div>
 

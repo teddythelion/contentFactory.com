@@ -11,9 +11,23 @@ import type { PlanTier } from '$lib/types/subscription';
 const stripe = new Stripe(env.STRIPE_SECRET_KEY!, { apiVersion: '2024-12-18.acacia' });
 
 /**
+ * Period end moved from the subscription to its items in newer Stripe API
+ * versions (the webhook endpoint runs 2026-01-28.clover). Read both shapes —
+ * missing it must yield null, never NaN into Firestore.
+ */
+function getPeriodEnd(subscription: Stripe.Subscription): Timestamp | null {
+	const raw =
+		(subscription as any).current_period_end ??
+		(subscription.items?.data?.[0] as any)?.current_period_end ??
+		null;
+	return typeof raw === 'number' && isFinite(raw) ? Timestamp.fromMillis(raw * 1000) : null;
+}
+
+/**
  * Map Stripe price ID to plan tier
  */
 function getPlanFromPriceId(priceId: string): PlanTier {
+	if (priceId === env.STRIPE_ELITE_PRICE_ID) return 'elite';
 	if (priceId === env.STRIPE_PRO_PRICE_ID) return 'pro';
 	if (priceId === env.STRIPE_STARTER_PRICE_ID) return 'starter';
 	return 'free';
@@ -80,7 +94,7 @@ export const POST: RequestHandler = async ({ request }) => {
 						plan,
 						stripeSubscriptionId: subscription.id,
 						subscriptionStatus: subscription.status,
-						subscriptionPeriodEnd: Timestamp.fromMillis(subscription.current_period_end * 1000),
+						subscriptionPeriodEnd: getPeriodEnd(subscription),
 						stripePriceId: priceId
 					});
 				}
@@ -96,7 +110,7 @@ export const POST: RequestHandler = async ({ request }) => {
 					plan: subscription.status === 'active' ? plan : 'free',
 					stripeSubscriptionId: subscription.id,
 					subscriptionStatus: subscription.status,
-					subscriptionPeriodEnd: Timestamp.fromMillis(subscription.current_period_end * 1000),
+					subscriptionPeriodEnd: getPeriodEnd(subscription),
 					stripePriceId: priceId
 				});
 				break;

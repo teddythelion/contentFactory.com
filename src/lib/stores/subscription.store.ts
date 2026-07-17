@@ -7,8 +7,10 @@ interface SubscriptionState {
 	plan: PlanTier;
 	imagesUsed: number;
 	videosUsed: number;
+	premiumUsed: number;
 	imagesRemaining: number;
 	videosRemaining: number;
+	premiumRemaining: number;
 	resetAt: string;
 	period: 'daily' | 'monthly';
 	canExtend: boolean;
@@ -17,14 +19,18 @@ interface SubscriptionState {
 	lastChecked: number | null;
 }
 
+// Fallback values mirror TIER_CONFIG.free in $lib/types/subscription — the
+// server enforces the real limits; keep these in sync so the UI never lies.
 const initialState: SubscriptionState = {
 	plan: 'free',
 	imagesUsed: 0,
 	videosUsed: 0,
-	imagesRemaining: 2,
+	premiumUsed: 0,
+	imagesRemaining: 3,
 	videosRemaining: 2,
-	resetAt: 'midnight Pacific time',
-	period: 'daily',
+	premiumRemaining: 0,
+	resetAt: 'the start of next month',
+	period: 'monthly',
 	canExtend: false,
 	canUsePremiumQuality: false,
 	loading: false,
@@ -59,8 +65,10 @@ export async function canGenerate(type: 'image' | 'video'): Promise<UsageCheckRe
 			plan: result.plan,
 			imagesUsed: result.imagesUsed,
 			videosUsed: result.videosUsed,
+			premiumUsed: result.premiumUsed ?? 0,
 			imagesRemaining: result.imagesRemaining,
 			videosRemaining: result.videosRemaining,
+			premiumRemaining: result.premiumRemaining ?? 0,
 			resetAt: result.resetAt,
 			period: result.period,
 			canExtend: result.canExtend,
@@ -73,16 +81,19 @@ export async function canGenerate(type: 'image' | 'video'): Promise<UsageCheckRe
 	} catch (error) {
 		console.error('Usage check failed:', error);
 		subscriptionStore.update(s => ({ ...s, loading: false }));
-		// Fail open — allow generation if check fails; server still enforces
+		// Fail open — allow generation if check fails; server still enforces.
+		// Values mirror TIER_CONFIG.free.
 		return {
 			allowed: true,
 			plan: 'free',
 			imagesUsed: 0,
 			videosUsed: 0,
-			imagesRemaining: 2,
+			premiumUsed: 0,
+			imagesRemaining: 3,
 			videosRemaining: 2,
-			resetAt: 'midnight Pacific time',
-			period: 'daily',
+			premiumRemaining: 0,
+			resetAt: 'the start of next month',
+			period: 'monthly',
 			canExtend: false,
 			canUsePremiumQuality: false
 		};

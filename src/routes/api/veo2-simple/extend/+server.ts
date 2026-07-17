@@ -19,9 +19,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return new Response(JSON.stringify({ error: 'unsupported', feature: 'extend', provider: provider.name }), { status: 501 });
 	}
 
-	const usageCheck = await checkUsage(userId, 'video');
+	// Extends run the premium model ($0.40/sec real cost) — they burn a PREMIUM
+	// credit, not a fast-video credit. This cap is what keeps the tiers profitable.
+	const usageCheck = await checkUsage(userId, 'premium_video');
 	if (!usageCheck.allowed) {
-		return new Response(JSON.stringify({ error: 'limit_reached', usage: usageCheck }), { status: 429 });
+		return new Response(JSON.stringify({ error: 'limit_reached', feature: 'premium', usage: usageCheck }), { status: 429 });
 	}
 
 	try {
@@ -43,7 +45,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		});
 
 		console.log(`✅ Extension operation started: ${operation.id}`);
-		await incrementUsage(userId, 'video');
+		await incrementUsage(userId, 'premium_video');
 
 		return new Response(JSON.stringify({ operation: operation.id }), {
 			headers: { 'Content-Type': 'application/json' },

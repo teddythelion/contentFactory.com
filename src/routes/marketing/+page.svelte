@@ -44,7 +44,7 @@
 			<div class="rounded-2xl border border-info/20 bg-info/5 p-8">
 				<h3 class="mb-4 text-lg font-black text-info">The Content Factory Way</h3>
 				<ul class="space-y-3">
-					{#each ['Generate cinematic video in seconds — free', 'Create unique brand images instantly — free', 'Custom AI music for every video — included', 'Original sound effects on demand — included', 'Iterate in real time, no waiting', 'Completely unique content every time'] as item (item)}
+					{#each ['Generate cinematic video in seconds', 'Create unique brand images instantly', 'Custom AI music for every video — included', 'Original sound effects on demand — included', 'Iterate in real time, no waiting', 'Completely unique content every time'] as item (item)}
 						<li class="flex items-start gap-3 text-sm text-white/60">
 							<span class="mt-0.5 text-info">✓</span>
 							{item}
@@ -103,7 +103,7 @@
 
 		<!-- Stats -->
 		<div class="my-20 grid gap-6 md:grid-cols-4">
-			{#each [{ stat: '10 min', label: 'Average time to produce a full social content set' }, { stat: '100%', label: 'Original content — no stock, no licensing issues' }, { stat: '8+', label: 'Output types — images, 3D videos, enhanced audio, voice over' }, { stat: '$0', label: 'Cost to generate on the free plan' }] as item (item.stat)}
+			{#each [{ stat: '10 min', label: 'Average time to produce a full social content set' }, { stat: '100%', label: 'Original content — no stock, no licensing issues' }, { stat: '8+', label: 'Output types — images, 3D videos, enhanced audio, voice over' }, { stat: '1', label: 'Pipeline from idea to ready-to-ship content' }] as item (item.stat)}
 				<div class="rounded-xl border border-info/20 bg-info/5 p-6 text-center">
 					<div class="mb-2 text-3xl font-black text-info">{item.stat}</div>
 					<div class="text-xs text-white/50">{item.label}</div>
@@ -116,7 +116,7 @@
 			<h2 class="mb-4 text-3xl font-black text-white">
 				Your Marketing Content Pipeline Starts Here.
 			</h2>
-			<p class="mb-8 text-white/50">Start free — no credit card, no agency, no waiting.</p>
+			<p class="mb-8 text-white/50">Start today — no credit card, no agency, no waiting.</p>
 			<div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
 				<a href="/create" class="btn btn-lg btn-info">🖼️ Generate Marketing Images</a>
 				<a href="/create" class="btn text-white btn-outline btn-lg hover:btn-info"

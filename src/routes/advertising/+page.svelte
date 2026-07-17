@@ -322,7 +322,7 @@
     <!-- CTA -->
     <div class="mt-20 rounded-2xl border border-info/20 bg-info/5 p-12 text-center">
       <h2 class="mb-4 text-3xl font-black text-white">Ready to Outproduce Your Competition?</h2>
-      <p class="mb-8 text-white/50">Start generating ad creative today — free, no credit card required.</p>
+      <p class="mb-8 text-white/50">Start generating ad creative today — no credit card required.</p>
       <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
         <a href="/create" class="btn btn-info btn-lg">🖼️ Create Ad Images</a>
         <a href="/create" class="btn btn-outline btn-lg text-white hover:btn-info">🎬 Create Ad Videos</a>

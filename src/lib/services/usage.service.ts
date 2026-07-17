@@ -44,7 +44,7 @@ export async function getUserPlan(userId: string): Promise<PlanTier> {
 
 	// Trust the plan field if it's a paid tier
 	const storedPlan = data?.plan as PlanTier | undefined;
-	if (storedPlan === 'pro' || storedPlan === 'starter') {
+	if (storedPlan === 'elite' || storedPlan === 'pro' || storedPlan === 'starter') {
 		return storedPlan;
 	}
 
@@ -53,6 +53,7 @@ export async function getUserPlan(userId: string): Promise<PlanTier> {
 	const status = data?.subscriptionStatus as string | null;
 	const priceId = data?.stripePriceId as string | null;
 	if (status === 'active' && priceId) {
+		if (priceId === env.STRIPE_ELITE_PRICE_ID) return 'elite';
 		if (priceId === env.STRIPE_PRO_PRICE_ID) return 'pro';
 		if (priceId === env.STRIPE_STARTER_PRICE_ID) return 'starter';
 	}
@@ -60,42 +61,61 @@ export async function getUserPlan(userId: string): Promise<PlanTier> {
 	return 'free';
 }
 
-async function getCurrentUsage(userId: string, plan: PlanTier): Promise<{ imagesGenerated: number; videosGenerated: number }> {
+async function getCurrentUsage(
+	userId: string,
+	plan: PlanTier
+): Promise<{ imagesGenerated: number; videosGenerated: number; premiumVideosGenerated: number }> {
 	const dateKey = getDateKey(plan);
 	const docId = getUsageDocId(userId, dateKey);
 	const usageDoc = await adminDb.collection(USAGE_COLLECTION).doc(docId).get();
 
 	if (!usageDoc.exists) {
-		return { imagesGenerated: 0, videosGenerated: 0 };
+		return { imagesGenerated: 0, videosGenerated: 0, premiumVideosGenerated: 0 };
 	}
 
 	const data = usageDoc.data();
 	return {
 		imagesGenerated: data?.imagesGenerated || 0,
-		videosGenerated: data?.videosGenerated || 0
+		videosGenerated: data?.videosGenerated || 0,
+		premiumVideosGenerated: data?.premiumVideosGenerated || 0
 	};
 }
+
+const USAGE_FIELD: Record<GenerationType, string> = {
+	image: 'imagesGenerated',
+	video: 'videosGenerated',
+	premium_video: 'premiumVideosGenerated'
+};
 
 export async function checkUsage(userId: string, type: GenerationType): Promise<UsageCheckResult> {
 	const plan = await getUserPlan(userId);
 	const limits = TIER_CONFIG[plan];
 	const usage = await getCurrentUsage(userId, plan);
 
-	const maxForType = type === 'image' ? limits.maxImages : limits.maxVideos;
-	const usedForType = type === 'image' ? usage.imagesGenerated : usage.videosGenerated;
+	const maxForType =
+		type === 'image' ? limits.maxImages :
+		type === 'premium_video' ? limits.maxPremiumVideos :
+		limits.maxVideos;
+	const usedForType =
+		type === 'image' ? usage.imagesGenerated :
+		type === 'premium_video' ? usage.premiumVideosGenerated :
+		usage.videosGenerated;
 
 	const allowed = maxForType === -1 || usedForType < maxForType;
 
 	const imagesRemaining = limits.maxImages === -1 ? -1 : Math.max(0, limits.maxImages - usage.imagesGenerated);
 	const videosRemaining = limits.maxVideos === -1 ? -1 : Math.max(0, limits.maxVideos - usage.videosGenerated);
+	const premiumRemaining = Math.max(0, limits.maxPremiumVideos - usage.premiumVideosGenerated);
 
 	return {
 		allowed,
 		plan,
 		imagesUsed: usage.imagesGenerated,
 		videosUsed: usage.videosGenerated,
+		premiumUsed: usage.premiumVideosGenerated,
 		imagesRemaining,
 		videosRemaining,
+		premiumRemaining,
 		resetAt: getResetTime(plan),
 		period: limits.period,
 		canExtend: limits.canExtend,
@@ -117,12 +137,12 @@ export async function incrementUsage(userId: string, type: GenerationType, count
 			date: dateKey,
 			imagesGenerated: type === 'image' ? count : 0,
 			videosGenerated: type === 'video' ? count : 0,
+			premiumVideosGenerated: type === 'premium_video' ? count : 0,
 			lastGenerationAt: Timestamp.now()
 		});
 	} else {
-		const field = type === 'image' ? 'imagesGenerated' : 'videosGenerated';
 		await usageRef.update({
-			[field]: FieldValue.increment(count),
+			[USAGE_FIELD[type]]: FieldValue.increment(count),
 			lastGenerationAt: Timestamp.now()
 		});
 	}

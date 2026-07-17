@@ -18,11 +18,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
 	}
 
-	const usageCheck = await checkUsage(userId, 'video');
-	if (!usageCheck.allowed) {
-		return new Response(JSON.stringify({ error: 'limit_reached', usage: usageCheck }), { status: 429 });
-	}
-
 	const contentType = request.headers.get('content-type') || '';
 	let prompt: string;
 	let duration = 8;
@@ -62,10 +57,29 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		const plan = await getUserPlan(userId);
 		const tierLimits = TIER_CONFIG[plan];
-		// Server enforces model — client quality preference only applies if the plan allows it
-		const model = (quality === 'premium' && tierLimits.canUsePremiumQuality)
-			? 'veo-3.1-generate-preview'
-			: tierLimits.videoModel;
+
+		// Server enforces model AND credits. Premium quality burns a PREMIUM credit
+		// (separate pool — real cost is 4× fast); when the plan disallows it or
+		// credits are spent, the request gracefully downgrades to the fast pool
+		// instead of failing, and the response says so.
+		let usePremium = quality === 'premium' && tierLimits.canUsePremiumQuality;
+		let premiumDowngraded = false;
+		if (usePremium) {
+			const premiumCheck = await checkUsage(userId, 'premium_video');
+			if (!premiumCheck.allowed) {
+				usePremium = false;
+				premiumDowngraded = true;
+				console.log(`⬇️ Premium credits exhausted for ${userId} (${plan}) — downgrading to fast model`);
+			}
+		}
+		if (!usePremium) {
+			const usageCheck = await checkUsage(userId, 'video');
+			if (!usageCheck.allowed) {
+				return new Response(JSON.stringify({ error: 'limit_reached', usage: usageCheck }), { status: 429 });
+			}
+		}
+		const usageType = usePremium ? 'premium_video' as const : 'video' as const;
+		const model = usePremium ? 'veo-3.1-generate-preview' : tierLimits.videoModel;
 
 		const modeMap = ['text-to-video', 'first-frame animation', 'interpolation (start→end)', 'interpolation (start→mid→end)'];
 		const mode = modeMap[refImages.length] ?? modeMap[0];
@@ -82,11 +96,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		});
 
 		console.log(`✅ Operation started: ${operation.id}`);
-		await incrementUsage(userId, 'video');
+		await incrementUsage(userId, usageType);
 
 		return new Response(JSON.stringify({
 			operation: operation.id,
 			mode,
+			premiumDowngraded, // true = premium requested but credits spent; ran on fast model
 		}), {
 			headers: { 'Content-Type': 'application/json' },
 		});

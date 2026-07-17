@@ -269,7 +269,7 @@ A picture is worth a thousand words — and a thousand tokens.
     <!-- CTA -->
     <div class="mt-20 rounded-2xl border border-info/20 bg-info/5 p-12 text-center">
       <h2 class="mb-4 text-3xl font-black text-white">Ready to Create?</h2>
-      <p class="mb-8 text-white/50">Start free — 2 images and 2 videos every day, no credit card required.</p>
+      <p class="mb-8 text-white/50">Start creating today — no credit card required.</p>
       <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
         <a href="/create" class="btn btn-info btn-lg">
           🖼️ Generate an Image

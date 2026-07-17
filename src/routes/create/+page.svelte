@@ -1147,7 +1147,10 @@ let showAuthModal = $state(false);
 												</button>
 											</div>
 											{#if videoQuality === 'premium' && planCanUsePremiumQuality}
-												<p class="text-xs text-warning/70 mt-1">Highest detail & resolution — slower generation</p>
+												<p class="text-xs text-warning/70 mt-1">
+													Highest detail & resolution — slower generation
+													&middot; {$subscriptionStore.premiumRemaining} premium credit{$subscriptionStore.premiumRemaining === 1 ? '' : 's'} left this month
+												</p>
 											{/if}
 										</div>
 									</div>

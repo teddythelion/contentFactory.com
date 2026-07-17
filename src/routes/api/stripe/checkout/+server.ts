@@ -9,8 +9,9 @@ import Stripe from 'stripe';
 const stripe = new Stripe(env.STRIPE_SECRET_KEY!, { apiVersion: '2024-12-18.acacia' });
 
 const PRICE_MAP: Record<string, string> = {
+	elite: env.STRIPE_ELITE_PRICE_ID!,
 	pro: env.STRIPE_PRO_PRICE_ID!,
-	starter: env.STRIPE_SARTER_PRICE_ID!
+	starter: env.STRIPE_STARTER_PRICE_ID!
 };
 
 export const POST: RequestHandler = async ({ request, locals, url }) => {
@@ -20,7 +21,7 @@ export const POST: RequestHandler = async ({ request, locals, url }) => {
 			return json({ error: 'Unauthorized' }, { status: 401 });
 		}
 
-		const { plan } = await request.json() as { plan: 'pro' | 'unlimited' };
+		const { plan } = await request.json() as { plan: 'starter' | 'pro' | 'elite' };
 
 		if (!plan || !PRICE_MAP[plan]) {
 			return json({ error: 'Invalid plan' }, { status: 400 });
