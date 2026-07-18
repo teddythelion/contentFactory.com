@@ -290,17 +290,17 @@ export async function captureThreeJsVideo(
 	};
 
 	const fps = 30;
-	// Physical pixel dimensions — what the WebGL drawing buffer actually holds.
-	const width = canvas.width;
-	const height = canvas.height;
-	// Logical (CSS) pixel dimensions — target output resolution.
-	// On a 2× DPR display, canvas.width = clientWidth * 2. The WebCodecs path
-	// down-scales in the browser; the JPEG path ships physical pixels and the
-	// server down-scales, so the encoded video isn't 4× larger than display size.
-	const outWidth = Math.floor(canvas.clientWidth / 2) * 2; // H.264 needs even dims
-	const outHeight = Math.floor(canvas.clientHeight / 2) * 2;
-	console.log(`🖼️ Canvas size: ${width}x${height}`);
-	console.log(`🖼️ Canvas client size: ${canvas.clientWidth}x${canvas.clientHeight}`);
+	// DETERMINISTIC export resolution — fixed 1080p, never the on-screen canvas
+	// size. Exporting at display size made output dims a function of window/
+	// monitor/zoom at capture time, and every re-import of a capture compounded
+	// a downscale + re-encode. The renderer is locked to exactly this resolution
+	// for the duration of the capture (pixelRatio 1) and restored after, so
+	// physical pixels == output pixels == 1920×1080, every time, everywhere.
+	const outWidth = 1920;
+	const outHeight = 1080;
+	const width = outWidth;
+	const height = outHeight;
+	console.log(`🖼️ Capture locked to ${outWidth}x${outHeight} (display canvas: ${canvas.clientWidth}x${canvas.clientHeight})`);
 	const totalFrames = Math.ceil(timelineEnd * fps);
 
 	// Read audioSessionId from store — will be null if video had no audio
@@ -403,6 +403,17 @@ export async function captureThreeJsVideo(
 
 	videoElement.pause();
 	(window as any).__threeJsCapturing = true;
+
+	// Lock the renderer to the exact output resolution — offscreen only (CSS
+	// size untouched), restored in the finally below.
+	const prevPixelRatio = threeRenderer.getPixelRatio();
+	const prevCssW = canvas.clientWidth;
+	const prevCssH = canvas.clientHeight;
+	const prevAspect = threeCamera.aspect;
+	threeRenderer.setPixelRatio(1);
+	threeRenderer.setSize(outWidth, outHeight, false);
+	threeCamera.aspect = outWidth / outHeight;
+	threeCamera.updateProjectionMatrix();
 
 	try {
 		const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
@@ -591,6 +602,11 @@ export async function captureThreeJsVideo(
 		console.error('❌ Capture failed:', error);
 		throw error;
 	} finally {
+		// Restore display-sized rendering before handing the canvas back to preview
+		threeRenderer.setPixelRatio(prevPixelRatio);
+		threeRenderer.setSize(prevCssW, prevCssH, false);
+		threeCamera.aspect = prevAspect;
+		threeCamera.updateProjectionMatrix();
 		(window as any).__threeJsCapturing = false;
 		videoElement.currentTime = 0;
 		videoElement.play().catch(() => {});

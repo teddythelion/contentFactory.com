@@ -43,7 +43,7 @@ SvelteKit (Svelte 5 runes in newer components, legacy `$:` in older ones — bot
 
 Two pluggable sinks:
 
-1. **WebCodecs (primary):** hardware H.264 in-browser (`VideoEncoder` + `mp4-muxer`), downscale to CSS resolution and video fade-in/out **baked client-side**, one mp4 upload to `/api/uploadCapturedVideo` → `capture-{sessionId}.mp4`. Encode request carries `preEncoded: true` → server skips Pass 1 entirely, does `-c:v copy` + audio mux only (seconds, not minutes). This exists because the VPS is weak and can't be upgraded — **never move pixel work back to the server.**
+1. **WebCodecs (primary):** hardware H.264 in-browser (`VideoEncoder` + `mp4-muxer`). Export resolution is **locked to 1920×1080** (7-18-2026): the renderer is resized offscreen (`setPixelRatio(1)` + `setSize(1920,1080,false)`) for the capture and restored in the `finally` — exports no longer inherit window/zoom/monitor size (that made dims a crapshoot and re-imports compounded downscales). Video fade-in/out baked client-side, one mp4 upload to `/api/uploadCapturedVideo` → `capture-{sessionId}.mp4`. Encode request carries `preEncoded: true` → server skips Pass 1 entirely, does `-c:v copy` + audio mux only (seconds, not minutes). This exists because the VPS is weak and can't be upgraded — **never move pixel work back to the server.**
 2. **JPEG batches (fallback):** auto-used if WebCodecs is unsupported or errors (the whole capture reruns on this path). Uploads are **sequential await-per-batch on purpose** — a parallelized version + server frame-gap check caused a cascade and was rolled back (that version survives on branch `pre-rollback-snapshot-2026-07-07` and a patch in `Documents\dev\_patches\`).
 
 **Server:** `src/routes/api/encodeFromBatches/+server.ts`. Pass 1 (x264 from JPEGs — skipped when preEncoded) → Pass 2 audio mux → GCS upload → Firestore `content` doc → temp cleanup. Job status via in-memory `jobStore`; client polls.
@@ -104,3 +104,14 @@ Uses **structured outputs** (`output_config.format` json_schema, `@anthropic-ai/
 - Phase: production readiness — VPS deploy of all this (`pnpm install` required: mp4-muxer + SDK 0.111 are new deps), GCP/Firestore checks, copy. A GCP migration to the James Haas account is pending new credentials (see auto-memory).--done
 - Planned: Audio tab in the library — save generated audio only, not user uploads (see auto-memory).--done
   ted will do commits and pushes --github and vps he handles with occasional assitance for obscure or cryptic console commands.
+
+Our last reponse-from context--
+Done — from probabilities to fractions, literally:
+
+What was happening: export size = the canvas's on-screen CSS size at the moment you hit capture. Your window width, the sidebar, browser zoom, which monitor — all of it changed the output dimensions (that's the shrink). Then re-importing that file made it the new source, and the next export downscaled and re-encoded it again — generational quality loss on every round-trip. Nothing was broken per se; the design just tied output to display.
+
+What it does now: the moment capture starts, the renderer is locked to exactly 1920×1080 (offscreen — your preview doesn't visibly change), every frame renders and encodes at that resolution 1:1 with no downscale step, and the display sizing is restored when capture ends. Both sinks inherit it (WebCodecs directly; JPEG fallback ships 1080p frames). 8 Mbps H.264, so quality floor is solid.
+
+Net result: every export is 1920×1080, always. Import a capture, edit it, export again — still 1920×1080, single re-encode per generation, no dimension drift.
+
+Test it: capture anything, check Properties → 1920×1080; re-import that file and capture again → still 1920×1080. One thing to watch on your machine: encoding true 1080p is a bit more iGPU work than your old ~880px exports — if capture gets noticeably slower or you see ⚠️ seek-timeout warnings stacking in the console, tell me and I'll add a quality/resolution selector instead of the fixed lock.

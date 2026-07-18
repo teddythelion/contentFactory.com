@@ -158,7 +158,7 @@
 		</div>
 
 		<!-- ── DESKTOP LAYOUT (original, unchanged) ── -->
-		<div class="hidden h-full w-full max-w-7xl flex-col gap-4 overflow-hidden lg:flex lg:flex-row">
+		<div class="hidden h-full w-full max-w-[1800px] flex-col gap-4 overflow-hidden lg:flex lg:flex-row">
 			<!-- Preview Section (Left) -->
 			<div class="flex flex-1 flex-col gap-4 overflow-y-auto">
 				<div class="flex items-center justify-between">
@@ -174,9 +174,14 @@
 					</button>
 				</div>
 
+				<!-- Strict 16:9 stage. Width drives height via aspect-ratio (EXACT ratio,
+				     never squeezed — capture exports at canvas size, so the file inherits
+				     this ratio); max-width caps it so it can't outgrow the viewport
+				     vertically. The old flex-1 box silently went narrower than 16:9 when
+				     height ran out and exports came out narrow. -->
 				<div
-					class="relative flex-1 overflow-hidden rounded-lg bg-base-300"
-					style="min-height: 0; aspect-ratio: 16/9;"
+					class="relative mx-auto my-auto w-full overflow-hidden rounded-lg bg-base-300"
+					style="aspect-ratio: 16/9; max-width: calc((100vh - 180px) * 16 / 9);"
 				>
 					{#if videoError}
 						<div class="absolute inset-0 flex items-center justify-center bg-red-900/50 backdrop-blur-lg">

@@ -201,6 +201,33 @@
 					</a>
 				</li>
 
+				<!-- Pricing -->
+				<li>
+					<a
+						href={resolve("/pricing")}
+						class="is-drawer-close:tooltip is-drawer-close:tooltip-right {$page.url.pathname ===
+						'/pricing'
+							? 'active'
+							: ''}"
+						data-tip="Pricing"
+						onclick={closeSidebar}
+					>
+						<!-- Pricing icon (tag) -->
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							stroke-linejoin="round"
+							stroke-linecap="round"
+							stroke-width="2"
+							fill="none"
+							stroke="currentColor"
+							class="my-1.5 inline-block size-4"
+							><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg
+						>
+						<span class="is-drawer-close:hidden">Pricing</span>
+					</a>
+				</li>
+
 				<!-- Settings -->
 				<li>
 					<a

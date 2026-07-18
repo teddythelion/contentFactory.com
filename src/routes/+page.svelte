@@ -1,6 +1,42 @@
 <script lang="ts">
 	import { authStore } from '$lib/stores/auth.store';
 
+	// ── SHOWCASE GRID ────────────────────────────────────────────────
+	// Drop clips in static/showcase/ and list them here — the section stays
+	// hidden while this array is empty, so shipping without videos is safe.
+	// Keep clips short (5–15s), muted-friendly, ~720p. Poster optional but
+	// recommended (first-frame JPEG) so the grid paints before video loads.
+	// `process` is the honest recipe line — what was actually done, in-app.
+	interface ShowcaseClip {
+		src: string;
+		poster?: string;
+		title: string;
+		process: string;
+	}
+	const showcase: ShowcaseClip[] = [
+		{ src: '/showcase/clip1.mp4', title: 'Example title 1', process: 'Process → outcome caption 1' },
+		{ src: '/showcase/clip2.mp4', title: 'Example title 2', process: 'Process → outcome caption 2' },
+		{ src: '/showcase/clip3.mp4', title: 'Example title 3', process: 'Process → outcome caption 3' },
+		{ src: '/showcase/clip4.mp4', title: 'Example title 4', process: 'Process → outcome caption 4' },
+		{ src: '/showcase/clip5.mp4', title: 'Example title 5', process: 'Process → outcome caption 5' },
+		{ src: '/showcase/clip6.mp4', title: 'Example title 6', process: 'Process → outcome caption 6' }
+	];
+
+	// Play only while on screen — six autoplaying videos would hammer mobile
+	function autoplayInView(node: HTMLVideoElement) {
+		const io = new IntersectionObserver(
+			(entries) => {
+				for (const e of entries) {
+					if (e.isIntersecting) (e.target as HTMLVideoElement).play().catch(() => {});
+					else (e.target as HTMLVideoElement).pause();
+				}
+			},
+			{ threshold: 0.35 }
+		);
+		io.observe(node);
+		return { destroy: () => io.disconnect() };
+	}
+
 	const features = [
 		{
 			icon: '🎲',
@@ -61,7 +97,20 @@
 </script>
 
 <!-- Hero -->
-<section class="flex min-h-[90vh] flex-col items-center justify-center px-4 py-16 text-center">
+<section class="relative flex min-h-[90vh] flex-col items-center justify-center overflow-hidden px-4 py-16 text-center">
+	<!-- Hero background video — drop /static/showcase/hero.mp4; dark overlay keeps text readable -->
+	<video
+		src="/showcase/hero.mp4"
+		muted
+		loop
+		autoplay
+		playsinline
+		preload="metadata"
+		class="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40"
+		style="object-position: 50% 20%;"
+	></video>
+	<div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-base-100/70 via-base-100/55 to-base-100"></div>
+	<div class="relative z-10 flex flex-col items-center">
 	<h1 class="mb-4 text-4xl font-black leading-tight tracking-tight sm:text-5xl lg:text-7xl">
 		Create videos
 		<br />
@@ -73,8 +122,9 @@
 	</h1>
 
 	<p class="mb-8 max-w-xl text-base text-base-content/70 sm:text-lg">
-		Content Factory combines 3D image enhancement, AI video generation, and a built-in Prompt Engineer 
-		into one frictionless pipeline. From idea to ready-to-ship content in minutes.
+		Generation is the easy part — the magic is everything after. Content Factory pairs AI video,
+		image, music and voice generation with a real multi-track studio, so you shape every frame
+		until it's exactly what you envisioned. One app, idea to ship.
 	</p>
 
 	<div class="flex flex-col gap-3 sm:flex-row">
@@ -87,9 +137,48 @@
 	</div>
 
 	<p class="mt-6 text-xs text-base-content/40">
-		No credit card required to try it
+		No credit card required to try it &nbsp;·&nbsp; Real prices, no bait &nbsp;·&nbsp; <a href="/pricing" class="link link-hover text-base-content/60">View pricing</a>
 	</p>
+	</div>
 </section>
+
+<!-- Showcase — real output, honest recipes. Hidden until clips are added. -->
+{#if showcase.length > 0}
+	<section class="px-4 py-16">
+		<!-- 14.5% side space / 33% video / 4% gap / 33% video / 14.5% (of content area) -->
+		<div class="mx-auto w-full lg:px-[14.5%]">
+			<h2 class="mb-2 text-center text-2xl font-bold sm:text-3xl">
+				Made here, <span class="bg-gradient-to-r from-secondary to-accent bg-clip-text text-transparent">start to finish</span>
+			</h2>
+			<p class="mx-auto mb-10 max-w-2xl text-center text-sm text-base-content/60">
+				Every clip below was generated, edited, scored and exported inside Content Factory —
+				no other tools touched it. The caption under each one is the actual recipe.
+			</p>
+			<div class="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-[5.6%]">
+				{#each showcase as clip (clip.src)}
+					<figure class="group overflow-hidden rounded-2xl border border-white/10 bg-base-200 transition-transform duration-300 hover:-translate-y-1 hover:border-secondary/40">
+						<div class="relative aspect-video overflow-hidden bg-black">
+							<video
+								src={clip.src}
+								poster={clip.poster}
+								muted
+								loop
+								playsinline
+								preload="metadata"
+								use:autoplayInView
+								class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+							></video>
+						</div>
+						<figcaption class="p-4">
+							<p class="mb-1 font-semibold">{clip.title}</p>
+							<p class="text-xs leading-relaxed text-base-content/60">{clip.process}</p>
+						</figcaption>
+					</figure>
+				{/each}
+			</div>
+		</div>
+	</section>
+{/if}
 
 <!-- What sets it apart -->
 <section class="px-4 py-16">
