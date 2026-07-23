@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { goto } from '$app/navigation';
 import { auth } from '$lib/firebase/client';
 import {
 	signInWithPopup,
@@ -130,6 +131,8 @@ function createAuthStore() {
 					initialized: true
 				}));
 
+				if (userProfile?.isAdmin) goto('/admin');
+
 				return { success: true, user: result.user };
 			} catch (error: any) {
 				const errorMessage = error.message || 'Failed to sign in';
@@ -192,6 +195,8 @@ function createAuthStore() {
 				});
 				if (!sessionResponse.ok) throw new Error('Failed to create session');
 
+				const userProfile = await getUserProfile(result.user.uid);
+
 				update((state) => ({
 					...state,
 					user: mapFirebaseUser(result.user),
@@ -199,6 +204,8 @@ function createAuthStore() {
 					error: null,
 					initialized: true
 				}));
+
+				if (userProfile?.isAdmin) goto('/admin');
 
 				return { success: true, user: result.user };
 			} catch (error: any) {

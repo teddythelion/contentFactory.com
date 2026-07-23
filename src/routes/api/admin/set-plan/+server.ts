@@ -6,9 +6,9 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
 import { adminDb } from '$lib/firebase/admin';
-import type { PlanTier } from '$lib/types/subscription';
+import { TIER_CONFIG, type PlanTier } from '$lib/types/subscription';
 
-const VALID_PLANS: PlanTier[] = ['free', 'starter', 'pro'];
+const VALID_PLANS = Object.keys(TIER_CONFIG) as PlanTier[];
 
 export const POST: RequestHandler = async ({ request }) => {
 	const secret = request.headers.get('x-admin-secret');
@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ error: 'User not found' }, { status: 404 });
 	}
 
-	await userRef.update({ plan });
+	await userRef.update({ plan, storageLimit: TIER_CONFIG[plan as PlanTier].storageLimit });
 
 	console.log(`[admin] Set plan for user ${userId} → ${plan}`);
 	return json({ success: true, userId, plan });

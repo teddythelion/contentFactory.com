@@ -2,6 +2,7 @@
 	import { authStore } from '$lib/stores/auth.store';
 	import { getUserProfile, updateContentRetentionSettings } from '$lib/firebase/firestore';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import type { User } from '$lib/types/firestore';
 
 	let userProfile = $state<User | null>(null);
@@ -159,6 +160,15 @@
 						{#if userProfile}
 							<p class="mt-1 text-sm opacity-60">
 								Plan: <span class="badge badge-primary">{userProfile.plan}</span>
+								{#if userProfile.isAdmin}
+									<button
+										onclick={() => goto('/admin')}
+										class="badge badge-outline badge-ghost ml-1 opacity-50 transition-opacity hover:opacity-100"
+										title="Open admin panel"
+									>
+										Admin
+									</button>
+								{/if}
 							</p>
 						{/if}
 						{#if photoError}

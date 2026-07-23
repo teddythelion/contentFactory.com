@@ -6,7 +6,7 @@ import { env } from '$env/dynamic/private';
 import { adminDb } from '$lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import Stripe from 'stripe';
-import type { PlanTier } from '$lib/types/subscription';
+import { TIER_CONFIG, type PlanTier } from '$lib/types/subscription';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY!, { apiVersion: '2024-12-18.acacia' });
 
@@ -59,7 +59,9 @@ async function updateUserSubscription(
 	}
 
 	const userDoc = usersQuery.docs[0];
-	await userDoc.ref.update(updates);
+	// Keep the user doc's tier-derived fields in sync with the plan change —
+	// storageLimit is displayed in Settings and would otherwise go stale.
+	await userDoc.ref.update({ ...updates, storageLimit: TIER_CONFIG[updates.plan].storageLimit });
 	console.log(`Updated subscription for user ${userDoc.id}: plan=${updates.plan}, status=${updates.subscriptionStatus}`);
 }
 

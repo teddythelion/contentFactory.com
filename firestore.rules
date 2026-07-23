@@ -1,0 +1,64 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if user owns the resource
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Fields a signed-in user may edit on their OWN profile document.
+    // Everything else on this doc (plan, isAdmin, storage*, stripe*, usage
+    // counters) is server-authoritative — written only via the Admin SDK
+    // (Stripe webhook, admin panel, usage/storage services), which bypasses
+    // these rules entirely. This is what stops a user from self-granting
+    // isAdmin or a paid plan by editing their own document directly.
+    function ownerWritableUserFields() {
+      return ['displayName', 'photoURL', 'contentRetention', 'lastLogin'];
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && isOwner(userId);
+
+      allow create: if isSignedIn() && isOwner(userId)
+        && request.resource.data.plan == 'free'
+        && request.resource.data.get('isAdmin', false) == false;
+
+      allow update: if isSignedIn() && isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(ownerWritableUserFields());
+
+      allow delete: if false; // Users can't delete their own account via Firestore
+    }
+
+    // Content collection
+    match /content/{contentId} {
+      allow read: if isSignedIn() && isOwner(resource.data.userId);
+      allow create: if isSignedIn() && isOwner(request.resource.data.userId);
+      allow update: if isSignedIn() && isOwner(resource.data.userId);
+      allow delete: if isSignedIn() && isOwner(resource.data.userId);
+    }
+
+    // Social accounts collection
+    match /socialAccounts/{accountId} {
+      allow read: if isSignedIn() && isOwner(resource.data.userId);
+      allow create: if isSignedIn() && isOwner(request.resource.data.userId);
+      allow update: if isSignedIn() && isOwner(resource.data.userId);
+      allow delete: if isSignedIn() && isOwner(resource.data.userId);
+    }
+
+    // Posts collection
+    match /posts/{postId} {
+      allow read: if isSignedIn() && isOwner(resource.data.userId);
+      allow create: if isSignedIn() && isOwner(request.resource.data.userId);
+      allow update: if isSignedIn() && isOwner(resource.data.userId);
+      allow delete: if isSignedIn() && isOwner(resource.data.userId);
+    }
+  }
+}

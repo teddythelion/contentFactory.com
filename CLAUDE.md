@@ -105,7 +105,9 @@ Uses **structured outputs** (`output_config.format` json_schema, `@anthropic-ai/
 - Planned: Audio tab in the library — save generated audio only, not user uploads (see auto-memory).--done
   ted will do commits and pushes --github and vps he handles with occasional assitance for obscure or cryptic console commands.
 
-Our last reponse-from context--
+---
+
+Our last reponse-from context--7-18ish-2026
 Done — from probabilities to fractions, literally:
 
 What was happening: export size = the canvas's on-screen CSS size at the moment you hit capture. Your window width, the sidebar, browser zoom, which monitor — all of it changed the output dimensions (that's the shrink). Then re-importing that file made it the new source, and the next export downscaled and re-encoded it again — generational quality loss on every round-trip. Nothing was broken per se; the design just tied output to display.
@@ -114,4 +116,25 @@ What it does now: the moment capture starts, the renderer is locked to exactly 1
 
 Net result: every export is 1920×1080, always. Import a capture, edit it, export again — still 1920×1080, single re-encode per generation, no dimension drift.
 
-Test it: capture anything, check Properties → 1920×1080; re-import that file and capture again → still 1920×1080. One thing to watch on your machine: encoding true 1080p is a bit more iGPU work than your old ~880px exports — if capture gets noticeably slower or you see ⚠️ seek-timeout warnings stacking in the console, tell me and I'll add a quality/resolution selector instead of the fixed lock.
+## Test it: capture anything, check Properties → 1920×1080; re-import that file and capture again → still 1920×1080. One thing to watch on your machine: encoding true 1080p is a bit more iGPU work than your old ~880px exports — if capture gets noticeably slower or you see ⚠️ seek-timeout warnings stacking in the console, tell me and I'll add a quality/resolution selector instead of the fixed lock.
+
+Our last reponse-from context--7-21-2026
+
+Done — from probabilities to fractions, literally:
+Done — cap enforced, premium gating verified, limits confirmed. svelte-check: 8 errors, all the known pre-existing noise (Stripe apiVersion ×3, ControlsPanel ×2, THREE.Font, Readable.from) — zero new.
+
+Storage cap (was display-only, now enforced server-side):
+
+New checkStorageCap() in storage.ts — limit always derives from TIER_CONFIG[plan], never the stale user-doc field.
+saveContent and uploadEnhancedVideo reject over-cap saves with 413 + a human-readable message ("Storage limit reached (4.90 GB of 5.00 GB used)…").
+encodeFromBatches checks before the GCS upload and fails the job through the existing error path, so the message reaches the client via the job poll.
+While wiring it I found and fixed two accounting holes that would have made the cap wrong: saveContent never counted uploaded bytes (images/audio were invisible to storage), and delete never freed bytes — content/delete now decrements via a clamped-at-0 transaction. Also replaced saveContent's silent .catch() with a loud ⚠️ warn per house rules.
+Ran a one-time true-up of every user's storageUsed from their actual content docs — 5 accounts were off (worst: teddythelion7788 8.9 MB recorded vs 39.8 MB real). All correct now.
+Profile images stay uncapped on purpose (not library content).
+Premium/Elite access enforcement — verified correct, nothing to fix:
+
+Video generate: server checks canUsePremiumQuality, burns a premium credit, gracefully downgrades to the fast model when credits run out; free/starter can't reach the premium model even with a forged request (generateFromImage:65-82).
+Extend: 403 without canExtend (Pro+), 429 without premium credits.
+Image: imageEdit is airtight — size clamped to tier ceiling, premium model gated by canUsePremiumImage, and variants clamped to both the tier max and remaining quota (so 4 variants with 1 credit left generates 1, no overrun).
+Client UI (disabled toggles, PRO badges) matches the server in every case — the UI never promises what the server denies.
+Limits double-checked against the finalized 7-16 params — TIER_CONFIG matches exactly: Free 3 img/2 vid/0 credits · Starter 30/10/0 · Pro 60/25/4 · Elite 100/60/15, storage 5/5/5/10 GB, extend + premium at Pro and Elite only. No simulated-generation testing needed; every limit is read from that one table at request time, so the code path is the same one you already use daily.

@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { adminDb } from '$lib/firebase/admin';
-import { uploadToGCS, updateUserStorage, incrementContentStats } from '$lib/firebase/storage';
+import { uploadToGCS, updateUserStorage, incrementContentStats, checkStorageCap, storageCapMessage } from '$lib/firebase/storage';
 import { Timestamp } from 'firebase-admin/firestore';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
@@ -20,6 +20,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 
 		const fileBuffer = Buffer.from(await file.arrayBuffer());
+
+		const cap = await checkStorageCap(userId, fileBuffer.length);
+		if (!cap.allowed) {
+			return json({ error: 'storage_limit', message: storageCapMessage(cap) }, { status: 413 });
+		}
+
 		const timestamp = Date.now();
 		const fileName = `enhanced-video-${timestamp}.mp4`;
 

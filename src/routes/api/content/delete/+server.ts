@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { adminDb } from '$lib/firebase/admin';
-import { deleteFromGCS } from '$lib/firebase/storage';
+import { deleteFromGCS, decrementUserStorage } from '$lib/firebase/storage';
 
 export const DELETE: RequestHandler = async ({ request, locals }) => {
 	try {
@@ -33,6 +33,12 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
 
 		// Delete from Firestore
 		await adminDb.collection('content').doc(contentId).delete();
+
+		// Free the bytes toward the storage cap
+		if (typeof data?.fileSize === 'number' && data.fileSize > 0) {
+			await decrementUserStorage(userId, data.fileSize)
+				.catch((e) => console.warn('⚠️ content/delete: storageUsed decrement failed:', e?.message));
+		}
 
 		return json({ success: true });
 	} catch (error: any) {

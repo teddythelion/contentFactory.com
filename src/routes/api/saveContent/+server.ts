@@ -2,7 +2,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { adminDb } from '$lib/firebase/admin';
-import { uploadToGCS } from '$lib/firebase/storage';
+import { uploadToGCS, updateUserStorage, checkStorageCap, storageCapMessage } from '$lib/firebase/storage';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 
 interface SaveContentParams {
@@ -50,6 +50,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			fileSize = imageBuffer.length;
 		}
 
+		const cap = await checkStorageCap(userId, fileSize);
+		if (!cap.allowed) {
+			return json({ error: 'storage_limit', message: storageCapMessage(cap), used: cap.used, limit: cap.limit }, { status: 413 });
+		}
+
 		// Upload to GCS
 		const fileName = `${params.type}-${Date.now()}.${params.format || 'png'}`;
 		const mimeType = params.type === 'image' ? 'image/png' : params.type === 'audio' ? 'audio/mpeg' : 'video/mp4';
@@ -87,16 +92,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		await contentRef.set(documentData);
 
-		// Update user stats
+		// Update user stats (user doc might not exist yet — non-fatal, but loud)
 		await adminDb
 			.collection('users')
 			.doc(userId)
 			.update({
 				[params.type === 'image' ? 'imagesGenerated' : params.type === 'audio' ? 'audioGenerated' : 'videosGenerated']: FieldValue.increment(1)
 			})
-			.catch(() => {
-				// User doc might not exist yet, ignore
-			});
+			.catch((e) => console.warn('⚠️ saveContent: user stats update failed:', e?.message));
+		await updateUserStorage(userId, fileSize)
+			.catch((e) => console.warn('⚠️ saveContent: storageUsed update failed:', e?.message));
 
 		return json({
 			success: true,

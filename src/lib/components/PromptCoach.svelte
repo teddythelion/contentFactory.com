@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import AuthModal from '$lib/components/AuthModal.svelte';
+	import AuthToast from '$lib/components/AuthToast.svelte';
 
 	let userInput = $state('');
 	let isLoading = $state(false);
@@ -13,7 +13,6 @@
 	let researchInsights = $state<{ proTip: string | null; reference: string | null } | null>(null);
 	let showInsightsModal = $state(false);
 	let showAuthToast = $state(false);
-	let showAuthModal = $state(false);
 	let lastMessageCount = $state(0);
 	let thinkingWord = $state('Analyzing');
 	let thinkingInterval: ReturnType<typeof setInterval> | null = null;
@@ -73,7 +72,6 @@
 	async function sendMessage() {
 		if (!$authStore.user) {
 			showAuthToast = true;
-			setTimeout(() => { showAuthToast = false; }, 6000);
 			return;
 		}
 		if (!userInput.trim() || isLoading) return;
@@ -171,26 +169,7 @@
 	});
 </script>
 
-<AuthModal bind:isOpen={showAuthModal} />
-
-<!-- Auth toast -->
-{#if showAuthToast}
-	<div class="toast toast-top toast-center z-[9999]">
-		<div class="alert alert-warning flex flex-col gap-2 max-w-sm shadow-2xl">
-			<div class="flex items-center gap-2">
-				<span class="text-2xl">🔒</span>
-				<div>
-					<p class="font-bold">Sign in required</p>
-					<p class="text-sm">You need to be signed in to use the Prompt Engineer.</p>
-				</div>
-				<button onclick={() => showAuthToast = false} class="btn btn-ghost btn-xs ml-auto">✕</button>
-			</div>
-			<button onclick={() => { showAuthModal = true; showAuthToast = false; }} class="btn btn-primary btn-sm w-full">
-				Sign In Now
-			</button>
-		</div>
-	</div>
-{/if}
+<AuthToast bind:visible={showAuthToast} message="You need to be signed in to use the Prompt Engineer." />
 
 <!-- Research Insights Modal -->
 {#if showInsightsModal && researchInsights}

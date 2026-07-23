@@ -6,7 +6,7 @@
 	import { canGenerate, subscriptionStore } from '$lib/stores/subscription.store';
 	import { audioSessionStore } from '$lib/stores/audioSession.store';
 import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
-	import AuthModal from '$lib/components/AuthModal.svelte';
+	import AuthToast from '$lib/components/AuthToast.svelte';
 	import ThreeJsEnhancer from '$lib/components/ThreeJsEnhancer/ThreeJsEnhancer.svelte';
 	import ThreeJSEnhancer from '$lib/components/ThreeJSEnhancer.svelte';
 	import { TIER_CONFIG, type UsageCheckResult } from '$lib/types/subscription';
@@ -57,7 +57,6 @@ import UsageLimitModal from '$lib/components/UsageLimitModal.svelte';
 	let extendOperation = $state<string | null>(null);
 
 	// UI toggles
-let showAuthModal = $state(false);
 	let showAuthToast = $state(false);
 	let showUsageLimitModal = $state(false);
 	let usageLimitData = $state<UsageCheckResult | null>(null);
@@ -152,7 +151,6 @@ let showAuthModal = $state(false);
 	function requireAuth(): boolean {
 		if (!$authStore.user) {
 			showAuthToast = true;
-			setTimeout(() => { showAuthToast = false; }, 5000);
 			return false;
 		}
 		return true;
@@ -521,7 +519,7 @@ let showAuthModal = $state(false);
 </script>
 
 <!-- ── Modals & Overlays ────────────────────────────────────────────────────── -->
-<AuthModal bind:isOpen={showAuthModal} />
+<AuthToast bind:visible={showAuthToast} />
 
 <UsageLimitModal
 	bind:show={showUsageLimitModal}
@@ -569,23 +567,6 @@ let showAuthModal = $state(false);
 	</div>
 {/if}
 
-{#if showAuthToast}
-	<div class="toast toast-top toast-center z-[9999]">
-		<div class="alert alert-warning flex flex-col gap-2 max-w-sm shadow-2xl">
-			<div class="flex items-center gap-2">
-				<span class="text-2xl">🔒</span>
-				<div>
-					<p class="font-bold">Sign in required</p>
-					<p class="text-sm">You need to be signed in to use this tool.</p>
-				</div>
-				<button onclick={() => (showAuthToast = false)} class="btn btn-ghost btn-xs ml-auto">✕</button>
-			</div>
-			<button onclick={() => { showAuthModal = true; showAuthToast = false; }} class="btn btn-primary btn-sm w-full">
-				Sign In Now
-			</button>
-		</div>
-	</div>
-{/if}
 
 <!-- ── Main layout ────────────────────────────────────────────────────────────── -->
 <div class="flex justify-center py-4 px-4 xl:pl-12 2xl:pl-20">

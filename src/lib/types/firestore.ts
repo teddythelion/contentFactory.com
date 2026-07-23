@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore';
+import type { PlanTier, SubscriptionStatus } from './subscription';
 
 // User Profile
 export interface User {
@@ -8,8 +9,9 @@ export interface User {
   photoURL: string | null;
   createdAt: Timestamp;
   lastLogin: Timestamp;
-  plan: 'free' | 'starter' | 'pro';
-  
+  plan: PlanTier;
+  isAdmin?: boolean;
+
   // Storage
   storageUsed: number;
   storageLimit: number;
@@ -25,7 +27,7 @@ export interface User {
   // Subscription
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
-  subscriptionStatus: 'active' | 'canceled' | 'past_due' | 'trialing' | null;
+  subscriptionStatus: SubscriptionStatus;
   subscriptionPeriodEnd: Timestamp | null;
   stripePriceId: string | null;
 }

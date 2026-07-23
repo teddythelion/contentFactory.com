@@ -12,7 +12,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
 import { encodeJobs, pruneOldJobs } from '$lib/server/jobStore';
-import { uploadToGCS, updateUserStorage, incrementContentStats } from '$lib/firebase/storage';
+import { uploadToGCS, updateUserStorage, incrementContentStats, checkStorageCap, storageCapMessage } from '$lib/firebase/storage';
 import { adminDb } from '$lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
 
@@ -373,6 +373,13 @@ async function runEncode(
 		const videoBuffer = await readFile(finalOutputPath);
 		const timestamp = Date.now();
 		const fileName = `enhanced-video-${timestamp}.mp4`;
+
+		const cap = await checkStorageCap(userId, videoBuffer.length);
+		if (!cap.allowed) {
+			// Thrown so the catch below cleans temp files and surfaces the message
+			// to the client via the job poll.
+			throw new Error(storageCapMessage(cap));
+		}
 
 		const uploadResult = await uploadToGCS(userId, videoBuffer, fileName, 'video/mp4', 'videos');
 		console.log(`☁️ Uploaded to GCS: ${uploadResult.publicUrl}`);

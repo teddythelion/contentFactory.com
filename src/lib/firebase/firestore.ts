@@ -15,6 +15,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import type { User, Content, SocialAccount, Post, ContentRetentionSettings } from '$lib/types/firestore';
+import { TIER_CONFIG } from '$lib/types/subscription';
 
 // ==================== USERS ====================
 
@@ -30,7 +31,7 @@ export async function createUserProfile(uid: string, email: string, displayName:
     lastLogin: serverTimestamp() as Timestamp,
     plan: 'free',
     storageUsed: 0,
-    storageLimit: 5368709120, // 5GB
+    storageLimit: TIER_CONFIG.free.storageLimit,
     imagesGenerated: 0,
     videosGenerated: 0,
     postsPublished: 0,
