@@ -19,8 +19,9 @@
         <span class="text-info">Start the Story.</span>
       </h1>
       <p class="mx-auto max-w-2xl text-lg text-white/60">
-        Content Factory gives creators, entrepreneurs, and brands a full AI-powered studio — 
-        right in the browser. Generate, enhance, and distribute content that actually gets noticed.
+        Content Factory gives creators, entrepreneurs, and brands a full AI-powered studio —
+        right in the browser. From a single scroll-stopping clip to a complete brand campaign —
+        logo, covers, hero images, launch video — generated, edited, and shipped in one sitting.
       </p>
     </div>
   </div>
@@ -63,14 +64,16 @@
         <div class="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-info/10 text-3xl">
           ✨
         </div>
-        <h3 class="mb-3 text-xl font-bold text-white">3D Video Enhancement</h3>
+        <h3 class="mb-3 text-xl font-bold text-white">3D Studio &amp; Timeline Editor</h3>
         <p class="mb-6 text-sm leading-relaxed text-white/60">
-          Wrap your video onto 3D geometry — spheres, cubes, planes, and more. Add particle
-          systems, timed text overlay with fade, logo animation, and video fade in/out.
-          Full audio mixing studio built in. Export a fully rendered MP4 ready for posting anywhere.
+          Not a filter menu — a real editor. Cut clips from any source on a multi-track timeline
+          with 21 transition styles, layer in text and true 3D text, animate your logo, and fire
+          off three distinct particle systems — including 3D shape particles that streak tracer
+          trails across your footage. Everything previews live and bakes into a crisp 1080p MP4
+          exactly as you saw it.
         </p>
         <ul class="space-y-2">
-          {#each ['14+ 3D shape options', 'Custom particle systems', 'Timed text overlay with fade', 'Logo overlay with animation', 'Video fade in & fade out', 'Full audio mixing studio'] as feature}
+          {#each ['Multi-track timeline with 21 transitions', '14+ 3D shape options', '3D shape particles with tracer trails', 'Text overlays & true 3D text', 'Logo & image overlays with animation', 'Per-clip fades, transforms & undo/redo', 'Full audio mixing studio', 'Locked 1080p MP4 export'] as feature}
             <li class="flex items-center gap-2 text-sm text-white/50">
               <span class="text-info">✓</span> {feature}
             </li>
@@ -168,6 +171,28 @@ A picture is worth a thousand words — and a thousand tokens.
         </ul>
       </div>
 
+      <!-- Service 7: Complete Brand Campaigns — full-width banner card -->
+      <div class="group rounded-2xl border border-info/30 bg-gradient-to-br from-info/10 to-base-200 p-8 transition-all hover:border-info/50 md:col-span-2">
+        <div class="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-info/10 text-3xl">
+          🧰
+        </div>
+        <h3 class="mb-3 text-xl font-bold text-white">Complete Brand Campaigns — Logo to Launch</h3>
+        <p class="mb-6 max-w-3xl text-sm leading-relaxed text-white/60">
+          This is the workflow the whole studio exists for. Generate a logo treatment, spin it into
+          matching social covers, profile banners, and splash-page hero images — then animate that
+          same identity into a branded launch video with your logo, colors, particles, and a custom
+          score baked in. One session. Every asset matching. Ready to post everywhere your brand lives.
+          What an agency quotes in weeks, you ship before lunch.
+        </p>
+        <ul class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {#each ['Logo treatments & variations', 'Social covers & profile banners', 'Splash-page & website hero images', 'Matching branded launch video', 'Custom score & audio identity', 'One consistent identity across every asset'] as feature}
+            <li class="flex items-center gap-2 text-sm text-white/50">
+              <span class="text-info">✓</span> {feature}
+            </li>
+          {/each}
+        </ul>
+      </div>
+
     </div>
 
     <!-- Divider -->
@@ -229,9 +254,9 @@ A picture is worth a thousand words — and a thousand tokens.
     <div class="grid gap-6 md:grid-cols-3">
 
       <div class="rounded-xl border border-white/10 bg-base-200 p-6">
-        <div class="mb-4 text-2xl">🎞️</div>
-        <h4 class="mb-2 font-bold text-white">Higher Resolution Export</h4>
-        <p class="text-sm text-white/50">Export at full resolution instead of CSS pixel size. Your 4K source stays 4K.</p>
+        <div class="mb-4 text-2xl">🧬</div>
+        <h4 class="mb-2 font-bold text-white">Custom Shape Particles</h4>
+        <p class="text-sm text-white/50">Particle clouds that assemble into real 3D models — your logo, your product, your mascot — then morph and trail across your video.</p>
       </div>
 
       <div class="rounded-xl border border-white/10 bg-base-200 p-6">
@@ -247,9 +272,9 @@ A picture is worth a thousand words — and a thousand tokens.
       </div>
 
       <div class="rounded-xl border border-white/10 bg-base-200 p-6">
-        <div class="mb-4 text-2xl">🔗</div>
-        <h4 class="mb-2 font-bold text-white">Multi-Scene Sequences</h4>
-        <p class="text-sm text-white/50">Chain multiple AI video clips into a single timeline and export as one continuous video.</p>
+        <div class="mb-4 text-2xl">💾</div>
+        <h4 class="mb-2 font-bold text-white">Branded Video Presets</h4>
+        <p class="text-sm text-white/50">Save your signature setup — shape, particles, logo position, score style — and reapply it to any new video in one click.</p>
       </div>
 
       <div class="rounded-xl border border-white/10 bg-base-200 p-6">

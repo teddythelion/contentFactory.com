@@ -382,7 +382,47 @@
 				},
 				{ label: 'Gradient Color 2', type: 'color' },
 				{ label: 'Glow Effect', type: 'toggle' },
-				{ label: 'Particle Rotation', type: 'toggle' }
+				{ label: 'Particle Rotation', type: 'toggle' },
+				{
+					label: 'Render Mode',
+					type: 'select',
+					options: [
+						{ value: 'sprite',      label: '✨ Sprite (flat, cheap)' },
+						{ value: 'instanced3d', label: '🔷 3D Shapes (lit, heavier)' },
+						{ value: 'shapeCloud',  label: '🔺 Shape Cloud (traveling + trails)' }
+					]
+				},
+				{
+					label: '3D Shape',
+					type: 'select',
+					options: [
+						{ value: 'octahedron',  label: '🔷 Octahedron' },
+						{ value: 'box',         label: '🧊 Box' },
+						{ value: 'tetrahedron', label: '🔺 Tetrahedron' },
+						{ value: 'icosahedron', label: '⚽ Icosahedron' }
+					]
+				},
+				{
+					label: '3D Motion',
+					type: 'select',
+					options: [
+						{ value: 'bounce', label: '⛹️ Bounce' },
+						{ value: 'spiral', label: '🌀 Spiral' },
+						{ value: 'orbit',  label: '🪐 Orbit' }
+					]
+				},
+				{
+					label: 'Shape Cloud Primitive',
+					type: 'select',
+					options: [
+						{ value: 'pyramid', label: '🔺 Pyramid' },
+						{ value: 'sphere',  label: '⚽ Sphere' },
+						{ value: 'cube',    label: '🧊 Cube' },
+						{ value: 'torus',   label: '🍩 Torus' }
+					]
+				},
+				{ label: 'Shape Cloud Scale', type: 'range', min: 0.5, max: 8, step: 0.5 },
+				{ label: 'Trail Length', type: 'range', min: 0, max: 20, step: 1 }
 			]
 		},
 		{
@@ -592,6 +632,12 @@
 			case 'Gradient Color 2': return $threeJsState.particleGradientColor;
 			case 'Glow Effect': return $threeJsState.particleGlow;
 			case 'Particle Rotation': return $threeJsState.particleRotation;
+			case 'Render Mode': return $threeJsState.particleRenderMode;
+			case '3D Shape': return $threeJsState.particleGeometry3d;
+			case '3D Motion': return $threeJsState.particleInstanced3dAnimation;
+			case 'Shape Cloud Primitive': return $threeJsState.shapeCloudPrimitive;
+			case 'Shape Cloud Scale': return $threeJsState.shapeCloudScale;
+			case 'Trail Length': return $threeJsState.particleTrailCount;
 			default: return 0;
 		}
 	}
@@ -690,6 +736,12 @@
 			case 'Gradient Color 2': threeJsState.updateProperty('particleGradientColor', value); break;
 			case 'Glow Effect': threeJsState.updateProperty('particleGlow', value); break;
 			case 'Particle Rotation': threeJsState.updateProperty('particleRotation', value); break;
+			case 'Render Mode': threeJsState.updateProperty('particleRenderMode', value); break;
+			case '3D Shape': threeJsState.updateProperty('particleGeometry3d', value); break;
+			case '3D Motion': threeJsState.updateProperty('particleInstanced3dAnimation', value); break;
+			case 'Shape Cloud Primitive': threeJsState.updateProperty('shapeCloudPrimitive', value); break;
+			case 'Shape Cloud Scale': threeJsState.updateProperty('shapeCloudScale', value); break;
+			case 'Trail Length': threeJsState.updateProperty('particleTrailCount', value); break;
 		}
 	}
 

@@ -488,10 +488,18 @@ export async function captureThreeJsVideo(
 		};
 
 		const runCaptureLoop = async (sink: CaptureSink) => {
+			// Throttle progress to ~2 UI updates/sec. Per-frame updates forced a
+			// DOM write + GPU composite 30×/sec for the whole capture — on an
+			// iGPU that compositing directly starves the WebCodecs encoder
+			// (measured: same export 15× faster with the tab backgrounded,
+			// because Chrome stops compositing entirely).
+			const progressEvery = Math.max(1, Math.round(fps / 2));
 			for (let i = 0; i < totalFrames; i++) {
 				await prepareFrame(i);
 				await sink.addFrame(i);
-				progressCallback?.((i / totalFrames) * 70, `Capturing frame ${i + 1}/${totalFrames}`);
+				if (i % progressEvery === 0 || i === totalFrames - 1) {
+					progressCallback?.((i / totalFrames) * 70, `Capturing frame ${i + 1}/${totalFrames}`);
+				}
 			}
 			await sink.finalize();
 		};

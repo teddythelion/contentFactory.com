@@ -52,16 +52,16 @@
       step: 3,
       phase: 'Variation',
       title: 'Build a Visual Family',
-      body: "Generate 4–6 variations of your hero image using the same core prompt with small tweaks. Vary the angle, composition, or lighting. This gives you a visual family — a set of images that feel cohesive but aren't identical.",
+      body: "Generate 4–6 variations of your hero image using the same core prompt with small tweaks. Vary the angle, composition, or lighting — and vary the format: 16:9 for website heroes and covers, 9:16 for stories, 1:1 for profile imagery. This gives you a visual family — a full campaign kit that feels cohesive without being identical.",
       example: null,
-      tip: "Save every variation to your Content Library. You'll use these across Instagram, your website, pitch decks, and more.",
+      tip: "Save every variation to your Content Library. You'll use these as social covers, splash-page heroes, profile banners, pitch decks, and more.",
       cta: { label: '🖼️ Generate Variations', href: '/create' }
     },
     {
       step: 4,
       phase: 'Archive',
       title: 'Save Your Brand Kit to Your Library',
-      body: "Download your full set of brand images from the Content Library. You now have a brand visual kit — hero image, variations, and refined assets — all AI-generated, all yours, all consistent.",
+      body: "Download your full set of brand images from the Content Library. You now have a complete brand campaign kit — hero image, social covers, profile banners, splash-page assets — all AI-generated, all yours, all consistent. Built in one sitting, not billed in agency weeks.",
       example: null,
       tip: null,
       cta: { label: '📚 Open Content Library', href: '/content-library' }
@@ -145,7 +145,7 @@
       step: 4,
       phase: 'Particles',
       title: 'Add Particles for Atmosphere',
-      body: "Turn on the particle system and choose a style that matches your brand energy. Orbit particles feel premium and tech-forward. Fountain feels dynamic and energetic. Spiral feels elegant and creative. Adjust size, opacity, and color to complement — not overpower — your video.",
+      body: "Turn on the particle system and choose a style that matches your brand energy. Orbit particles feel premium and tech-forward. Fountain feels dynamic and energetic. Spiral feels elegant and creative. Want something nobody else has? Switch the render mode to 3D Shapes for lit, tumbling geometry with tracer trails, or Shape Cloud for a drifting constellation that holds a 3D form as it moves. Adjust size, opacity, and color to complement — not overpower — your video.",
       tip: 'Keep particle opacity between 0.3–0.6 for a subtle, premium look. Max opacity feels cheap.',
       cta: { label: '✨ Open 3D Enhancer', href: '/create' }
     },

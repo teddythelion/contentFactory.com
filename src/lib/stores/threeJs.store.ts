@@ -12,6 +12,19 @@ export type ParticleAnimation =
 	| 'pulse'
 	| 'fountain';
 
+// 'sprite' = flat camera-facing billboards (THREE.Points, cheap, existing).
+// 'instanced3d' = real lit 3D geometry via InstancedMesh + optional tracer
+// trails — heavier, benchmarked separately (src/routes/dev/particle-bench).
+// 'shapeCloud' = a GPU-blended point cloud sampled from a primitive's
+// surface, moved as one unit via a shader uniform — see
+// shapeCloudParticles.ts for why this is a separate system from instanced3d
+// rather than a third mode bolted onto it.
+export type ParticleRenderMode = 'sprite' | 'instanced3d' | 'shapeCloud';
+export type ParticleGeometry3d = 'octahedron' | 'box' | 'tetrahedron' | 'icosahedron';
+// Trail-compatible motions only — see instancedParticles.ts for why.
+export type Instanced3dAnimation = 'bounce' | 'spiral' | 'orbit';
+export type ShapeCloudPrimitive = 'pyramid' | 'sphere' | 'cube' | 'torus';
+
 interface ThreeJsState {
 	selectedShape: string;
 	rotationX: number;
@@ -40,11 +53,20 @@ interface ThreeJsState {
 	particleShape: ParticleShape;
 	particleAnimation: ParticleAnimation;
 	particleAnimationSpeed: number;
-	particleTrailEnabled: boolean;
 	particleGlow: boolean;
 	particleRotation: boolean;
 	particleColorMode: 'solid' | 'gradient' | 'rainbow' | 'video-reactive';
 	particleGradientColor: string;
+
+	// 3D shapes + tracer trails (instanced3d mode)
+	particleRenderMode: ParticleRenderMode;
+	particleGeometry3d: ParticleGeometry3d;
+	particleInstanced3dAnimation: Instanced3dAnimation;
+	particleTrailCount: number; // 0 = off, each layer costs roughly a full extra particle pass
+
+	// Shape cloud mode — a traveling, trailing aggregate shape
+	shapeCloudPrimitive: ShapeCloudPrimitive;
+	shapeCloudScale: number;
 
 	// Video pan offset (moves the video plane without changing scale or camera)
 	videoPanX: number;
@@ -82,11 +104,18 @@ const initialState: ThreeJsState = {
 	particleShape: 'circle',
 	particleAnimation: 'none',
 	particleAnimationSpeed: 1.0,
-	particleTrailEnabled: false,
 	particleGlow: true,
 	particleRotation: false,
 	particleColorMode: 'solid',
 	particleGradientColor: '#00ffff',
+
+	particleRenderMode: 'sprite',
+	particleGeometry3d: 'octahedron',
+	particleInstanced3dAnimation: 'bounce',
+	particleTrailCount: 0,
+
+	shapeCloudPrimitive: 'pyramid',
+	shapeCloudScale: 3,
 
 	videoPanX: 0,
 	videoPanY: 1,
@@ -138,11 +167,16 @@ function createThreeJsStore() {
 				particleShape: initialState.particleShape,
 				particleAnimation: initialState.particleAnimation,
 				particleAnimationSpeed: initialState.particleAnimationSpeed,
-				particleTrailEnabled: initialState.particleTrailEnabled,
 				particleGlow: initialState.particleGlow,
 				particleRotation: initialState.particleRotation,
 				particleColorMode: initialState.particleColorMode,
-				particleGradientColor: initialState.particleGradientColor
+				particleGradientColor: initialState.particleGradientColor,
+				particleRenderMode: initialState.particleRenderMode,
+				particleGeometry3d: initialState.particleGeometry3d,
+				particleInstanced3dAnimation: initialState.particleInstanced3dAnimation,
+				particleTrailCount: initialState.particleTrailCount,
+				shapeCloudPrimitive: initialState.shapeCloudPrimitive,
+				shapeCloudScale: initialState.shapeCloudScale
 			}));
 		},
 		resetRotation: () => {

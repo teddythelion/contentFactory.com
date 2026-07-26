@@ -69,6 +69,22 @@
 			colorBg: 'bg-warning/10',
 			title: 'Frames-to-Video',
 			desc: 'Set a beginning, middle, and end frame — Veo fills in the story. Stack with extended video for consistent 2-minute ads, shorts, and music videos.'
+		},
+		{
+			icon: '🎞️',
+			colorText: 'text-info',
+			colorBorder: 'border-info',
+			colorBg: 'bg-info/10',
+			title: 'A Real Timeline, Not a Toy',
+			desc: 'Multi-track editing with 21 transition styles, text and true 3D text, per-clip fades and transforms, undo/redo. What you see in the preview is exactly what bakes into the export.'
+		},
+		{
+			icon: '🧰',
+			colorText: 'text-success',
+			colorBorder: 'border-success',
+			colorBg: 'bg-success/10',
+			title: 'Logo-to-Launch Brand Kits',
+			desc: 'Run an entire campaign in one sitting: logo treatments, social covers, splash-page heroes, profile banners — then animate the same identity into a branded launch video. Everything matches.'
 		}
 	];
 
@@ -92,6 +108,26 @@
 			emoji: '💪',
 			title: 'Plate-to-Macros',
 			desc: 'Photo your meal and get calorie and macro estimates instantly. No barcode scanning, no manual logging.'
+		},
+		{
+			emoji: '🧰',
+			title: 'Complete Brand Campaign',
+			desc: 'Logo, social covers, splash-page heroes, and a branded launch video — one workflow, one afternoon, everything matching.'
+		},
+		{
+			emoji: '🛍️',
+			title: 'Product Ads That Look Expensive',
+			desc: 'One product photo becomes a cinematic ad: premium video, your logo, 3D text, and a custom score. No shoot, no crew.'
+		},
+		{
+			emoji: '🌐',
+			title: 'Website Hero Sections',
+			desc: 'Generate the hero image, then animate it into a looping 1080p background video. Your landing page just leveled up.'
+		},
+		{
+			emoji: '📣',
+			title: 'Event & Launch Promos',
+			desc: 'Announcement videos with 3D text, particle atmosphere, and a custom score — done in an evening, not a week.'
 		}
 	];
 </script>
@@ -124,7 +160,8 @@
 	<p class="mb-8 max-w-xl text-base text-base-content/70 sm:text-lg">
 		Generation is the easy part — the magic is everything after. Content Factory pairs AI video,
 		image, music and voice generation with a real multi-track studio, so you shape every frame
-		until it's exactly what you envisioned. One app, idea to ship.
+		until it's exactly what you envisioned. One clip or a complete brand campaign — logo, social
+		covers, hero images, launch video — one app, one sitting, idea to ship.
 	</p>
 
 	<div class="flex flex-col gap-3 sm:flex-row">
@@ -267,6 +304,21 @@
 						<td>Frames-to-video consistency</td>
 						<td class="text-center text-secondary font-bold">✓</td>
 						<td class="text-center text-base-content/30">✗</td>
+					</tr>
+					<tr>
+						<td>Multi-track timeline + 21 transitions</td>
+						<td class="text-center text-secondary font-bold">✓</td>
+						<td class="text-center text-base-content/30">separate app</td>
+					</tr>
+					<tr>
+						<td>3D text &amp; particle systems over video</td>
+						<td class="text-center text-secondary font-bold">✓</td>
+						<td class="text-center text-base-content/30">✗</td>
+					</tr>
+					<tr>
+						<td>Full brand kit — logo to launch video</td>
+						<td class="text-center text-secondary font-bold">✓</td>
+						<td class="text-center text-base-content/30">multiple tools</td>
 					</tr>
 					<tr>
 						<td>Upload your own audio / music</td>

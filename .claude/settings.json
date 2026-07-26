@@ -3,7 +3,11 @@
     "allow": [
       "Bash(node _stripe-test.cjs)",
       "Bash(mkdir -p \"c:/Users/dc tech/Documents/dev/sand/src/routes/api/admin/users/[uid]\")",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/dev/particle-bench --max-time 8)",
+      "Bash(netstat -ano)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/dev/particle-bench --max-time 8)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/create --max-time 8)"
     ],
     "additionalDirectories": [
       "c:\\Users\\dc tech\\Documents\\dev\\sand\\src\\routes\\api\\admin\\users"

@@ -147,7 +147,7 @@
 			{:else if isCapturing}
 			<div class="mx-4 mt-2 shrink-0 rounded-lg border border-blue-500/50 bg-blue-900/30 px-3 py-2 space-y-1">
 				<p class="text-xs text-blue-400 font-semibold">🎬 Professional encoding in progress...</p>
-				<p class="text-[10px] text-gray-400">Typically takes 10-15 min • 20x faster than manual editing</p>
+				<p class="text-[10px] text-gray-400">Usually done in minutes • saved to your library automatically</p>
 			</div>
 			{/if}
 

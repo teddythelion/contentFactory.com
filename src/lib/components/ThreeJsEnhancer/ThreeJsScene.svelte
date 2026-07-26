@@ -20,6 +20,8 @@
 	import { editHistory } from '$lib/stores/editHistory.store';
 	import TimelineEditor from './TimelineEditor.svelte';
 	import MediaBin from './MediaBin.svelte';
+	import { buildInstancedLayers, updateInstancedLayers, disposeInstancedLayers, type InstancedParticleConfig } from '$lib/utils/instancedParticles';
+	import { buildShapeCloud, updateShapeCloud, disposeShapeCloud, setShapeCloudVisible, type ShapeCloudSystem, type ShapeCloudConfig } from '$lib/utils/shapeCloudParticles';
 
 	let threeJsTextComponent: ThreeJsText;
 	let threeJsLogoComponent: ThreeJsLogo;
@@ -55,7 +57,9 @@
 	let directionalLight: THREE.DirectionalLight | null = null;
 	let particleSystem: THREE.Points | null = null;
 	let particleGeometry: THREE.BufferGeometry | null = null;
-	let particleMaterial: THREE.PointsMaterial | THREE.ShaderMaterial | null = null;	
+	let particleMaterial: THREE.PointsMaterial | THREE.ShaderMaterial | null = null;
+	let instancedLayers: THREE.InstancedMesh[] = [];
+	let shapeCloud: ShapeCloudSystem | null = null;
 
 	$: selectedShape = $threeJsState.selectedShape;
 	$: rotationX = $threeJsState.rotationX;
@@ -86,11 +90,16 @@
 	$: particleShape = $threeJsState.particleShape;
 	$: particleAnimation = $threeJsState.particleAnimation;
 	$: particleAnimationSpeed = $threeJsState.particleAnimationSpeed;
-	$: particleTrailEnabled = $threeJsState.particleTrailEnabled;
 	$: particleGlow = $threeJsState.particleGlow;
 	$: particleRotation = $threeJsState.particleRotation;
 	$: particleColorMode = $threeJsState.particleColorMode;
 	$: particleGradientColor = $threeJsState.particleGradientColor;
+	$: particleRenderMode = $threeJsState.particleRenderMode;
+	$: particleGeometry3d = $threeJsState.particleGeometry3d;
+	$: particleInstanced3dAnimation = $threeJsState.particleInstanced3dAnimation;
+	$: particleTrailCount = $threeJsState.particleTrailCount;
+	$: shapeCloudPrimitive = $threeJsState.shapeCloudPrimitive;
+	$: shapeCloudScale = $threeJsState.shapeCloudScale;
 	$: videoFadeIn = $audioStudioStore.videoFadeIn;
 	$: videoFadeOut = $audioStudioStore.videoFadeOut;
 	let fadeOverlayOpacity = 0;
@@ -186,6 +195,14 @@
 					particleMaterial = null;
 				}
 				particleSystem = null;
+			}
+			if (instancedLayers.length > 0) {
+				disposeInstancedLayers(scene, instancedLayers);
+				instancedLayers = [];
+			}
+			if (shapeCloud) {
+				disposeShapeCloud(scene, shapeCloud);
+				shapeCloud = null;
 			}
 
 			if (mesh) {
@@ -1054,6 +1071,71 @@
 		if (particlesEnabled) scene.add(particleSystem);
 	}
 
+	function currentInstancedConfig(): InstancedParticleConfig {
+		return {
+			count: particleCount,
+			trailCount: particleTrailCount,
+			geometryType: particleGeometry3d,
+			size: particleSize * 2, // sprite particleSize reads small for real geometry
+			animation: particleInstanced3dAnimation,
+			spread: particleSpread,
+			speed: particleSpeed,
+			color: particleColor,
+			colorMode: particleColorMode,
+			gradientColor: particleGradientColor,
+			opacity: particleOpacity,
+			glow: particleGlow
+		};
+	}
+
+	function createInstanced3dSystem() {
+		if (instancedLayers.length > 0) {
+			disposeInstancedLayers(scene, instancedLayers);
+			instancedLayers = [];
+		}
+		instancedLayers = buildInstancedLayers(scene, currentInstancedConfig());
+		// buildInstancedLayers only sets color — every instance starts at the
+		// identity matrix (stacked at the origin) until positions are written.
+		// Populate immediately so a layer is never presented unpopulated —
+		// during capture the gap could otherwise land on an exported frame.
+		updateInstancedLayers(instancedLayers, currentInstancedConfig(), performance.now() * 0.001);
+		if (!particlesEnabled) {
+			for (const layer of instancedLayers) scene.remove(layer);
+		}
+	}
+
+	function currentShapeCloudConfig(): ShapeCloudConfig {
+		return {
+			count: particleCount,
+			trailCount: particleTrailCount,
+			primitive: shapeCloudPrimitive,
+			shapeScale: shapeCloudScale,
+			// Shader applies uSize * (300/-z); at camera z≈6 that's ~×50, so
+			// slider default 0.05 → uSize 0.2 → ~10px points. ×400 here once
+			// produced ~1000px blobs that additively merged into white masses.
+			pointSize: particleSize * 4,
+			spread: particleSpread,
+			speed: particleSpeed,
+			color: particleColor,
+			colorMode: particleColorMode,
+			gradientColor: particleGradientColor,
+			opacity: particleOpacity,
+			glow: particleGlow
+		};
+	}
+
+	function createShapeCloudSystem() {
+		if (shapeCloud) {
+			disposeShapeCloud(scene, shapeCloud);
+			shapeCloud = null;
+		}
+		shapeCloud = buildShapeCloud(scene, currentShapeCloudConfig());
+		updateShapeCloud(shapeCloud, currentShapeCloudConfig(), performance.now() * 0.001);
+		if (!particlesEnabled) {
+			for (const layer of shapeCloud.layers) scene.remove(layer.points);
+		}
+	}
+
 	function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 		let r, g, b;
 		if (s === 0) { r = g = b = l; } else {
@@ -1072,7 +1154,14 @@
 	}
 
 	function updateParticles(animationTime: number) {
-		if (!particleSystem || !particlesEnabled || !particleGeometry) return;
+		if (particlesEnabled && particleRenderMode === 'instanced3d' && instancedLayers.length > 0) {
+			updateInstancedLayers(instancedLayers, currentInstancedConfig(), animationTime);
+		}
+		if (particlesEnabled && particleRenderMode === 'shapeCloud' && shapeCloud) {
+			updateShapeCloud(shapeCloud, currentShapeCloudConfig(), animationTime);
+		}
+
+		if (particleRenderMode !== 'sprite' || !particleSystem || !particlesEnabled || !particleGeometry) return;
 
 		const positions = particleGeometry.attributes.position.array as Float32Array;
 		const velocities = particleGeometry.userData.velocities as Float32Array;
@@ -1242,10 +1331,14 @@
 
 	$: if (mesh && (compositeTexture ?? videoTexture) && selectedShape) createMesh(selectedShape);
 	$: if (mesh) mesh.scale.set(scale, scale, scale);
-	$: if (scene && (particleShape || particleColorMode || particleAnimation)) createParticleSystem();
+	$: if (scene && particleRenderMode === 'sprite' && (particleShape || particleColorMode || particleAnimation)) createParticleSystem();
 	$: if (particleSystem && particleGeometry && particleMaterial) {
-		if (particlesEnabled && !scene.children.includes(particleSystem)) { scene.add(particleSystem); }
-		else if (!particlesEnabled && scene.children.includes(particleSystem)) { scene.remove(particleSystem); }
+		// Sprite Points only belong in the scene in sprite mode — without the
+		// mode gate they kept rendering under instanced3d/shapeCloud, drowning
+		// those systems in random floaters and making mode switches look dead.
+		const showSprite = particlesEnabled && particleRenderMode === 'sprite';
+		if (showSprite && !scene.children.includes(particleSystem)) { scene.add(particleSystem); }
+		else if (!showSprite && scene.children.includes(particleSystem)) { scene.remove(particleSystem); }
 		if (particleMaterial instanceof THREE.PointsMaterial) {
 			particleMaterial.size = particleSize;
 			if (particleColorMode === 'solid') particleMaterial.color.set(particleColor);
@@ -1254,11 +1347,52 @@
 		}
 	}
 
+	// instanced3d: any config change needs a full rebuild (trail-layer count,
+	// material, and instance colors are all fixed at build time) — cheaper to
+	// rebuild on the rare "changed a slider" event than to keep two update
+	// paths in sync.
+	$: if (
+		scene && particleRenderMode === 'instanced3d' &&
+		(particleGeometry3d || particleTrailCount !== undefined || particleCount || particleColorMode || particleInstanced3dAnimation)
+	) createInstanced3dSystem();
+	$: if (scene && particleRenderMode !== 'instanced3d' && instancedLayers.length > 0) {
+		// switched away from instanced3d — drop any leftover 3D layers
+		disposeInstancedLayers(scene, instancedLayers); instancedLayers = [];
+	}
+	$: if (instancedLayers.length > 0) {
+		const shouldShow = particlesEnabled;
+		const isShown = scene.children.includes(instancedLayers[0]);
+		if (shouldShow && !isShown) { for (const l of instancedLayers) scene.add(l); }
+		else if (!shouldShow && isShown) { for (const l of instancedLayers) scene.remove(l); }
+	}
+
+	// shapeCloud: same "rebuild on config change" pattern as instanced3d —
+	// the point cloud and colors are baked into the geometry at build time.
+	// particleColor/particleGradientColor MUST be listed here: Svelte only
+	// tracks variables referenced in the statement itself, not reads inside
+	// called functions — omitting them froze the cloud at its first-built
+	// colors (the "everything stays bluish" bug).
+	$: if (
+		scene && particleRenderMode === 'shapeCloud' &&
+		(shapeCloudPrimitive || shapeCloudScale || particleTrailCount !== undefined || particleCount || particleColorMode || particleColor || particleGradientColor || particleGlow !== undefined)
+	) createShapeCloudSystem();
+	$: if (scene && particleRenderMode !== 'shapeCloud' && shapeCloud) {
+		disposeShapeCloud(scene, shapeCloud); shapeCloud = null;
+	}
+	$: if (shapeCloud) {
+		setShapeCloudVisible(scene, shapeCloud, particlesEnabled);
+	}
+
 		
 </script>
 
 <div class="relative h-full w-full">
-	<canvas bind:this={canvas} class="h-full w-full"></canvas>
+	<!-- visibility (not display) during capture: skips the compositor's paint
+	     of the 1080p canvas — real GPU savings on iGPUs where the WebCodecs
+	     encoder, video decode, and page compositing all share one device —
+	     while keeping layout so clientWidth stays valid for handleResize.
+	     WebGL rendering + readback are driven by JS and unaffected. -->
+	<canvas bind:this={canvas} class="h-full w-full" style="visibility: {$threeJsState.isCapturing ? 'hidden' : 'visible'};"></canvas>
 
 	{#if fadeOverlayOpacity > 0 && !(window as any).__threeJsCapturing}
 		<div class="pointer-events-none absolute inset-0 bg-black" style="opacity: {fadeOverlayOpacity};"></div>
